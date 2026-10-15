@@ -18,22 +18,22 @@ npm run tauri dev
 ## Comprobaciones (las mismas que CI)
 
 ```bash
-npm run check:versions
-npm run typecheck
-npm run lint
-npm test
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace         # también regenera src/bindings (hay que commitearlos)
+npm run check              # versions, typecheck, lint, tests, build
+npm run check:rust         # fmt, clippy, tests y drift de bindings
+node scripts/dependency-inventory.mjs dependency-inventory.json
+npm audit --audit-level=low
+cargo deny --locked check  # 0.20.2; excepción documentada B-01
+actionlint -shellcheck= -pyflakes= # 1.7.12
 ```
 
 Pruebas end-to-end contra el binario real (Linux):
 
 ```bash
-sudo apt install webkit2gtk-driver xvfb
+sudo apt install webkit2gtk-driver xvfb dbus-x11
 cargo install tauri-driver --locked
 npx tauri build --debug --no-bundle
-E2E_SCREENSHOTS=e2e-screenshots xvfb-run -a node --test e2e/app.e2e.mjs
+E2E_SCREENSHOTS=e2e-screenshots xvfb-run -a dbus-run-session -- node --test e2e/app.e2e.mjs
+xvfb-run -a dbus-run-session -- node e2e/measure.mjs
 ```
 
 ## Reglas de arquitectura
@@ -55,9 +55,12 @@ E2E_SCREENSHOTS=e2e-screenshots xvfb-run -a node --test e2e/app.e2e.mjs
   preasignadas.
 - **Honestidad**: una función que no existe se muestra deshabilitada con su
   motivo. Los datos de demostración solo en `elyvon_project::demo`.
-- **Diseño**: usa los tokens de `src/styles/tokens.css`; iconos propios en
-  `src/components/Icon.tsx` (no se usan recursos gráficos de terceros).
-- Dependencias nuevas solo si aportan claramente; licencias MIT/Apache-2.0/BSD.
+- **Diseño**: usa los tokens de `src/styles/tokens.css`; el adaptador de
+  `src/components/Icon.tsx` usa Phosphor Icons (MIT), atribuido en THIRD_PARTY_NOTICES.md.
+- Revisa licencias, fuentes y avisos de toda dependencia nueva según deny.toml y
+  scripts/dependency-inventory.mjs; esas políticas no sustituyen las atribuciones de distribución.
+- Contratos y soporte reales: docs/CONTRACTS.md y docs/STATUS.md. No habilites controles
+  de audio/jobs por la mera existencia de tipos. La distribución actual es Windows x86/x64.
 
 ## Commits y ramas
 

@@ -3,6 +3,29 @@
 Este documento explica cómo se compilan, firman y publican las versiones de
 Elyvon Studio, y qué credenciales hay que configurar.
 
+## Estado auditado y alcance actual (2026-10-15)
+
+La distribución autorizada actualmente es **Windows x64 y x86**. El workflow CI
+compila esos dos targets, y prueba el ejecutable Linux x64 como infraestructura de tests.
+Las siete entradas del workflow Release descrito abajo son configuración heredada;
+no equivalen a siete targets compilados o probados. No se ha verificado instalación
+en hardware Windows, macOS o Linux ARM. Véase [STATUS](STATUS.md).
+
+La [Release Windows preview 2](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.1.0-windows-preview.2)
+contiene cuatro instaladores independientes EXE/MSI y sus hashes. No lleva firma de
+updater ni Authenticode. La clave pública embebida sigue en UNCONFIGURED; la existencia
+de secretos privados del repositorio no se pudo comprobar (API 403), por lo que no se
+presenta como ausente ni como configurada. El test con clave de producción sigue pendiente.
+
+Los tags `v0.1.0-windows-preview.*` nombran binarios existentes de aplicación 0.1.0:
+se publican por el flujo específico de previews, y el flujo SemVer de reconstrucción
+omite esos pushes. Un dispatch explícito del flujo Release conserva su comprobación
+estricta tag == versión. No ejecutes la matriz heredada de siete builds como parte de
+una fase limitada a Windows; hay que adaptar y verificar ese lanzamiento cuando se autorice.
+
+La política estable rechaza prereleases, pero aún no hay endpoint/canal beta independiente.
+Firmar con éxito tampoco prueba una instalación/actualización en dispositivo real.
+
 ## Resumen
 
 ```
@@ -19,7 +42,7 @@ Con la clave de firma configurada nunca se publica automáticamente una versión
 estable: el workflow crea un borrador y los usuarios solo reciben la
 actualización cuando un responsable lo publica.
 
-**Modo sin clave (estado actual).** Si `TAURI_SIGNING_PRIVATE_KEY` no existe,
+**Modo sin clave (rama condicional del workflow heredado).** Si `TAURI_SIGNING_PRIVATE_KEY` no existe,
 el workflow compila igualmente los siete instaladores, pero sin paquetes de
 actualización ni `latest.json`, y los publica como **pre-release descargable**
 con un aviso al principio de las notas. Esas compilaciones llevan
@@ -51,8 +74,9 @@ Notas:
   plan con runners de pago o runners propios; alternativa documentada:
   compilación cruzada de `aarch64-pc-windows-msvc` desde `windows-latest`
   (solo NSIS).
-- El job *Build* del workflow **CI** compila los siete objetivos sin firmar en
-  cada push: es la verificación de que cada plataforma compila.
+- El job *Build* del workflow **CI** compila Windows x64 y x86 sin firmar en cada
+  push. El resto de esta tabla corresponde al flujo Release heredado, sin evidencia
+  de compilación para los otros cinco targets en esta auditoría.
 
 ## Nombres de archivo
 

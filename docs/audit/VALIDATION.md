@@ -57,5 +57,10 @@ benchmark. No performance threshold or hardware guarantee is invented. The runne
 machine/build metadata and the exact commit with every result. Missing or failed measurements
 must stay unmeasured; they cannot be filled using Chromium mocks or estimated values.
 
+The first phase CI attempt (run 38765613839) failed in the generic audit-tool installer
+(exit 76, before audits ran). It was replaced with scripts/install-audit-tools.sh, which
+uses the same official, checksum-verified archives tested locally. This is a tooling failure,
+not a passing dependency audit.
+
 Raw current-phase results and CI links are added after the run completes. Until then,
 current native measurements and Windows builds are **pending**, not passed.
