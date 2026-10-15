@@ -65,12 +65,13 @@ for (const kind of kinds) {
   copyFileSync(join(from, files[0]), join(out, name));
   console.log(`${files[0]} -> ${name}`);
   copied++;
-  if (signed) {
+  // Never ship a signature without updater artifacts (could be stale from a cache).
+  if (signed && updaterArtifacts) {
     const sig = join(from, `${files[0]}.sig`);
     if (existsSync(sig)) {
       copyFileSync(sig, join(out, `${name}.sig`));
       console.log(`  + ${name}.sig`);
-    } else if (updaterArtifacts) {
+    } else {
       throw new Error(`missing updater signature ${sig} (is TAURI_SIGNING_PRIVATE_KEY set?)`);
     }
   }
