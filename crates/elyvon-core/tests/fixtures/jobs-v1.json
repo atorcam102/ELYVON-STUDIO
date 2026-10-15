@@ -1,0 +1,58 @@
+[
+  {
+    "contractVersion": 1,
+    "id": "test-job",
+    "state": {
+      "state": "unavailable",
+      "reason": "No scheduler in this build"
+    }
+  },
+  {
+    "contractVersion": 1,
+    "id": "test-job",
+    "state": {
+      "state": "queued"
+    }
+  },
+  {
+    "contractVersion": 1,
+    "id": "test-job",
+    "state": {
+      "state": "running",
+      "completed": 3,
+      "total": 10
+    }
+  },
+  {
+    "contractVersion": 1,
+    "id": "test-job",
+    "state": {
+      "state": "running",
+      "completed": 4,
+      "total": null
+    }
+  },
+  {
+    "contractVersion": 1,
+    "id": "test-job",
+    "state": {
+      "state": "completed"
+    }
+  },
+  {
+    "contractVersion": 1,
+    "id": "test-job",
+    "state": {
+      "state": "cancelled"
+    }
+  },
+  {
+    "contractVersion": 1,
+    "id": "test-job",
+    "state": {
+      "state": "failed",
+      "code": "io",
+      "message": "Fixture error"
+    }
+  }
+]

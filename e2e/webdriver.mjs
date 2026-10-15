@@ -3,6 +3,7 @@
 // third-party dependencies, so the end-to-end suite stays light.
 
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const ELEMENT = "element-6066-11e4-a52e-4f735466cecf";
@@ -41,7 +42,11 @@ export class Driver {
     try {
       await request(this.base, "DELETE", `/session/${this.sessionId}`);
     } finally {
-      this.proc?.kill();
+      if (this.proc && this.proc.exitCode === null && this.proc.signalCode === null) {
+        const exited = once(this.proc, "exit", { signal: AbortSignal.timeout(5000) });
+        this.proc.kill();
+        await exited;
+      }
     }
   }
 

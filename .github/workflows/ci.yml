@@ -28,12 +28,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
-      - name: Versions are consistent
-        run: node scripts/check-versions.mjs
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm test
-      - run: npm run build
+      - name: Frontend checks (same command as local development)
+        run: npm run check
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
@@ -58,16 +54,11 @@ jobs:
         with:
           name: frontend-dist
           path: dist
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
-      - name: TypeScript bindings are up to date
-        run: |
-          git add -N src/bindings
-          git diff --exit-code -- src/bindings || {
-            echo "::error::src/bindings is out of date. Run 'cargo test --workspace' and commit the result."
-            exit 1
-          }
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Rust checks and binding drift (same command as local development)
+        run: npm run check:rust
 
   e2e:
     name: End-to-end (Linux, real binary)
@@ -95,13 +86,54 @@ jobs:
         env:
           E2E_SCREENSHOTS: e2e-screenshots
         run: xvfb-run -a -s "-screen 0 1280x800x24" dbus-run-session -- node --test e2e/app.e2e.mjs
+      - name: Measure real native startup, idle RSS and timeline
+        env:
+          E2E_METRICS: e2e-evidence/native-metrics.json
+        run: xvfb-run -a -s "-screen 0 1280x800x24" dbus-run-session -- node e2e/measure.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: e2e-screenshots
-          path: e2e-screenshots
-          retention-days: 7
-          if-no-files-found: ignore
+          name: native-evidence
+          path: |
+            e2e-screenshots
+            e2e-evidence
+          retention-days: 30
+          if-no-files-found: error
+
+  dependencies:
+    name: Dependencies, licences and workflow syntax
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2,actionlint@1.7.12
+      - run: npm ci
+      - name: Dependency and licence inventory
+        run: |
+          mkdir -p audit-evidence
+          node scripts/dependency-inventory.mjs audit-evidence/dependency-inventory.json
+      - name: npm advisories
+        run: npm audit --audit-level=low --json > audit-evidence/npm-audit.json
+      - name: Rust licences, sources, bans and advisories
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo deny --locked check 2>&1 | tee audit-evidence/cargo-deny.txt
+      - name: GitHub Actions syntax and expression checks
+        run: actionlint -shellcheck= -pyflakes=
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-evidence
+          path: audit-evidence
+          retention-days: 30
+          if-no-files-found: error
 
   build:
     name: Build ${{ matrix.label }}
