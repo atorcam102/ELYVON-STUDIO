@@ -11,13 +11,13 @@ permissions:
   actions: read
 
 concurrency:
-  group: publish-windows-preview-2
+  group: publish-windows-preview-3
   cancel-in-progress: false
 
 env:
-  SOURCE_RUN: "38757410164"
-  SOURCE_COMMIT: "fbc456623aced9396cc235f6fd2f5d5697a1cd14"
-  RELEASE_TAG: "v0.1.0-windows-preview.2"
+  SOURCE_RUN: "38768320136"
+  SOURCE_COMMIT: "974b09c015009d254be135629b3658fe638c7115"
+  RELEASE_TAG: "v0.1.0-windows-preview.3"
   GH_TOKEN: ${{ github.token }}
   GH_REPO: ${{ github.repository }}
 
@@ -81,39 +81,42 @@ jobs:
       - name: Publish Windows preview release
         run: |
           cat > release-notes.md <<'NOTES'
-          ## Elyvon Studio 0.1.0 — Windows preview 2
+          ## Elyvon Studio 0.1.0 — Windows preview 3
 
-          This preview includes the new studio interface applied to the native application:
+          This release includes the redesigned native studio interface and the Phase 02 technical baseline from `main`:
 
-          - Graphite workspace, compact LCD transport and arrangement toolbar.
-          - Compact track headers, colour-coded regions and redesigned mixer channels.
-          - Library on the left, with the inspector and piano roll available alongside the arrangement.
-          - Existing project editing, save, undo/redo, mute, solo and volume controls preserved.
+          - Track and region arrangement, project save/open, undo/redo and recovery.
+          - Graphite workspace, compact LCD transport, left-side library, inspector, mixer and read-only piano roll.
+          - Versioned native IPC, MIDI, graph and job contracts, compatibility fixtures and native restart tests.
+          - Updated documentation, support matrix and reproducible dependency and performance evidence.
 
-          ### Downloads
+          ### Which installer should I download?
 
-          Installers for **Windows x64 (64-bit)** and **Windows x86 (32-bit)**:
+          For most users with **64-bit Windows**, choose **Elyvon-Studio-v0.1.0-windows-x64-setup.exe**.
 
-          - `*-setup.exe`: NSIS installer.
-          - `*.msi`: MSI installer.
-          - `SHA256SUMS.txt`: SHA-256 checksums for all four installers.
+          | Windows architecture | Standard installer (recommended) | Windows Installer package |
+          | --- | --- | --- |
+          | x64 / 64-bit | `Elyvon-Studio-v0.1.0-windows-x64-setup.exe` | `Elyvon-Studio-v0.1.0-windows-x64.msi` |
+          | x86 / 32-bit | `Elyvon-Studio-v0.1.0-windows-x86-setup.exe` | `Elyvon-Studio-v0.1.0-windows-x86.msi` |
 
-          **Build source:** commit `fbc456623aced9396cc235f6fd2f5d5697a1cd14`, [successful CI run 38757410164](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38757410164).
+          Download and install **one** package for your architecture. EXE (NSIS) and MSI (Windows Installer) contain the same application and features; MSI is useful for managed or automated deployments. `SHA256SUMS.txt` contains checksums for all four installers.
 
-          These are the existing CI installers, published without rebuilding or replacing the previous release. The application version remains 0.1.0.
+          **Build source:** commit `974b09c015009d254be135629b3658fe638c7115`, [successful CI run 38768320136](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38768320136). All six CI jobs passed, including separate Windows x64/x86 installer builds and native Linux GUI tests.
+
+          The existing verified CI installers are published without rebuilding. The application version remains 0.1.0. Earlier releases are preserved.
 
           ### Current limitations
 
-          This is a development preview. Audio playback, recording, instruments and plug-in processing are not implemented yet. Waveforms in the demo are labelled illustrations; the piano roll is read-only.
+          This is a development preview. Audio playback, recording, instruments and plug-in processing are not implemented. MIDI, graph and job contracts do not implement an engine, device backend or scheduler. Demo waveforms are labelled illustrations and the piano roll is read-only.
 
-          Installers are not Authenticode-signed and have no updater signatures. This release does not include `latest.json` or enable automatic updates.
+          Installers are unsigned (no Authenticode or updater signatures). This release does not include `latest.json` or enable automatic updates. Physical Windows installation and device tests remain pending; CI builds do not replace them.
 
           NOTES
           if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
             echo 'The existing release entry is preserved.'
           else
             gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease \
-              --title "Elyvon Studio 0.1.0 — Windows x64 / x86 preview 2" \
+              --title "Elyvon Studio 0.1.0 — Windows x64 / x86 preview 3" \
               --notes-file release-notes.md
           fi
       - name: Attach missing installers and checksums
