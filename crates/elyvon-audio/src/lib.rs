@@ -1,23 +1,32 @@
-//! Contracts for the future Elyvon Studio audio engine.
+//! The Elyvon Studio audio engine.
 //!
-//! **There is no audio engine in Phase 1.** This crate fixes the boundaries the
-//! engine will be built against so the rest of the application can already be
-//! structured correctly:
-//!
-//! * [`engine`] — engine status reporting and the [`engine::AudioProcessor`]
-//!   contract every real-time node will implement.
-//! * [`rt`] — lock-free primitives for passing values to the audio thread.
-//! * [`gain`] — the gain and pan laws the mixer will apply.
+//! * [`media`] — decoding (WAV/AIFF/FLAC/MP3/Ogg Vorbis), sample-rate
+//!   conversion and waveform peaks, on worker threads.
+//! * [`plan`] — an immutable playback plan built from a project on the control
+//!   thread: sample-accurate clip segments, MIDI notes, tempo map, metronome.
+//! * [`engine`] — engine status, the real-time [`engine::Engine`] and its
+//!   lock-free control handle.
+//! * [`transport`] — transport commands and the state shared with the UI.
+//! * [`render`] — offline (faster than real time) rendering and WAV export
+//!   through the same engine code path.
+//! * [`device`] — audio-device output (feature `device`) and an internal clock.
+//! * [`rt`], [`gain`], [`contracts`] — primitives and versioned contracts.
 //!
 //! # Real-time rules
 //!
 //! Code reachable from the audio callback must never allocate or free memory,
 //! take a lock that a non-real-time thread can hold, perform file or network
-//! IO, log, or call into the UI. Parameters reach the callback through atomics
-//! ([`rt::AtomicF32`]) or pre-allocated lock-free queues; anything that might
-//! block happens on a separate worker thread. See `docs/ARCHITECTURE.md`.
+//! IO, log, or call into the UI. Plans and commands reach the callback through
+//! pre-allocated lock-free SPSC queues (`rtrb`); replaced plans travel back to
+//! the control thread to be freed there. See `docs/ARCHITECTURE.md`.
 
 pub mod contracts;
+pub mod device;
 pub mod engine;
 pub mod gain;
+pub mod media;
+pub mod plan;
+pub mod render;
 pub mod rt;
+pub mod transport;
+pub mod waveform;

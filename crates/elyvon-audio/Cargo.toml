@@ -1,6 +1,6 @@
 [package]
 name = "elyvon-audio"
-description = "Contracts and real-time-safe primitives for the future Elyvon Studio audio engine (no engine yet)."
+description = "Elyvon Studio audio engine: tempo-mapped transport, block scheduler, media decoding, mixing and offline render."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,11 +9,23 @@ publish.workspace = true
 repository.workspace = true
 
 [dependencies]
+elyvon-core.workspace = true
+elyvon-project.workspace = true
+cpal = { version = "0.18.2", optional = true }
+rtrb = "0.4.0"
+rubato = "5.0.1"
 serde.workspace = true
+serde_json.workspace = true
+symphonia = { version = "0.6.1", default-features = false, features = ["wav", "aiff", "pcm", "flac", "mp3", "ogg", "vorbis"] }
 ts-rs.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+# Real audio-device output (cpal). Off for headless engine/render tests.
+device = ["dep:cpal"]

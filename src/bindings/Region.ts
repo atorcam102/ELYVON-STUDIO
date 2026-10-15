@@ -6,4 +6,8 @@ export type Region = { id: RegionId, name: string,
 /**
  * Position on the timeline.
  */
-start: number, length: number, content: RegionContent, };
+start: number, length: number, 
+/**
+ * A muted region produces no sound or MIDI.
+ */
+muted: boolean, content: RegionContent, };

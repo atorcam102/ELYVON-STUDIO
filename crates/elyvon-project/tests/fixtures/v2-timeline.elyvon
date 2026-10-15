@@ -1,0 +1,77 @@
+{
+  "format": "elyvon-studio-project",
+  "schemaVersion": 2,
+  "savedWith": "0.2.0",
+  "project": {
+    "id": "0b5b8a7e-6a4c-4b8a-9a55-0000000000a0",
+    "name": "Timeline Fixture",
+    "sampleRate": 44100,
+    "transport": {
+      "tempo": 96.0,
+      "timeSignature": { "numerator": 4, "denominator": 4 },
+      "key": { "tonic": "D", "mode": "major" },
+      "loopRange": { "enabled": true, "start": 3840, "end": 11520 },
+      "tempoChanges": [
+        { "tick": 7680, "bpm": 120.0 },
+        { "tick": 15360, "bpm": 140.0 }
+      ],
+      "meterChanges": [
+        { "bar": 4, "timeSignature": { "numerator": 7, "denominator": 8 } }
+      ],
+      "metronome": { "enabled": true, "volumeDb": -9.0, "accent": true },
+      "countInBars": 1,
+      "preRollBars": 2,
+      "punch": { "enabled": true, "start": 7680, "end": 11520 }
+    },
+    "lengthBars": 32,
+    "tracks": [
+      {
+        "id": "0b5b8a7e-6a4c-4b8a-9a55-000000000010",
+        "name": "Drums",
+        "kind": "audio",
+        "color": "#19A7C0",
+        "muted": false,
+        "soloed": false,
+        "volumeDb": -3.0,
+        "pan": 0.25,
+        "regions": [
+          {
+            "id": "0b5b8a7e-6a4c-4b8a-9a55-000000000020",
+            "name": "Loop",
+            "start": 0,
+            "length": 7680,
+            "muted": true,
+            "content": {
+              "type": "audio",
+              "media": "0b5b8a7e-6a4c-4b8a-9a55-000000000001",
+              "offset": 441,
+              "gainDb": -4.5,
+              "fadeIn": 100,
+              "fadeOut": 2205,
+              "looped": true
+            }
+          }
+        ]
+      }
+    ],
+    "media": [
+      {
+        "id": "0b5b8a7e-6a4c-4b8a-9a55-000000000001",
+        "name": "drums.wav",
+        "path": "Audio/drums.wav",
+        "info": {
+          "sampleRate": 44100,
+          "channels": 2,
+          "frames": 88200,
+          "format": "wav",
+          "sizeBytes": 352844,
+          "fingerprint": "8f3c2a1b4d5e6f70"
+        }
+      }
+    ],
+    "markers": [
+      { "id": "0b5b8a7e-6a4c-4b8a-9a55-000000000031", "name": "Intro", "tick": 0 },
+      { "id": "0b5b8a7e-6a4c-4b8a-9a55-000000000032", "name": "Verse", "tick": 7680 }
+    ]
+  }
+}

@@ -3,7 +3,8 @@
 //! This is the single source of truth for a song. It is purely descriptive: no
 //! pixel sizes, selection or zoom — those belong to the presentation layer.
 
-use elyvon_core::{Color, Key, Tempo, Ticks, TimeSignature};
+use elyvon_core::tempo::TempoMapError;
+use elyvon_core::{Color, Key, MeterChange, Tempo, TempoChange, TempoMap, Ticks, TimeSignature};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
@@ -42,6 +43,11 @@ id_type!(
 );
 id_type!(TrackId);
 id_type!(RegionId);
+id_type!(
+    /// Identity of an imported audio file in the project's media pool.
+    MediaId
+);
+id_type!(MarkerId);
 
 /// A complete Elyvon Studio song.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -50,21 +56,40 @@ id_type!(RegionId);
 pub struct Project {
     pub id: ProjectId,
     pub name: String,
+    /// Sample rate (Hz) the engine and offline renders run at when possible.
+    pub sample_rate: u32,
     pub transport: Transport,
     /// Visible song length in bars. Grows automatically to cover content.
     pub length_bars: u32,
     pub tracks: Vec<Track>,
+    /// Imported audio files referenced by regions. Files are never modified.
+    pub media: Vec<MediaAsset>,
+    /// Named positions on the timeline, sorted by tick.
+    pub markers: Vec<Marker>,
 }
 
 /// Global musical settings of the project.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct Transport {
+    /// Tempo at the start of the song.
     pub tempo: Tempo,
+    /// Time signature of bar 1.
     pub time_signature: TimeSignature,
     pub key: Key,
     pub loop_range: LoopRange,
+    /// Tempo steps after the start, strictly increasing by tick.
+    pub tempo_changes: Vec<TempoChange>,
+    /// Metre changes on bar lines, strictly increasing by bar.
+    pub meter_changes: Vec<MeterChange>,
+    pub metronome: MetronomeSettings,
+    /// Bars of metronome count-in before playback starts (0 = off).
+    pub count_in_bars: u8,
+    /// Bars played before the start position (0 = off).
+    pub pre_roll_bars: u8,
+    /// Punch-in/out range (stored and shown; recording is not implemented yet).
+    pub punch: LoopRange,
 }
 
 impl Default for Transport {
@@ -74,7 +99,102 @@ impl Default for Transport {
             time_signature: TimeSignature::default(),
             key: Key::default(),
             loop_range: LoopRange::default(),
+            tempo_changes: Vec::new(),
+            meter_changes: Vec::new(),
+            metronome: MetronomeSettings::default(),
+            count_in_bars: 0,
+            pre_roll_bars: 0,
+            punch: LoopRange::default(),
         }
+    }
+}
+
+impl Transport {
+    pub const MAX_COUNT_IN_BARS: u8 = 4;
+    pub const MAX_PRE_ROLL_BARS: u8 = 4;
+
+    /// The validated tempo/metre map of these settings.
+    pub fn tempo_map(&self) -> Result<TempoMap, TempoMapError> {
+        TempoMap::new(
+            self.tempo,
+            &self.tempo_changes,
+            self.time_signature,
+            &self.meter_changes,
+        )
+    }
+}
+
+/// Metronome options. Count-in always clicks.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MetronomeSettings {
+    /// Click during playback.
+    pub enabled: bool,
+    /// Click level in dB (−96 … +6).
+    pub volume_db: f64,
+    /// Higher-pitched click on the first beat of each bar.
+    pub accent: bool,
+}
+
+impl Default for MetronomeSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            volume_db: -6.0,
+            accent: true,
+        }
+    }
+}
+
+/// A named position (locator) on the timeline.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Marker {
+    pub id: MarkerId,
+    pub name: String,
+    #[ts(type = "number")]
+    pub tick: Ticks,
+}
+
+/// An audio file in the media pool. The file itself is immutable: edits only
+/// change how regions reference it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MediaAsset {
+    pub id: MediaId,
+    /// Display name (the file name at import time).
+    pub name: String,
+    /// Absolute path, or relative to the project file's directory.
+    pub path: String,
+    /// Properties measured when the file was imported; `None` for files that
+    /// were never decoded (e.g. migrated from schema 1).
+    pub info: Option<MediaInfo>,
+}
+
+/// Measured properties of an audio file, used to detect changed files.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MediaInfo {
+    pub sample_rate: u32,
+    pub channels: u16,
+    /// Length in frames at `sample_rate`.
+    #[ts(type = "number")]
+    pub frames: u64,
+    /// Container/codec, e.g. `wav`, `flac`, `mp3`.
+    pub format: String,
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+    /// 64-bit FNV-1a of the file bytes, hex.
+    pub fingerprint: String,
+}
+
+impl MediaInfo {
+    pub fn duration_seconds(&self) -> f64 {
+        self.frames as f64 / f64::from(self.sample_rate.max(1))
     }
 }
 
@@ -190,6 +310,8 @@ pub struct Region {
     pub start: Ticks,
     #[ts(type = "number")]
     pub length: Ticks,
+    /// A muted region produces no sound or MIDI.
+    pub muted: bool,
     pub content: RegionContent,
 }
 
@@ -208,23 +330,43 @@ impl Region {
 )]
 #[ts(export)]
 pub enum RegionContent {
+    /// Plays part of a media-pool file. Offsets and fades are in frames of the
+    /// source file's own sample rate, so they do not depend on tempo.
     Audio {
-        /// `None` until media import exists (Phase 2); such regions are
-        /// placeholders and produce no sound.
-        source: Option<AudioSource>,
+        /// `None` for placeholders (e.g. the demo session): silent.
+        media: Option<MediaId>,
+        /// Source frame heard at the region start (non-destructive trim).
+        #[ts(type = "number")]
+        offset: u64,
+        /// Region gain in dB (−96 … +24).
+        gain_db: f64,
+        #[ts(type = "number")]
+        fade_in: u64,
+        #[ts(type = "number")]
+        fade_out: u64,
+        /// Repeat the source from `offset` to its end until the region ends.
+        looped: bool,
     },
     Midi {
         notes: Vec<MidiNote>,
     },
 }
 
-/// Reference to an audio file used by an audio region.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export)]
-pub struct AudioSource {
-    /// Path relative to the project file when possible, absolute otherwise.
-    pub path: String,
+impl RegionContent {
+    pub const MIN_GAIN_DB: f64 = -96.0;
+    pub const MAX_GAIN_DB: f64 = 24.0;
+
+    /// Audio content playing `media` from its start, unity gain, no fades.
+    pub fn audio(media: Option<MediaId>) -> Self {
+        Self::Audio {
+            media,
+            offset: 0,
+            gain_db: 0.0,
+            fade_in: 0,
+            fade_out: 0,
+            looped: false,
+        }
+    }
 }
 
 /// A MIDI note with timing relative to the start of its region.
@@ -260,14 +402,24 @@ impl Project {
     pub const DEFAULT_NAME: &'static str = "Untitled";
 
     /// A new, empty project with default settings. Contains no demo data.
+    pub const DEFAULT_SAMPLE_RATE: u32 = 48_000;
+    pub const SAMPLE_RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
+
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             id: ProjectId::new(),
             name: name.into(),
+            sample_rate: Self::DEFAULT_SAMPLE_RATE,
             transport: Transport::default(),
             length_bars: Self::DEFAULT_LENGTH_BARS,
             tracks: Vec::new(),
+            media: Vec::new(),
+            markers: Vec::new(),
         }
+    }
+
+    pub fn media_asset(&self, id: MediaId) -> Option<&MediaAsset> {
+        self.media.iter().find(|m| m.id == id)
     }
 
     pub fn any_solo(&self) -> bool {
@@ -333,7 +485,7 @@ mod tests {
 
     #[test]
     fn track_kind_accepts_matching_content() {
-        let audio = RegionContent::Audio { source: None };
+        let audio = RegionContent::audio(None);
         let midi = RegionContent::Midi { notes: vec![] };
         assert!(TrackKind::Audio.accepts(&audio));
         assert!(!TrackKind::Audio.accepts(&midi));

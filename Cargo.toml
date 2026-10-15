@@ -40,6 +40,47 @@ dbg_macro = "warn"
 todo = "warn"
 unwrap_used = "warn"
 
+# Real-time audio and decoding must keep up in debug builds (`tauri dev`,
+# native E2E) and keep the deterministic audio tests fast.
+[profile.dev.package.elyvon-core]
+opt-level = 2
+
+[profile.dev.package.elyvon-audio]
+opt-level = 2
+
+[profile.dev.package.symphonia-core]
+opt-level = 2
+
+[profile.dev.package.symphonia-common]
+opt-level = 2
+
+[profile.dev.package.symphonia-bundle-flac]
+opt-level = 2
+
+[profile.dev.package.symphonia-bundle-mp3]
+opt-level = 2
+
+[profile.dev.package.symphonia-codec-pcm]
+opt-level = 2
+
+[profile.dev.package.symphonia-codec-vorbis]
+opt-level = 2
+
+[profile.dev.package.symphonia-format-ogg]
+opt-level = 2
+
+[profile.dev.package.symphonia-format-riff]
+opt-level = 2
+
+[profile.dev.package.rubato]
+opt-level = 2
+
+[profile.dev.package.realfft]
+opt-level = 2
+
+[profile.dev.package.rustfft]
+opt-level = 2
+
 [profile.release]
 codegen-units = 1
 lto = true

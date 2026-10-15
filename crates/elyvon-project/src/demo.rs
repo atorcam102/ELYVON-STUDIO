@@ -19,12 +19,13 @@ fn region(name: &str, start_bar: Ticks, bars: Ticks, content: RegionContent) -> 
         name: name.into(),
         start: start_bar * BAR,
         length: bars * BAR,
+        muted: false,
         content,
     }
 }
 
 fn placeholder_audio(name: &str, start_bar: Ticks, bars: Ticks) -> Region {
-    region(name, start_bar, bars, RegionContent::Audio { source: None })
+    region(name, start_bar, bars, RegionContent::audio(None))
 }
 
 fn notes(pattern: &[(u8, Ticks, Ticks)], bars: Ticks, velocity: u8) -> RegionContent {
