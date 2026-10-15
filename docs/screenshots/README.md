@@ -1,23 +1,23 @@
-# Capturas de Elyvon Studio
+# Elyvon Studio screenshots
 
-Capturas del frontend principal del commit [`fbc4566`](https://github.com/atorcam102/ELYVON-STUDIO/commit/fbc456623aced9396cc235f6fd2f5d5697a1cd14), con el nuevo diseño aplicado a `src/App.tsx` y sus componentes. No proceden de la maqueta `/reference.html`.
+Screenshots of the main frontend at commit [`fbc4566`](https://github.com/atorcam102/ELYVON-STUDIO/commit/fbc456623aced9396cc235f6fd2f5d5697a1cd14), with the new design applied to `src/App.tsx` and its components. They are not captures of the `/reference.html` mockup.
 
-| Archivo | Vista |
+| File | View |
 | --- | --- |
-| `01-arrangement-mixer.png` | Arreglo de la sesión demo y mezclador. |
-| `02-library-inspector.png` | Biblioteca e inspector con Keys seleccionada. |
-| `03-piano-roll.png` | Vista de solo lectura de las notas de Chords. |
+| `01-arrangement-mixer.png` | Demo-session arrangement and mixer. |
+| `02-library-inspector.png` | Library and inspector with Keys selected. |
+| `03-piano-roll.png` | Read-only preview of the notes in Chords. |
 
-## Método de captura
+## Capture method
 
-- Chromium mediante Playwright, ventana de 1280 × 800 CSS px y densidad 1.
-- Entrada principal de Vite: `/`, con los componentes de la aplicación Tauri.
-- Puente IPC sustituido únicamente durante la captura por el mock oficial de `@tauri-apps/api/mocks`.
-- Proyecto de muestra con las seis pistas, regiones, tempo y patrones MIDI definidos en `crates/elyvon-project/src/demo.rs`; se utilizan identificadores estables para capturar las vistas.
-- Datos de carpetas de ejemplo en la biblioteca. No representan el disco de una instalación real.
-- Motor marcado como no disponible y simulación de medidores desactivada.
-- Las ilustraciones de audio son las del componente `DemoWaveform`, con su etiqueta de demostración. No hay archivos de audio detrás de esas regiones.
+- Chromium through Playwright, 1280 × 800 CSS pixels, device scale factor 1.
+- Main Vite entry point: `/`, using the Tauri application's components.
+- IPC replaced only during capture by the official `@tauri-apps/api/mocks` bridge.
+- Sample project matching the six tracks, regions, tempo and MIDI patterns defined in `crates/elyvon-project/src/demo.rs`; stable identifiers are used for capture.
+- Example folder data in the library. It does not represent a real installation's disk contents.
+- Audio engine marked unavailable, with meter simulation disabled.
+- Audio illustrations come from `DemoWaveform` and retain their demo label. No audio files back those regions.
 
-Son capturas reales del frontend renderizado, no imágenes generadas ni composiciones. No acreditan la ejecución del instalador Windows ni la existencia de reproducción, grabación o procesamiento de audio.
+These are actual captures of the rendered frontend, not generated images or composites. They do not demonstrate execution of the Windows installer or working audio playback, recording or processing.
 
-Para actualizar las imágenes, conserva los nombres de archivo y captura la misma entrada principal, revisando también las funciones y limitaciones descritas en el README raíz.
+When updating the images, keep the filenames and capture the same main entry point. Also review the features and limitations described in the root README.
