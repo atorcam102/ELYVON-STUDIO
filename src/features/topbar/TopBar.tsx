@@ -1,12 +1,12 @@
 import { useState } from "react";
 import type { KeyMode } from "../../bindings/KeyMode";
 import type { PitchClass } from "../../bindings/PitchClass";
-import { Badge, IconButton } from "../../components/Button";
+import { Badge } from "../../components/Button";
 import { InlineEdit, NumberField } from "../../components/Fields";
-import { Icon } from "../../components/Icon";
+import { Icon, type IconName } from "../../components/Icon";
 import { Menu, type MenuEntry } from "../../components/Popover";
 import { useMenu } from "../../components/useMenu";
-import { DENOMINATORS, formatClock, formatKey, positionFromTicks, PITCH_CLASSES } from "../../lib/music";
+import { DENOMINATORS, formatClock, positionFromTicks, PITCH_CLASSES } from "../../lib/music";
 import { shortcutLabel } from "../../lib/platform";
 import { engineAvailable, useApp } from "../../state/app";
 import { useProject } from "../../state/project";
@@ -15,87 +15,123 @@ import { hasUpdateBadge, useUpdates } from "../../state/updates";
 import { redo, toggleLoop, undo } from "../project/editActions";
 import { newProject, openProject, saveProject } from "../project/projectActions";
 
-function BrandMark() {
+interface CbButtonProps {
+  icon: IconName;
+  label: string;
+  onClick?: () => void;
+  active?: boolean;
+  disabled?: boolean;
+  tone?: "default" | "play" | "record" | "cycle" | "view";
+  size?: number;
+}
+
+/** Control-bar button: borderless, rounded, with signal colours per tone. */
+function CbButton({ icon, label, onClick, active, disabled, tone = "default", size = 16 }: CbButtonProps) {
   return (
-    <div className="brand" title="Elyvon Studio">
-      <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden>
-        <defs>
-          <linearGradient id="brand-g" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="#7FE3D0" />
-            <stop offset=".55" stopColor="#5B8DEF" />
-            <stop offset="1" stopColor="#9B7BE8" />
-          </linearGradient>
-        </defs>
-        <rect x="1" y="1" width="30" height="30" rx="8" fill="#1A1C23" />
-        <g fill="url(#brand-g)">
-          <rect x="9" y="8" width="3.2" height="16" rx="1.6" />
-          <rect x="9" y="8" width="14" height="3.2" rx="1.6" />
-          <rect x="9" y="14.4" width="10.5" height="3.2" rx="1.6" />
-          <rect x="9" y="20.8" width="14" height="3.2" rx="1.6" />
-        </g>
-      </svg>
-      <span className="brand__name">
-        Elyvon <span className="brand__product">Studio</span>
-      </span>
+    <button
+      type="button"
+      className={`cb-btn cb-btn--${tone}${active ? " is-active" : ""}`}
+      aria-label={label}
+      title={label}
+      aria-pressed={active === undefined ? undefined : active}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <Icon name={icon} size={size} />
+    </button>
+  );
+}
+
+function ViewButtons() {
+  const layout = useUi((s) => s.layout);
+  const setLayout = useUi((s) => s.setLayout);
+  const mixerShown = layout.bottomVisible && layout.bottomTab === "mixer";
+  const editorShown = layout.bottomVisible && layout.bottomTab !== "mixer";
+  return (
+    <div className="cb-group" role="group" aria-label="View">
+      <CbButton
+        icon="panelLeft"
+        tone="view"
+        label="Inspector (I)"
+        active={layout.inspectorVisible}
+        onClick={() => setLayout({ inspectorVisible: !layout.inspectorVisible })}
+      />
+      <CbButton
+        icon="mixer"
+        tone="view"
+        label="Mixer (X)"
+        active={mixerShown}
+        onClick={() => setLayout(mixerShown ? { bottomVisible: false } : { bottomVisible: true, bottomTab: "mixer" })}
+      />
+      <CbButton
+        icon="piano"
+        tone="view"
+        label="Editors (E)"
+        active={editorShown}
+        onClick={() =>
+          setLayout(
+            editorShown
+              ? { bottomVisible: false }
+              : { bottomVisible: true, bottomTab: layout.bottomTab === "mixer" ? "pianoRoll" : layout.bottomTab },
+          )
+        }
+      />
+    </div>
+  );
+}
+
+function FileButtons() {
+  const view = useProject((s) => s.view);
+  return (
+    <div className="cb-group" role="group" aria-label="Project">
+      <CbButton icon="newFile" label={`New project (${shortcutLabel("Mod+N")})`} onClick={() => void newProject()} />
+      <CbButton icon="open" label={`Open project (${shortcutLabel("Mod+O")})`} onClick={() => void openProject()} />
+      <CbButton icon="save" label={`Save (${shortcutLabel("Mod+S")})`} onClick={() => void saveProject()} disabled={!view} />
+      <span className="cb-sep" />
+      <CbButton
+        icon="undo"
+        label={view?.undoLabel ? `Undo ${view.undoLabel} (${shortcutLabel("Mod+Z")})` : "Nothing to undo"}
+        disabled={!view?.undoLabel}
+        onClick={undo}
+      />
+      <CbButton
+        icon="redo"
+        label={view?.redoLabel ? `Redo ${view.redoLabel} (${shortcutLabel("Mod+Shift+Z")})` : "Nothing to redo"}
+        disabled={!view?.redoLabel}
+        onClick={redo}
+      />
     </div>
   );
 }
 
 function Transport() {
-  const view = useProject((s) => s.view);
   const engine = useApp((s) => s.engine);
   const setCursor = useUi((s) => s.setCursor);
   const available = engineAvailable(engine);
   const reason = engine?.state === "unavailable" ? engine.reason : "";
-  const loop = view?.project.transport.loopRange.enabled ?? false;
-  const unavailable = (what: string) => `${what} — not available: ${reason}`;
+  const label = (what: string) => (available ? what : `${what} — unavailable: ${reason}`);
   return (
-    <div className="transport" role="group" aria-label="Transport">
-      <IconButton icon="toStart" label="Go to beginning" onClick={() => setCursor(0)} />
-      <IconButton icon="stop" label={available ? "Stop" : unavailable("Stop")} disabled={!available} />
-      <IconButton icon="play" label={available ? "Play" : unavailable("Play")} disabled={!available} size={17} />
-      <IconButton
-        icon="record"
-        tone="record"
-        label={available ? "Record" : unavailable("Record")}
-        disabled={!available}
-      />
-      <IconButton icon="loop" label={loop ? "Loop on" : "Loop off"} active={loop} onClick={toggleLoop} disabled={!view} tone="accent" />
+    <div className="cb-transport" role="group" aria-label="Transport">
+      <CbButton icon="toStart" label="Go to beginning" onClick={() => setCursor(0)} />
+      <CbButton icon="stop" label={label("Stop")} disabled={!available} />
+      <CbButton icon="play" tone="play" label={label("Play")} disabled={!available} size={17} />
+      <CbButton icon="record" tone="record" label={label("Record")} disabled={!available} />
     </div>
   );
 }
 
-function PositionDisplay() {
+function Lcd() {
   const cursor = useUi((s) => s.cursorTicks);
-  const transport = useProject((s) => s.view?.project.transport);
-  if (!transport) return <div className="lcd" />;
-  const p = positionFromTicks(cursor, transport.timeSignature);
-  return (
-    <div className="lcd" title="Edit cursor position (bar · beat · division · tick) and elapsed time">
-      <div className="lcd__primary">
-        <span>{String(p.bar).padStart(3, " ")}</span>
-        <i>.</i>
-        <span>{p.beat}</span>
-        <i>.</i>
-        <span>{p.division}</span>
-        <i>.</i>
-        <span className="lcd__dim">{String(p.tick).padStart(3, "0")}</span>
-      </div>
-      <div className="lcd__secondary">{formatClock(cursor, transport.tempo)}</div>
-    </div>
-  );
-}
-
-function SongSettings() {
   const transport = useProject((s) => s.view?.project.transport);
   const apply = useProject((s) => s.apply);
   const sigMenu = useMenu();
   const keyMenu = useMenu();
-  if (!transport) return null;
+  if (!transport) return <div className="lcd" />;
   const ts = transport.timeSignature;
+  const p = positionFromTicks(cursor, ts);
 
   const sigEntries: MenuEntry[] = [
-    { heading: "Common" },
+    { heading: "Time signature" },
     ...[
       [4, 4],
       [3, 4],
@@ -158,7 +194,7 @@ function SongSettings() {
                       keyMenu.close();
                     }}
                   >
-                    {mode === "minor" ? pc.toLowerCase() : pc}
+                    {mode === "minor" ? `${pc}m` : pc}
                   </button>
                 ))}
               </div>
@@ -170,30 +206,55 @@ function SongSettings() {
   ];
 
   return (
-    <div className="song-settings">
-      <label className="field-chip" title="Tempo (beats per minute)">
+    <div className="lcd" role="group" aria-label="Display">
+      <div className="lcd__cell lcd__position" title={`Cursor position · ${formatClock(cursor, transport.tempo)}`}>
+        <div className="lcd__digits">
+          <span className="lcd__big">{p.bar}</span>
+          <span className="lcd__big">{p.beat}</span>
+          <span className="lcd__small">{p.division}</span>
+          <span className="lcd__small">{String(p.tick).padStart(3, "0")}</span>
+        </div>
+        <div className="lcd__labels">
+          <span>BAR</span>
+          <span>BEAT</span>
+          <span>DIV</span>
+          <span>TICK</span>
+        </div>
+      </div>
+      <div className="lcd__cell lcd__tempo">
         <NumberField
           label="Tempo"
           value={transport.tempo}
           min={20}
           max={999}
-          step={1}
           precision={transport.tempo % 1 === 0 ? 0 : 2}
           onCommit={(bpm) => void apply({ type: "setTempo", bpm })}
-          className="field-chip__number"
+          className="lcd__number"
         />
-        <span className="field-chip__unit">BPM</span>
-      </label>
-      <button type="button" className="field-chip" title="Time signature" onClick={(e) => sigMenu.openBelow(e.currentTarget)}>
-        <span className="field-chip__value">{`${ts.numerator}/${ts.denominator}`}</span>
-        <Icon name="chevronDown" size={12} />
-      </button>
-      <button type="button" className="field-chip" title="Key" onClick={(e) => keyMenu.openBelow(e.currentTarget)}>
-        <span className="field-chip__value">{formatKey(transport.key)}</span>
-        <Icon name="chevronDown" size={12} />
-      </button>
+        <div className="lcd__labels">
+          <span>TEMPO</span>
+        </div>
+      </div>
+      <div className="lcd__cell lcd__meta">
+        <button type="button" className="lcd__btn" title="Time signature" onClick={(e) => sigMenu.openBelow(e.currentTarget)}>
+          {`${ts.numerator}/${ts.denominator}`}
+        </button>
+        <button type="button" className="lcd__btn lcd__btn--sub" title="Key" onClick={(e) => keyMenu.openBelow(e.currentTarget)}>
+          {`${transport.key.tonic}${transport.key.mode === "major" ? "maj" : "min"}`}
+        </button>
+      </div>
       {sigMenu.at && <Menu at={sigMenu.at} entries={sigEntries} onClose={sigMenu.close} />}
       {keyMenu.at && <Menu at={keyMenu.at} entries={keyEntries} onClose={keyMenu.close} />}
+    </div>
+  );
+}
+
+function Modes() {
+  const view = useProject((s) => s.view);
+  const loop = view?.project.transport.loopRange.enabled ?? false;
+  return (
+    <div className="cb-group" role="group" aria-label="Modes">
+      <CbButton icon="loop" tone="cycle" label={loop ? "Cycle on (L)" : "Cycle off (L)"} active={loop} onClick={toggleLoop} disabled={!view} />
     </div>
   );
 }
@@ -231,9 +292,10 @@ function StatusIndicator() {
   const setUpdateOpen = useUi((s) => s.setUpdateOpen);
   return (
     <div className="status">
+      {pending > 0 && <span className="status__busy" aria-label="Working" />}
       {hasUpdateBadge(updates) && (
         <button type="button" className="status__update" onClick={() => setUpdateOpen(true)} title="An update is available">
-          <Icon name="download" size={13} />
+          <Icon name="download" size={12} />
           <span>Update</span>
         </button>
       )}
@@ -242,47 +304,40 @@ function StatusIndicator() {
         title={engine?.state === "unavailable" ? engine.reason : "Audio engine running"}
       >
         <span className="status__dot" />
-        <span>{engineAvailable(engine) ? "Engine running" : "Audio engine offline"}</span>
+        <span className="status__text">{engineAvailable(engine) ? "Engine" : "Engine offline"}</span>
       </div>
-      {pending > 0 && <span className="status__busy" aria-label="Working" />}
     </div>
   );
 }
 
 export function TopBar() {
-  const view = useProject((s) => s.view);
+  const layout = useUi((s) => s.layout);
+  const setLayout = useUi((s) => s.setLayout);
   const openSettings = useUi((s) => s.openSettings);
   return (
-    <header className="topbar" data-tauri-drag-region>
-      <BrandMark />
-      <div className="topbar__group">
-        <IconButton icon="newFile" label={`New project (${shortcutLabel("Mod+N")})`} onClick={() => void newProject()} />
-        <IconButton icon="open" label={`Open project (${shortcutLabel("Mod+O")})`} onClick={() => void openProject()} />
-        <IconButton icon="save" label={`Save (${shortcutLabel("Mod+S")})`} onClick={() => void saveProject()} disabled={!view} />
+    <header className="controlbar">
+      <div className="controlbar__side">
+        <ViewButtons />
+        <FileButtons />
+        <ProjectTitle />
       </div>
-      <div className="topbar__group">
-        <IconButton
-          icon="undo"
-          label={view?.undoLabel ? `Undo ${view.undoLabel} (${shortcutLabel("Mod+Z")})` : "Nothing to undo"}
-          disabled={!view?.undoLabel}
-          onClick={undo}
-        />
-        <IconButton
-          icon="redo"
-          label={view?.redoLabel ? `Redo ${view.redoLabel} (${shortcutLabel("Mod+Shift+Z")})` : "Nothing to redo"}
-          disabled={!view?.redoLabel}
-          onClick={redo}
-        />
-      </div>
-      <ProjectTitle />
-      <div className="topbar__center">
+      <div className="controlbar__center">
         <Transport />
-        <PositionDisplay />
-        <SongSettings />
+        <Lcd />
+        <Modes />
       </div>
-      <div className="topbar__end">
+      <div className="controlbar__side controlbar__side--end">
         <StatusIndicator />
-        <IconButton icon="settings" label="Settings" onClick={() => openSettings()} />
+        <div className="cb-group" role="group" aria-label="Panels">
+          <CbButton
+            icon="panelRight"
+            tone="view"
+            label="Browser (B)"
+            active={layout.browserVisible}
+            onClick={() => setLayout({ browserVisible: !layout.browserVisible })}
+          />
+          <CbButton icon="settings" label={`Settings (${shortcutLabel("Mod+,")})`} onClick={() => openSettings()} />
+        </div>
       </div>
     </header>
   );

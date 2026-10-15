@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { IconButton } from "./components/Button";
 import { Splitter } from "./components/Splitter";
 import { Toasts } from "./components/Toasts";
 import { useAppEvents } from "./features/app/useAppEvents";
@@ -15,18 +14,6 @@ import { inTauri, ipc, toIpcError } from "./lib/ipc";
 import { useApp } from "./state/app";
 import { useProject } from "./state/project";
 import { useUi } from "./state/ui";
-
-function PanelToggles() {
-  const layout = useUi((s) => s.layout);
-  const setLayout = useUi((s) => s.setLayout);
-  return (
-    <div className="panel-toggles">
-      <IconButton icon="panelLeft" label="Inspector (I)" active={layout.inspectorVisible} size={14} onClick={() => setLayout({ inspectorVisible: !layout.inspectorVisible })} />
-      <IconButton icon="panelBottom" label="Editors (E)" active={layout.bottomVisible} size={14} onClick={() => setLayout({ bottomVisible: !layout.bottomVisible })} />
-      <IconButton icon="panelRight" label="Browser (B)" active={layout.browserVisible} size={14} onClick={() => setLayout({ browserVisible: !layout.browserVisible })} />
-    </div>
-  );
-}
 
 function Workspace() {
   const layout = useUi((s) => s.layout);
@@ -86,7 +73,6 @@ function Workspace() {
           </div>
         </>
       )}
-      <PanelToggles />
     </div>
   );
 }

@@ -5,8 +5,9 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border: 1px solid var(--line-2);
-  background: var(--bg-4);
+  border: 1px solid rgb(0 0 0 / 0.35);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1);
+  background: var(--button);
   color: var(--text-0);
   border-radius: var(--radius-md);
   white-space: nowrap;
@@ -28,7 +29,7 @@
 }
 
 .btn:hover:not(:disabled) {
-  background: var(--bg-5);
+  background: var(--button-hi);
 }
 
 .btn:active:not(:disabled) {
@@ -119,33 +120,41 @@
 
 /* Mute / Solo */
 .ms-btn {
-  width: 22px;
-  height: 20px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line-2);
-  background: var(--bg-3);
-  color: var(--text-2);
-  font-size: 10.5px;
+  width: 20px;
+  height: 16px;
+  border-radius: 3px;
+  border: 0;
+  background: linear-gradient(to bottom, #6a6a6c, #5c5c5e);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12), 0 0 0 1px rgb(0 0 0 / 0.3);
+  color: #e8e8e8;
+  font-size: 9.5px;
   font-weight: 700;
   line-height: 1;
   padding: 0;
 }
 
-.ms-btn:hover {
-  color: var(--text-0);
-  border-color: var(--line-3);
+.ms-btn:hover:not(:disabled) {
+  background: linear-gradient(to bottom, #78787a, #68686a);
+}
+
+.ms-btn:disabled {
+  color: #9a9a9c;
+  opacity: 0.6;
 }
 
 .ms-btn--mute.is-on {
   background: var(--mute);
-  border-color: transparent;
-  color: #0b1a20;
+  color: #fff;
 }
 
 .ms-btn--solo.is-on {
   background: var(--solo);
-  border-color: transparent;
-  color: #241c05;
+  color: #2a2100;
+}
+
+.ms-btn--rec.is-on {
+  background: var(--record);
+  color: #fff;
 }
 
 .ms-btn--wide {

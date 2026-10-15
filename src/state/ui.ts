@@ -51,7 +51,7 @@ export const DEFAULT_LAYOUT: Layout = {
   bottomVisible: true,
   inspectorWidth: 240,
   browserWidth: 260,
-  bottomHeight: 260,
+  bottomHeight: 340,
   trackHeaderWidth: 220,
   bottomTab: "mixer",
   browserTab: "files",

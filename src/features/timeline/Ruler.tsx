@@ -17,11 +17,11 @@ interface RulerProps {
   cursorTicks: number;
 }
 
-const LOOP_STRIP = 12;
+const LOOP_STRIP = 13;
 
 /**
- * Bar ruler. The lower part places the edit cursor (click or drag); the upper
- * strip sets the loop range (drag) or toggles it (click inside the range).
+ * Bar ruler. The upper part places the edit cursor (click or drag); the lower
+ * strip sets the cycle range (drag) or toggles it (click inside the range).
  */
 export function Ruler({ transport, width, lengthBars, pxPerQuarter, grid, viewLeft, viewWidth, cursorTicks }: RulerProps) {
   const setCursor = useUi((s) => s.setCursor);
@@ -40,7 +40,7 @@ export function Ruler({ transport, width, lengthBars, pxPerQuarter, grid, viewLe
     e.currentTarget.setPointerCapture(e.pointerId);
     const rect = e.currentTarget.getBoundingClientRect();
     const t = ticksAt(e);
-    if (e.clientY - rect.top < LOOP_STRIP) {
+    if (rect.bottom - e.clientY < LOOP_STRIP) {
       gesture.current = { kind: "loop", startTicks: Math.floor(t / barTicks) * barTicks, moved: false };
     } else {
       gesture.current = { kind: "cursor", startTicks: t, moved: false };
@@ -108,7 +108,7 @@ export function Ruler({ transport, width, lengthBars, pxPerQuarter, grid, viewLe
         gesture.current = null;
         setLoopDraft(null);
       }}
-      title="Click or drag to place the cursor. Drag in the top strip to set the loop range."
+      title="Click or drag to place the cursor. Drag in the lower strip to set the cycle range."
     >
       <div className="ruler__loop-strip">
         <div

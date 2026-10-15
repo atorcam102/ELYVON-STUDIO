@@ -77,7 +77,7 @@ impl Default for Layout {
             bottom_visible: true,
             inspector_width: 240.0,
             browser_width: 260.0,
-            bottom_height: 260.0,
+            bottom_height: 340.0,
             track_header_width: 220.0,
             bottom_tab: "mixer".into(),
             browser_tab: "files".into(),

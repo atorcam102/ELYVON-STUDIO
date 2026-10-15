@@ -1,12 +1,12 @@
 import { memo, useEffect, useRef, useState, type PointerEvent } from "react";
 import type { Track } from "../../bindings/Track";
+import type { TrackKind } from "../../bindings/TrackKind";
 import { Badge, Toggle } from "../../components/Button";
 import { Icon } from "../../components/Icon";
 import { dbToFaderPos, faderPosToDb, formatDb, formatPan, MIN_DB } from "../../lib/format";
 import { engineAvailable, useApp } from "../../state/app";
 import { useProject } from "../../state/project";
 import { useUi } from "../../state/ui";
-import { KIND_ICON } from "../tracks/trackMeta";
 
 /** Registry of meter bar elements, animated without React re-renders. */
 type MeterRegistry = Map<string, HTMLDivElement>;
@@ -115,6 +115,16 @@ function PanKnob({ value, onCommit, disabled }: { value: number; onCommit: (pan:
   );
 }
 
+const FADER_SCALE = [6, 0, -6, -12, -24, -40, -60];
+
+function Slot({ text, tone = "empty", title }: { text?: string; tone?: "empty" | "output" | "group" | "input"; title: string }) {
+  return (
+    <div className={`slot slot--${tone}`} title={title} aria-disabled="true">
+      {text}
+    </div>
+  );
+}
+
 const ChannelStrip = memo(function ChannelStrip({
   track,
   selected,
@@ -129,13 +139,48 @@ const ChannelStrip = memo(function ChannelStrip({
   onSelect: (id: string) => void;
 }) {
   const apply = useProject((s) => s.apply);
+  const later = "Available with the audio engine and plug-in hosting (later phases)";
   return (
     <div
       className={`strip${selected ? " is-selected" : ""}${silent ? " is-silent" : ""}`}
       style={{ ["--track-color" as string]: track.color }}
       onPointerDown={() => onSelect(track.id)}
     >
+      <Slot tone="input" text={track.kind === "audio" ? "Input" : track.kind === "midi" ? "MIDI Out" : ""} title={`Input — ${later}`} />
+      <div className="strip__fx">
+        <Slot title={`Audio FX slot — ${later}`} />
+        <Slot title={`Audio FX slot — ${later}`} />
+      </div>
+      <Slot tone="output" text="Stereo Out" title={`Output routing — ${later}`} />
+      <Slot tone="group" title={`Group — ${later}`} />
       <PanKnob value={track.pan} onCommit={(pan) => void apply({ type: "setTrackPan", id: track.id, pan })} />
+      <div className="strip__db">
+        <span className="strip__db-box" title="Fader level">
+          {formatDb(track.volumeDb)}
+        </span>
+        <span className="strip__db-box strip__db-box--peak" title="Peak level — no signal without the audio engine">
+          −∞
+        </span>
+      </div>
+      <div className="strip__fader-row">
+        <div className="fader-scale" aria-hidden>
+          {FADER_SCALE.map((db) => (
+            <span key={db} style={{ bottom: `${dbToFaderPos(db) * 100}%` }}>
+              {db > 0 ? `+${db}` : db}
+            </span>
+          ))}
+        </div>
+        <Fader value={track.volumeDb} label={`${track.name} volume`} onCommit={(volumeDb) => void apply({ type: "setTrackVolume", id: track.id, volumeDb })} />
+        <div className="meter" title="Level meter — no signal (audio engine offline)">
+          <div
+            className="meter__bar"
+            ref={(el) => {
+              if (el) registry.set(track.id, el);
+              else registry.delete(track.id);
+            }}
+          />
+        </div>
+      </div>
       <div className="strip__ms">
         <button
           type="button"
@@ -154,21 +199,7 @@ const ChannelStrip = memo(function ChannelStrip({
           S
         </button>
       </div>
-      <div className="strip__fader-row">
-        <Fader value={track.volumeDb} label={`${track.name} volume`} onCommit={(volumeDb) => void apply({ type: "setTrackVolume", id: track.id, volumeDb })} />
-        <div className="meter" title="Meter — no signal (audio engine offline)">
-          <div
-            className="meter__bar"
-            ref={(el) => {
-              if (el) registry.set(track.id, el);
-              else registry.delete(track.id);
-            }}
-          />
-        </div>
-      </div>
-      <div className="strip__db">{formatDb(track.volumeDb)}</div>
       <div className="strip__name" title={track.name}>
-        <Icon name={KIND_ICON[track.kind]} size={12} />
         <span>{track.name}</span>
       </div>
     </div>
@@ -214,6 +245,12 @@ function useSimulatedMeters(registry: MeterRegistry, tracks: Track[], on: boolea
   }, [on, registry]);
 }
 
+const KIND_FILTERS: { kind: TrackKind; label: string }[] = [
+  { kind: "audio", label: "Audio" },
+  { kind: "instrument", label: "Inst" },
+  { kind: "midi", label: "MIDI" },
+];
+
 export function Mixer() {
   const project = useProject((s) => s.view?.project);
   const engine = useApp((s) => s.engine);
@@ -221,50 +258,79 @@ export function Mixer() {
   const demoMeters = useUi((s) => s.demoMeters);
   const setDemoMeters = useUi((s) => s.setDemoMeters);
   const [registry] = useState<MeterRegistry>(() => new Map());
+  const [hidden, setHidden] = useState<TrackKind[]>([]);
   const tracks = project?.tracks ?? [];
   useSimulatedMeters(registry, tracks, demoMeters && !engineAvailable(engine));
 
   const onSelect = (id: string) => useUi.getState().selectTracks([id], id);
   const anySolo = tracks.some((t) => t.soloed);
+  const shown = tracks.filter((t) => !hidden.includes(t.kind));
 
   return (
     <div className="mixer">
       <div className="mixer__bar">
         {!engineAvailable(engine) && (
-          <span className="mixer__notice">
-            <Icon name="info" size={13} />
-            No audio signal: faders, pan, mute and solo edit the project; meters show {demoMeters ? "a simulation" : "nothing"} until the audio engine
-            ships.
+          <span className="mixer__notice" title="Faders, pan, mute and solo edit the project; there is no audio signal yet.">
+            <Icon name="info" size={12} />
+            No signal — audio engine offline
           </span>
         )}
+        <div className="segmented segmented--blue" role="group" aria-label="Show track types">
+          {KIND_FILTERS.map((f) => {
+            const on = !hidden.includes(f.kind);
+            return (
+              <button
+                key={f.kind}
+                type="button"
+                className={on ? "is-on" : ""}
+                aria-pressed={on}
+                onClick={() => setHidden(on ? [...hidden, f.kind] : hidden.filter((k) => k !== f.kind))}
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
         <div className="mixer__bar-end">
-          {demoMeters && <Badge tone="demo">Simulated meters</Badge>}
+          {demoMeters && <Badge tone="demo">Simulated</Badge>}
           <Toggle label="Simulate meters" checked={demoMeters} onChange={setDemoMeters} />
         </div>
       </div>
-      <div className="mixer__strips">
-        {tracks.length === 0 && <p className="mixer__empty">Add tracks to see their channel strips.</p>}
-        {tracks.map((t) => (
-          <ChannelStrip
-            key={t.id}
-            track={t}
-            selected={selection.trackIds.includes(t.id)}
-            silent={t.muted || (anySolo && !t.soloed)}
-            registry={registry}
-            onSelect={onSelect}
-          />
-        ))}
+      <div className="mixer__body">
         {tracks.length > 0 && (
-          <div className="strip strip--master is-unavailable" title="The master bus is created by the audio engine (Phase 2).">
-            <div className="strip__unavailable">
-              <Icon name="lock" size={14} />
-              <span>Master bus available with the audio engine</span>
-            </div>
-            <div className="strip__name">
-              <span>Stereo Out</span>
-            </div>
+          <div className="strip-labels" aria-hidden>
+            <span className="strip-labels__slot">Input</span>
+            <span className="strip-labels__fx">Audio FX</span>
+            <span className="strip-labels__slot">Output</span>
+            <span className="strip-labels__slot">Group</span>
+            <span className="strip-labels__pan">Pan</span>
+            <span className="strip-labels__slot">dB</span>
           </div>
         )}
+        <div className="mixer__strips">
+          {tracks.length === 0 && <p className="mixer__empty">Add tracks to see their channel strips.</p>}
+          {shown.map((t) => (
+            <ChannelStrip
+              key={t.id}
+              track={t}
+              selected={selection.trackIds.includes(t.id)}
+              silent={t.muted || (anySolo && !t.soloed)}
+              registry={registry}
+              onSelect={onSelect}
+            />
+          ))}
+          {tracks.length > 0 && (
+            <div className="strip strip--master is-unavailable" title="The master bus is created by the audio engine (Phase 2).">
+              <div className="strip__unavailable">
+                <Icon name="lock" size={14} />
+                <span>Master bus available with the audio engine</span>
+              </div>
+              <div className="strip__name">
+                <span>Stereo Out</span>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

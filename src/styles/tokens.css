@@ -1,78 +1,117 @@
 /*
- * Elyvon design tokens.
+ * Elyvon design tokens — "Graphite" theme.
  *
- * Shared vocabulary for every Elyvon application: neutral graphite surfaces,
- * one cool accent family, compact type. Products differ by content, not by
- * re-skinning. Keep component styles on these variables so a future light
- * theme (or a shared @elyvon/ui package) only has to redefine this file.
+ * Mid-grey chrome (control bar, track headers, inspector, mixer) around a dark
+ * blue-grey arrangement area, saturated region colours, a dark slate LCD and
+ * signal colours for transport and mute/solo. Component styles only use these
+ * variables, so a future light theme (or a shared @elyvon/ui package for the
+ * rest of the suite) only has to redefine this file.
  */
 
 :root {
   color-scheme: dark;
 
-  /* Surfaces, darkest to lightest */
-  --bg-0: #0b0c0f;
-  --bg-1: #101116;
-  --bg-2: #15171d;
-  --bg-3: #1b1e25;
-  --bg-4: #232731;
-  --bg-5: #2c313d;
+  /* Chrome */
+  --app-bg: #1e1e1f;
+  --toolbar: #3a3a3c;
+  --toolbar-hi: #444446;
+  --localbar: #3f3f3f;
+  --panel: #4a4a4a;
+  --panel-hi: #555555;
+  --panel-lo: #424242;
+  --header-col: #525252;
+  --header-col-sel: #6a6a6c;
+  --workspace: #262c30;
+  --workspace-alt: #283035;
+  --ruler: #333333;
+  --ruler-marker: #2e3f53;
+  --editor-bg: #2f2f2f;
+  --editor-bar: #474747;
+  --mixer-bg: #4e4e4e;
+  --strip: #4b4b4b;
+  --strip-sep: #3c3c3c;
+  --slot: #595959;
+  --slot-dark: #3a3a3a;
+  --slot-blue: #3d73b8;
+  --slot-output: #8a8a8a;
+  --slot-group: #4f4935;
+  --fader-track: #2b2c2c;
+  --lcd: #22252b;
+  --lcd-line: #3a3f48;
+  --button: #5a5a5c;
+  --button-hi: #6a6a6c;
+  --button-dark: #2c2c2e;
+
+  /* Legacy aliases used by generic components */
+  --bg-0: #1e1e1f;
+  --bg-1: #2f2f2f;
+  --bg-2: #3a3a3c;
+  --bg-3: #444446;
+  --bg-4: #555557;
+  --bg-5: #636366;
 
   /* Lines */
-  --line-1: rgb(255 255 255 / 0.055);
-  --line-2: rgb(255 255 255 / 0.09);
-  --line-3: rgb(255 255 255 / 0.14);
+  --line-1: rgb(0 0 0 / 0.28);
+  --line-2: rgb(255 255 255 / 0.1);
+  --line-3: rgb(255 255 255 / 0.18);
+  --bevel: inset 0 1px 0 rgb(255 255 255 / 0.07);
 
   /* Text */
-  --text-0: #e9ebf1;
-  --text-1: #b4b9c6;
-  --text-2: #7c8291;
-  --text-3: #555b69;
+  --text-0: #ececec;
+  --text-1: #c9c9c9;
+  --text-2: #9d9d9f;
+  --text-3: #77777a;
+  --text-dark: #1b1b1b;
 
-  /* Brand & semantic colours */
-  --accent: #5b8def;
-  --accent-strong: #7aa3f5;
-  --accent-soft: rgb(91 141 239 / 0.16);
-  --mint: #7fe3d0;
-  --violet: #9b7be8;
-  --ok: #46c37b;
-  --warn: #e0a13b;
-  --warn-soft: rgb(224 161 59 / 0.14);
-  --danger: #e5534b;
-  --danger-soft: rgb(229 83 75 / 0.14);
-  --record: #e5484d;
-  --mute: #4bb4d6;
-  --solo: #e7c14a;
+  /* Signal colours */
+  --accent: #2f7ae5;
+  --accent-strong: #4b8ff0;
+  --accent-soft: rgb(47 122 229 / 0.22);
+  --play: #34c759;
+  --record: #ff453a;
+  --cycle: #f5c400;
+  --cycle-region: #e9b81a;
+  --mute: #3aa0e8;
+  --solo: #f5c400;
+  --ok: #34c759;
+  --warn: #f5a623;
+  --warn-soft: rgb(245 166 35 / 0.16);
+  --danger: #ff453a;
+  --danger-soft: rgb(255 69 58 / 0.16);
+  --meter-green: #3ed160;
+  --mint: #ffffff;
+  --violet: #8e4fd1;
 
-  /* Timeline */
-  --grid-bar: rgb(255 255 255 / 0.085);
-  --grid-beat: rgb(255 255 255 / 0.04);
-  --grid-sub: rgb(255 255 255 / 0.018);
-  --grid-row: rgb(0 0 0 / 0.35);
-  --ruler-bar: rgb(255 255 255 / 0.35);
-  --ruler-beat: rgb(255 255 255 / 0.16);
-  --cursor: #f2f4f8;
+  /* Grid */
+  --grid-bar: rgb(255 255 255 / 0.11);
+  --grid-beat: rgb(255 255 255 / 0.05);
+  --grid-sub: rgb(255 255 255 / 0.025);
+  --grid-row: rgb(0 0 0 / 0.3);
+  --ruler-bar: rgb(255 255 255 / 0.45);
+  --ruler-beat: rgb(255 255 255 / 0.22);
+  --cursor: #c7ccd4;
 
   /* Type */
-  --font-ui: "Inter", "SF Pro Text", system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Roboto, Ubuntu, Cantarell,
+  --font-ui: "SF Pro Text", "Inter", system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Roboto, Ubuntu, Cantarell,
     "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, "Cascadia Mono", Menlo, Consolas, "Ubuntu Mono", monospace;
-  --fs-xs: 10.5px;
-  --fs-sm: 11.5px;
-  --fs-md: 12.5px;
-  --fs-lg: 14px;
+  --font-lcd: "SF Pro Display", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "Cascadia Mono", Menlo, Consolas, "Ubuntu Mono", monospace;
+  --fs-xs: 10px;
+  --fs-sm: 11px;
+  --fs-md: 12px;
+  --fs-lg: 13.5px;
   --fs-xl: 17px;
 
   /* Shape & motion */
-  --radius-sm: 4px;
-  --radius-md: 6px;
+  --radius-sm: 3px;
+  --radius-md: 5px;
   --radius-lg: 10px;
-  --shadow-pop: 0 12px 32px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-pop: 0 12px 32px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(0 0 0 / 0.5);
   --ease: cubic-bezier(0.2, 0, 0, 1);
-  --dur-fast: 90ms;
-  --dur: 140ms;
+  --dur-fast: 80ms;
+  --dur: 130ms;
 
-  --topbar-h: 52px;
+  --topbar-h: 56px;
 }
 
 @media (prefers-reduced-motion: reduce) {

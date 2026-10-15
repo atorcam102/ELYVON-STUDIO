@@ -118,7 +118,7 @@ pub fn demo_project() -> Project {
     let mut drums_t = track(
         TrackKind::Instrument,
         "Drums",
-        2,
+        6,
         vec![
             region("Beat A", 0, 8, notes(&drums(), 8, 96)),
             region("Beat B", 8, 16, notes(&drums(), 16, 110)),
@@ -144,7 +144,7 @@ pub fn demo_project() -> Project {
     let lead_t = track(
         TrackKind::Midi,
         "Hardware Lead",
-        4,
+        9,
         vec![region(
             "Hook",
             16,
@@ -174,7 +174,7 @@ pub fn demo_project() -> Project {
     let mut gtr_t = track(
         TrackKind::Audio,
         "Guitar",
-        6,
+        2,
         vec![placeholder_audio("Guitar DI", 4, 16)],
     );
     gtr_t.pan = 0.3;

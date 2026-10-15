@@ -1,25 +1,37 @@
 import { IconButton } from "../../components/Button";
-import { Tabs } from "../../components/Tabs";
 import { useUi, type BottomTab } from "../../state/ui";
 import { Mixer } from "../mixer/Mixer";
 import { AudioEditor, PianoRoll } from "./PianoRoll";
+
+const TABS: { id: BottomTab; label: string; note?: string }[] = [
+  { id: "mixer", label: "Mixer" },
+  { id: "pianoRoll", label: "Piano Roll", note: "Preview" },
+  { id: "audioEditor", label: "Audio Editor", note: "Phase 2" },
+];
 
 export function BottomPanel() {
   const tab = useUi((s) => s.layout.bottomTab) as BottomTab;
   const setLayout = useUi((s) => s.setLayout);
   return (
     <section className="bottom-panel" aria-label="Editors">
-      <Tabs<BottomTab>
-        label="Editors"
-        value={tab}
-        onChange={(bottomTab) => setLayout({ bottomTab })}
-        tabs={[
-          { id: "mixer", label: "Mixer", icon: "mixer" },
-          { id: "pianoRoll", label: "Piano Roll", icon: "piano", note: "Preview" },
-          { id: "audioEditor", label: "Audio Editor", icon: "waveform", note: "Phase 2" },
-        ]}
-        trailing={<IconButton icon="close" label="Hide editors (E)" size={13} onClick={() => setLayout({ bottomVisible: false })} />}
-      />
+      <div className="bottom-panel__bar">
+        <div className="segmented" role="tablist" aria-label="Editors">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={t.id === tab}
+              className={`tabs__tab${t.id === tab ? " is-on" : ""}`}
+              title={t.note ? `${t.label} (${t.note})` : t.label}
+              onClick={() => setLayout({ bottomTab: t.id })}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <IconButton icon="close" label="Hide editors (E)" size={12} onClick={() => setLayout({ bottomVisible: false })} />
+      </div>
       <div className="bottom-panel__content">
         {tab === "mixer" && <Mixer />}
         {tab === "pianoRoll" && <PianoRoll />}

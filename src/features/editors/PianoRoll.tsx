@@ -8,8 +8,8 @@ import { formatBarBeat, noteName, ticksPerBar, ticksPerBeat } from "../../lib/mu
 import { useProject } from "../../state/project";
 import { useUi } from "../../state/ui";
 
-const KEY_HEIGHT = 9;
-const PX_PER_TICK = 0.05;
+const KEY_HEIGHT = 13;
+const PX_PER_TICK = 0.06;
 
 function isBlack(pitch: number) {
   return [1, 3, 6, 8, 10].includes(pitch % 12);
@@ -102,9 +102,11 @@ export function PianoRoll() {
                 width: Math.max(2, n.length * PX_PER_TICK - 1),
                 top: (range.hi - n.pitch) * KEY_HEIGHT + 1,
                 height: KEY_HEIGHT - 2,
-                opacity: 0.45 + (n.velocity / 127) * 0.55,
+                opacity: 0.55 + (n.velocity / 127) * 0.45,
               }}
-            />
+            >
+              {n.length * PX_PER_TICK > 26 && <span>{noteName(n.pitch)}</span>}
+            </div>
           ))}
         </div>
       </div>

@@ -30,7 +30,7 @@ const trackCount = () => d.count(".track-header");
 describe("Elyvon Studio", { timeout: 120_000 }, () => {
   before(async () => {
     d = await Driver.start({ application: app });
-    await d.find(".topbar", { timeout: 20_000 });
+    await d.find(".controlbar", { timeout: 20_000 });
   });
 
   after(async () => {
@@ -40,7 +40,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
   it("starts with an empty, clean project and an honest engine status", async () => {
     assert.equal(await trackCount(), 0);
     await d.find(".timeline-empty__card");
-    const status = await d.text(await d.find(".status__pill"));
+    const status = await d.textOf(".status__pill");
     assert.match(status, /offline/i);
     const play = await d.find('[aria-label^="Play"]');
     assert.equal(await d.attr(play, "disabled"), "true", "play must be disabled without an engine");
@@ -105,7 +105,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     const reopened = await d.invoke("project_open", { path: saved.ok.path, discardChanges: false });
     assert.deepEqual(reopened.ok.project, saved.ok.project);
     await d.exec("location.reload()");
-    await d.find(".topbar", { timeout: 10_000 });
+    await d.find(".controlbar", { timeout: 10_000 });
     assert.equal(await trackCount(), 2);
   });
 
@@ -175,7 +175,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
   });
 
   it("explains why updates are unavailable instead of pretending", async () => {
-    await d.clickCss('[aria-label="Settings"]');
+    await d.clickCss('[aria-label^="Settings"]');
     await d.clickCss(".settings__nav-item:nth-child(2)");
     const page = await d.textOf(".settings__content");
     assert.match(page, /development builds|signing key|installer/i);
