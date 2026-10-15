@@ -92,9 +92,14 @@ La reproducción visual de las capturas está disponible en `/reference.html`
 durante `npm run dev` y en la compilación de producción. Es una página de
 referencia con datos de muestra estáticos (mezclador, biblioteca, Live Loops,
 secuenciador y acordes), separada del punto de entrada de la aplicación Tauri.
-La aplicación nativa conserva su conexión al proyecto y al núcleo existentes;
-los ajustes de cromado y densidad se aplican desde
-`src/styles/reference-chrome.css`.
+El diseño se aplica directamente a los componentes de la aplicación nativa:
+transporte con LCD, herramientas del arreglo, cabeceras compactas, mezclador
+y biblioteca lateral izquierda. La página `/reference.html` se conserva solo
+para comparación. La aplicación mantiene las acciones y los datos existentes
+de Tauri. Los estilos principales están en `src/styles/reference-chrome.css`.
+Las regiones de audio de la sesión demo muestran una ilustración estática
+rotulada «Demo preview · No audio file»; no generan sonido ni sustituyen
+señal real. Las regiones sin archivo de proyectos normales siguen vacías.
 
 Las compilaciones de instaladores de CI se limitan por ahora a Windows x64 y
 x86. `Publish Windows preview` publica los instaladores existentes de la

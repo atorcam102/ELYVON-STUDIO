@@ -3,7 +3,11 @@ import { Splitter } from "./components/Splitter";
 import { Toasts } from "./components/Toasts";
 import { useAppEvents } from "./features/app/useAppEvents";
 import { Browser } from "./features/browser/Browser";
-import { AboutDialog, PromptHost, RecoveryDialog } from "./features/dialogs/Dialogs";
+import {
+  AboutDialog,
+  PromptHost,
+  RecoveryDialog,
+} from "./features/dialogs/Dialogs";
 import { BottomPanel } from "./features/editors/BottomPanel";
 import { Inspector } from "./features/inspector/Inspector";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
@@ -21,9 +25,31 @@ function Workspace() {
   return (
     <div className="workspace">
       <div className="workspace__main">
+        {layout.browserVisible && (
+          <>
+            <div
+              className="workspace__browser"
+              style={{ width: layout.browserWidth }}
+            >
+              <Browser />
+            </div>
+            <Splitter
+              orientation="vertical"
+              label="Resize browser"
+              value={layout.browserWidth}
+              min={180}
+              max={560}
+              direction={1}
+              onChange={(browserWidth) => setLayout({ browserWidth })}
+            />
+          </>
+        )}
         {layout.inspectorVisible && (
           <>
-            <div className="workspace__inspector" style={{ width: layout.inspectorWidth }}>
+            <div
+              className="workspace__inspector"
+              style={{ width: layout.inspectorWidth }}
+            >
               <Inspector />
             </div>
             <Splitter
@@ -40,22 +66,6 @@ function Workspace() {
         <div className="workspace__center">
           <Timeline />
         </div>
-        {layout.browserVisible && (
-          <>
-            <Splitter
-              orientation="vertical"
-              label="Resize browser"
-              value={layout.browserWidth}
-              min={180}
-              max={560}
-              direction={-1}
-              onChange={(browserWidth) => setLayout({ browserWidth })}
-            />
-            <div className="workspace__browser" style={{ width: layout.browserWidth }}>
-              <Browser />
-            </div>
-          </>
-        )}
       </div>
       {layout.bottomVisible && (
         <>
@@ -68,7 +78,10 @@ function Workspace() {
             direction={-1}
             onChange={(bottomHeight) => setLayout({ bottomHeight })}
           />
-          <div className="workspace__bottom" style={{ height: layout.bottomHeight }}>
+          <div
+            className="workspace__bottom"
+            style={{ height: layout.bottomHeight }}
+          >
             <BottomPanel />
           </div>
         </>
@@ -82,7 +95,12 @@ function StartupError({ message }: { message: string }) {
     <div className="startup-error">
       <h1>Elyvon Studio could not start</h1>
       <p>{message}</p>
-      {!inTauri && <p className="muted">This interface must run inside the Elyvon Studio desktop application (npm run tauri dev).</p>}
+      {!inTauri && (
+        <p className="muted">
+          This interface must run inside the Elyvon Studio desktop application
+          (npm run tauri dev).
+        </p>
+      )}
     </div>
   );
 }
@@ -93,9 +111,10 @@ export default function App() {
   useAppEvents();
 
   useEffect(() => {
-    Promise.all([useApp.getState().load(), ipc.project.get().then((v) => useProject.getState().setView(v))]).catch((e) =>
-      setError(toIpcError(e).message),
-    );
+    Promise.all([
+      useApp.getState().load(),
+      ipc.project.get().then((v) => useProject.getState().setView(v)),
+    ]).catch((e) => setError(toIpcError(e).message));
   }, []);
 
   if (error) return <StartupError message={error} />;

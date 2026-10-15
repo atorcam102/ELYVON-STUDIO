@@ -9,6 +9,7 @@ import { Tabs } from "../../components/Tabs";
 import { fileName, formatBytes } from "../../lib/format";
 import { ipc, toIpcError, type IpcError } from "../../lib/ipc";
 import { notify } from "../../state/notifications";
+import { useProject } from "../../state/project";
 import { useUi, type BrowserTab } from "../../state/ui";
 import { openProject } from "../project/projectActions";
 
@@ -60,7 +61,10 @@ function FileBrowser() {
     if (entry.kind === "directory") void load(entry.path);
     else if (entry.kind === "project") void openProject(entry.path);
     else if (entry.kind === "audio" || entry.kind === "midi")
-      notify("info", `Importing ${entry.kind === "audio" ? "audio" : "MIDI"} files arrives in a later phase.`);
+      notify(
+        "info",
+        `Importing ${entry.kind === "audio" ? "audio" : "MIDI"} files arrives in a later phase.`,
+      );
   };
 
   return (
@@ -79,8 +83,19 @@ function FileBrowser() {
             </option>
           ))}
         </select>
-        <IconButton icon="arrowUp" label="Parent folder" size={14} disabled={!listing?.parent} onClick={() => listing?.parent && void load(listing.parent)} />
-        <IconButton icon="refresh" label="Refresh" size={14} onClick={() => void load(listing?.path)} />
+        <IconButton
+          icon="arrowUp"
+          label="Parent folder"
+          size={14}
+          disabled={!listing?.parent}
+          onClick={() => listing?.parent && void load(listing.parent)}
+        />
+        <IconButton
+          icon="refresh"
+          label="Refresh"
+          size={14}
+          onClick={() => void load(listing?.path)}
+        />
       </div>
       {listing && (
         <div className="file-browser__path" title={listing.path}>
@@ -94,8 +109,14 @@ function FileBrowser() {
           <span>{error.message}</span>
         </div>
       ) : (
-        <ul className={`file-list${loading ? " is-loading" : ""}`} role="listbox" aria-label="Files">
-          {listing?.entries.length === 0 && <li className="file-list__empty">This folder is empty.</li>}
+        <ul
+          className={`file-list${loading ? " is-loading" : ""}`}
+          role="listbox"
+          aria-label="Files"
+        >
+          {listing?.entries.length === 0 && (
+            <li className="file-list__empty">This folder is empty.</li>
+          )}
           {listing?.entries.map((e) => (
             <li
               key={e.path}
@@ -108,21 +129,39 @@ function FileBrowser() {
               onKeyDown={(ev) => {
                 if (ev.key === "Enter") activate(e);
               }}
-              title={e.kind === "project" ? "Double-click to open" : e.kind === "directory" ? "Double-click to open folder" : e.name}
+              title={
+                e.kind === "project"
+                  ? "Double-click to open"
+                  : e.kind === "directory"
+                    ? "Double-click to open folder"
+                    : e.name
+              }
             >
               <Icon name={ENTRY_ICON[e.kind]} size={14} />
               <span className="file-list__name">{e.name}</span>
-              {e.size !== null && <span className="file-list__size">{formatBytes(e.size)}</span>}
+              {e.size !== null && (
+                <span className="file-list__size">{formatBytes(e.size)}</span>
+              )}
             </li>
           ))}
-          {listing?.truncated && <li className="file-list__empty">Showing the first 5000 items.</li>}
+          {listing?.truncated && (
+            <li className="file-list__empty">Showing the first 5000 items.</li>
+          )}
         </ul>
       )}
     </div>
   );
 }
 
-function Planned({ icon, title, text }: { icon: IconName; title: string; text: string }) {
+function Planned({
+  icon,
+  title,
+  text,
+}: {
+  icon: IconName;
+  title: string;
+  text: string;
+}) {
   return (
     <div className="planned">
       <Icon name={icon} size={22} />
@@ -137,11 +176,36 @@ function Planned({ icon, title, text }: { icon: IconName; title: string; text: s
 export function Browser() {
   const tab = useUi((s) => s.layout.browserTab) as BrowserTab;
   const setLayout = useUi((s) => s.setLayout);
+  const selectedTrack = useUi((s) => s.selection.trackIds[0]);
+  const track = useProject((s) =>
+    s.view?.project.tracks.find((t) => t.id === selectedTrack),
+  );
   return (
-    <aside className="browser" aria-label="Browser">
+    <aside className="browser" aria-label="Library">
       <div className="panel-header">
-        <span className="panel-title">Browser</span>
-        <IconButton icon="close" label="Hide browser (B)" size={13} onClick={() => setLayout({ browserVisible: false })} />
+        <span className="panel-title">Library</span>
+        <IconButton
+          icon="close"
+          label="Hide library (B)"
+          size={13}
+          onClick={() => setLayout({ browserVisible: false })}
+        />
+      </div>
+      <div
+        className="library-patch"
+        style={{ ["--patch-color" as string]: track?.color ?? "#a1db28" }}
+      >
+        <Icon
+          name={
+            track?.kind === "audio"
+              ? "audio"
+              : track?.kind === "midi"
+                ? "midi"
+                : "instrument"
+          }
+          size={76}
+        />
+        <span>{track?.name ?? "All Sounds"}</span>
       </div>
       <Tabs<BrowserTab>
         label="Browser sections"
@@ -158,13 +222,25 @@ export function Browser() {
       <div className="browser__content">
         {tab === "files" && <FileBrowser />}
         {tab === "loops" && (
-          <Planned icon="loops" title="Loop library" text="Tempo- and key-aware loop browsing with preview requires the audio engine and is planned for Phase 3." />
+          <Planned
+            icon="loops"
+            title="Loop library"
+            text="Tempo- and key-aware loop browsing with preview requires the audio engine and is planned for Phase 3."
+          />
         )}
         {tab === "instruments" && (
-          <Planned icon="instrument" title="Instruments" text="Built-in Elyvon instruments are planned after the audio engine. Instrument tracks already store their MIDI regions." />
+          <Planned
+            icon="instrument"
+            title="Instruments"
+            text="Built-in Elyvon instruments are planned after the audio engine. Instrument tracks already store their MIDI regions."
+          />
         )}
         {tab === "plugins" && (
-          <Planned icon="plug" title="Plug-ins" text="CLAP and VST3 hosting (scanning, sandboxed loading, latency compensation) is planned for Phase 4." />
+          <Planned
+            icon="plug"
+            title="Plug-ins"
+            text="CLAP and VST3 hosting (scanning, sandboxed loading, latency compensation) is planned for Phase 4."
+          />
         )}
       </div>
     </aside>

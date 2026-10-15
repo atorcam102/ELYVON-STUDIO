@@ -1,6 +1,7 @@
 import { memo } from "react";
 import type { MidiNote } from "../../bindings/MidiNote";
 import type { Region } from "../../bindings/Region";
+import { DemoWaveform } from "./DemoWaveform";
 
 interface RegionViewProps {
   region: Region;
@@ -11,15 +12,25 @@ interface RegionViewProps {
   height: number;
   selected: boolean;
   dimmed: boolean;
+  demo?: boolean;
   /** Visual offset while dragging. */
   offset: { x: number; y: number } | null;
   invalid: boolean;
-  onPointerDown: (e: React.PointerEvent<HTMLDivElement>, region: Region) => void;
+  onPointerDown: (
+    e: React.PointerEvent<HTMLDivElement>,
+    region: Region,
+  ) => void;
 }
 
 /** Compact note overview drawn inside MIDI regions. */
 const MidiPreview = memo(
-  function MidiPreview({ notes, length }: { notes: MidiNote[]; length: number }) {
+  function MidiPreview({
+    notes,
+    length,
+  }: {
+    notes: MidiNote[];
+    length: number;
+  }) {
     if (notes.length === 0) return <div className="region__empty">Empty</div>;
     let lo = 127;
     let hi = 0;
@@ -30,9 +41,20 @@ const MidiPreview = memo(
     const span = Math.max(12, hi - lo + 1);
     const base = lo - Math.floor((span - (hi - lo + 1)) / 2);
     return (
-      <svg className="region__notes" viewBox={`0 0 ${length} ${span}`} preserveAspectRatio="none" aria-hidden>
+      <svg
+        className="region__notes"
+        viewBox={`0 0 ${length} ${span}`}
+        preserveAspectRatio="none"
+        aria-hidden
+      >
         {notes.map((n, i) => (
-          <rect key={i} x={n.start} y={span - (n.pitch - base) - 1} width={Math.max(n.length, length / 400)} height={0.8} />
+          <rect
+            key={i}
+            x={n.start}
+            y={span - (n.pitch - base) - 1}
+            width={Math.max(n.length, length / 400)}
+            height={0.8}
+          />
         ))}
       </svg>
     );
@@ -43,7 +65,9 @@ const MidiPreview = memo(
       (a.notes.length === b.notes.length &&
         a.notes.every((n, i) => {
           const m = b.notes[i]!;
-          return n.pitch === m.pitch && n.start === m.start && n.length === m.length;
+          return (
+            n.pitch === m.pitch && n.start === m.start && n.length === m.length
+          );
         }))),
 );
 
@@ -56,15 +80,18 @@ export const RegionView = memo(function RegionView({
   height,
   selected,
   dimmed,
+  demo = false,
   offset,
   invalid,
   onPointerDown,
 }: RegionViewProps) {
   const isMidi = region.content.type === "midi";
-  const isPlaceholder = region.content.type === "audio" && region.content.source === null;
+  const isPlaceholder =
+    region.content.type === "audio" && region.content.source === null;
   const classes = [
     "region",
     isMidi ? "region--midi" : "region--audio",
+    isPlaceholder && demo && "region--demo",
     selected && "is-selected",
     dimmed && "is-dimmed",
     offset && "is-dragging",
@@ -81,10 +108,16 @@ export const RegionView = memo(function RegionView({
         width: Math.max(2, width),
         height,
         ["--region-color" as string]: color,
-        transform: offset ? `translate(${offset.x}px, ${offset.y}px)` : undefined,
+        transform: offset
+          ? `translate(${offset.x}px, ${offset.y}px)`
+          : undefined,
       }}
       onPointerDown={(e) => onPointerDown(e, region)}
-      title={isPlaceholder ? `${region.name} — demo placeholder (no audio file)` : region.name}
+      title={
+        isPlaceholder
+          ? `${region.name} — demo placeholder (no audio file)`
+          : region.name
+      }
       data-region-id={region.id}
     >
       <div className="region__header">
@@ -94,13 +127,19 @@ export const RegionView = memo(function RegionView({
         {region.content.type === "midi" ? (
           <MidiPreview notes={region.content.notes} length={region.length} />
         ) : isPlaceholder ? (
-          // Deliberately not a fake waveform: there is no audio behind this region.
           <div className="region__placeholder">
-            <span>No audio file</span>
+            {demo && <DemoWaveform id={region.id} />}
+            <span>
+              {demo ? "Demo preview · No audio file" : "No audio file"}
+            </span>
           </div>
         ) : (
           <div className="region__placeholder">
-            <span>{region.content.type === "audio" ? region.content.source?.path : ""}</span>
+            <span>
+              {region.content.type === "audio"
+                ? region.content.source?.path
+                : ""}
+            </span>
           </div>
         )}
       </div>

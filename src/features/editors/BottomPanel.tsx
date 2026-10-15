@@ -13,7 +13,10 @@ export function BottomPanel() {
   const tab = useUi((s) => s.layout.bottomTab) as BottomTab;
   const setLayout = useUi((s) => s.setLayout);
   return (
-    <section className="bottom-panel" aria-label="Editors">
+    <section
+      className={`bottom-panel${tab === "mixer" ? " bottom-panel--mixer" : ""}`}
+      aria-label="Editors"
+    >
       <div className="bottom-panel__bar">
         <div className="segmented" role="tablist" aria-label="Editors">
           {TABS.map((t) => (
@@ -30,7 +33,12 @@ export function BottomPanel() {
             </button>
           ))}
         </div>
-        <IconButton icon="close" label="Hide editors (E)" size={12} onClick={() => setLayout({ bottomVisible: false })} />
+        <IconButton
+          icon="close"
+          label="Hide editors (E)"
+          size={12}
+          onClick={() => setLayout({ bottomVisible: false })}
+        />
       </div>
       <div className="bottom-panel__content">
         {tab === "mixer" && <Mixer />}
