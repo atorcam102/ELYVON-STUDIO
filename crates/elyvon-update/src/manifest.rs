@@ -103,6 +103,45 @@ pub fn check_signature(sig: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Cryptographically verifies `data` against a Tauri/minisign signature.
+///
+/// `pubkey_b64` is the `plugins.updater.pubkey` value embedded in the
+/// application; `sig_b64` the content of the `.sig` file. When
+/// `expected_version` is given, the signature's trusted comment must carry
+/// exactly that `version:` (what the updater's `requireSignedVersion` checks).
+pub fn verify_signature(
+    pubkey_b64: &str,
+    data: &[u8],
+    sig_b64: &str,
+    expected_version: Option<&str>,
+) -> Result<(), String> {
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let decode = |what: &str, v: &str| {
+        b64.decode(v.trim())
+            .map_err(|e| format!("{what} is not base64: {e}"))
+            .and_then(|bytes| String::from_utf8(bytes).map_err(|_| format!("{what} is not UTF-8")))
+    };
+    let key = minisign_verify::PublicKey::decode(&decode("public key", pubkey_b64)?)
+        .map_err(|e| format!("invalid public key: {e}"))?;
+    let sig = minisign_verify::Signature::decode(&decode("signature", sig_b64)?)
+        .map_err(|e| format!("invalid signature: {e}"))?;
+    key.verify(data, &sig, true)
+        .map_err(|e| format!("signature does not match the public key: {e}"))?;
+    if let Some(expected) = expected_version {
+        let signed = sig
+            .trusted_comment()
+            .split('\t')
+            .find_map(|f| f.strip_prefix("version:"))
+            .ok_or("signature is not bound to a version (sign with --app-version)")?;
+        if signed.trim_start_matches('v') != expected.trim_start_matches('v') {
+            return Err(format!(
+                "signature is for version {signed}, expected {expected}"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Verifies that `url` downloads exactly the artifact built for `platform`
 /// and `installer` at `version`. Used by the application before installing.
 pub fn check_artifact_url(
@@ -370,6 +409,45 @@ mod tests {
             bad("darwin-aarch64-app", &other_version, &sig),
             ManifestError::WrongArtifact { .. }
         ));
+    }
+
+    fn fixture(name: &str) -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/test-signing")
+                .join(name),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn verifies_real_signatures_and_versions() {
+        let key = String::from_utf8(fixture("test-only.pub.b64")).unwrap();
+        let data = fixture("payload.bin");
+        let sig = String::from_utf8(fixture("payload.bin.sig")).unwrap();
+        verify_signature(&key, &data, &sig, Some("0.2.0")).unwrap();
+        verify_signature(&key, &data, &sig, None).unwrap();
+        assert!(
+            verify_signature(&key, &data, &sig, Some("0.3.0"))
+                .unwrap_err()
+                .contains("0.2.0")
+        );
+        // Tampered payload.
+        let mut bad = data.clone();
+        bad[0] ^= 1;
+        assert!(verify_signature(&key, &bad, &sig, None).is_err());
+        // Unversioned signatures are valid but fail the version binding.
+        let unversioned = String::from_utf8(fixture("payload-unversioned.bin.sig")).unwrap();
+        verify_signature(&key, &data, &unversioned, None).unwrap();
+        assert!(verify_signature(&key, &data, &unversioned, Some("0.2.0")).is_err());
+        // Wrong or placeholder key.
+        assert!(verify_signature("UNCONFIGURED", &data, &sig, None).is_err());
+    }
+
+    #[test]
+    fn real_signatures_pass_structure_check() {
+        let sig = String::from_utf8(fixture("payload.bin.sig")).unwrap();
+        check_signature(&sig).unwrap();
     }
 
     #[test]

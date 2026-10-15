@@ -1,0 +1,51 @@
+name: Set up build environment
+description: Node, npm dependencies, Rust for one target and native system libraries.
+
+inputs:
+  target:
+    description: Rust target triple
+    required: true
+  node-version:
+    description: Node.js version
+    required: false
+    default: "22"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+
+    - name: Install Rust (Windows ARM64 runners ship without rustup)
+      if: runner.os == 'Windows' && runner.arch == 'ARM64'
+      shell: pwsh
+      run: |
+        if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+          Invoke-WebRequest https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe -OutFile rustup-init.exe
+          ./rustup-init.exe -y --default-toolchain none --profile minimal
+          Add-Content $env:GITHUB_PATH "$env:USERPROFILE\.cargo\bin"
+        }
+
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ inputs.target }}
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ inputs.target }}
+
+    - name: Linux system libraries
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev \
+          libxdo-dev libssl-dev patchelf file
+        # linuxdeploy (AppImage) is itself an AppImage; run it without FUSE.
+        echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
+
+    - name: npm dependencies
+      shell: bash
+      run: npm ci

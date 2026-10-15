@@ -138,7 +138,11 @@ pub struct UpdateInfo {
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
-#[serde(tag = "status", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 #[ts(export)]
 pub enum UpdateCheckResult {
     Unavailable {
@@ -158,7 +162,11 @@ pub enum UpdateCheckResult {
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
-#[serde(tag = "event", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "event",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 #[ts(export)]
 pub enum DownloadEvent {
     Started {

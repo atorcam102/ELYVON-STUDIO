@@ -801,6 +801,7 @@ name = "elyvon-update"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "minisign-verify",
  "semver",
  "serde",
  "serde_json",

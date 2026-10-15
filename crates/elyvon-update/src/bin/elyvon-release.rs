@@ -5,7 +5,10 @@
 //! elyvon-release name     --target <rust-triple> --kind <nsis|msi|dmg|app|deb|appimage> --version <x.y.z>
 //! elyvon-release manifest --dir <dir> --version <x.y.z> --base-url <url> --out <file>
 //!                         [--notes-file <file>] [--pub-date <rfc3339>] [--require-complete]
+//!                         [--verify-config <tauri.conf.json>]
 //! elyvon-release validate <latest.json> [--require-complete]
+//! elyvon-release pubkey   --config <tauri.conf.json>        (fails if unconfigured)
+//! elyvon-release verify   --config <tauri.conf.json> --file <f> --sig <f.sig> [--version <x.y.z>]
 //! elyvon-release targets
 //! ```
 
@@ -13,6 +16,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use elyvon_update::manifest::verify_signature;
 use elyvon_update::version::parse_tag;
 use elyvon_update::{ArtifactKind, Platform, STUDIO_NAMING, UpdateManifest};
 
@@ -21,6 +25,8 @@ fn usage() -> ExitCode {
         "usage:\n  elyvon-release name --target <triple> --kind <nsis|msi|dmg|app|deb|appimage> --version <x.y.z>\n  \
          elyvon-release manifest --dir <dir> --version <x.y.z> --base-url <url> --out <file> [--notes-file <file>] [--pub-date <date>] [--require-complete]\n  \
          elyvon-release validate <latest.json> [--require-complete]\n  \
+         elyvon-release pubkey --config <tauri.conf.json>\n  \
+         elyvon-release verify --config <tauri.conf.json> --file <f> --sig <f.sig> [--version <x.y.z>]\n  \
          elyvon-release targets"
     );
     ExitCode::from(2)
@@ -67,6 +73,24 @@ fn version_arg(args: &Args) -> Result<String, String> {
     parse_tag(raw)
         .map(|v| v.to_string())
         .map_err(|e| format!("invalid --version {raw:?}: {e}"))
+}
+
+/// Reads `plugins.updater.pubkey` from a Tauri config and rejects the placeholder.
+fn configured_pubkey(path: &str) -> Result<String, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
+    let key = json["plugins"]["updater"]["pubkey"]
+        .as_str()
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    if key.is_empty() || key == "UNCONFIGURED" {
+        return Err(format!(
+            "{path}: plugins.updater.pubkey is not configured; generate the release key (docs/RELEASES.md)"
+        ));
+    }
+    Ok(key)
 }
 
 fn check_complete(m: &UpdateManifest, args: &Args) -> Result<(), String> {
@@ -122,6 +146,17 @@ fn run(args: Args) -> Result<(), String> {
             )
             .map_err(|e| e.to_string())?;
             check_complete(&manifest, &args)?;
+            if let Some(config) = args.options.get("verify-config") {
+                let key = configured_pubkey(config)?;
+                let dir = PathBuf::from(opt(&args, "dir")?);
+                for (k, asset) in &manifest.platforms {
+                    let file = asset.url.rsplit('/').next().unwrap_or_default();
+                    let data = std::fs::read(dir.join(file)).map_err(|e| format!("{file}: {e}"))?;
+                    verify_signature(&key, &data, &asset.signature, Some(&version))
+                        .map_err(|e| format!("{k} ({file}): {e}"))?;
+                    eprintln!("  verified {k}");
+                }
+            }
             let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
             let out = opt(&args, "out")?;
             std::fs::write(out, json + "\n").map_err(|e| format!("{out}: {e}"))?;
@@ -148,6 +183,20 @@ fn run(args: Args) -> Result<(), String> {
                 manifest.version,
                 manifest.platforms.len()
             );
+        }
+        "pubkey" => {
+            configured_pubkey(opt(&args, "config")?)?;
+            println!("updater public key is configured");
+        }
+        "verify" => {
+            let key = configured_pubkey(opt(&args, "config")?)?;
+            let file = opt(&args, "file")?;
+            let data = std::fs::read(file).map_err(|e| format!("{file}: {e}"))?;
+            let sig_path = opt(&args, "sig")?;
+            let sig = std::fs::read_to_string(sig_path).map_err(|e| format!("{sig_path}: {e}"))?;
+            let version = args.options.get("version").map(String::as_str);
+            verify_signature(&key, &data, &sig, version)?;
+            println!("{file}: signature valid for the embedded public key");
         }
         "targets" => {
             for p in Platform::SUPPORTED {

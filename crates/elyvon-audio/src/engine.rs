@@ -8,7 +8,11 @@ use ts_rs::TS;
 /// Phase 1 always reports [`EngineStatus::Unavailable`]; the UI uses this to
 /// disable transport and recording controls instead of pretending they work.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 #[ts(export)]
 pub enum EngineStatus {
     Unavailable { reason: String },

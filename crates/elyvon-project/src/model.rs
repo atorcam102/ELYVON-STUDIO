@@ -201,7 +201,11 @@ impl Region {
 
 /// What a region plays. Audio regions reference media; MIDI regions own notes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 #[ts(export)]
 pub enum RegionContent {
     Audio {

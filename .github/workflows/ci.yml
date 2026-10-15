@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  NODE_VERSION: "22"
+
+jobs:
+  frontend:
+    name: Frontend (typecheck, lint, test, build)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Versions are consistent
+        run: node scripts/check-versions.mjs
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+          retention-days: 3
+
+  rust:
+    name: Rust (fmt, clippy, test, bindings)
+    runs-on: ubuntu-24.04
+    needs: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - name: TypeScript bindings are up to date
+        run: |
+          git add -N src/bindings
+          git diff --exit-code -- src/bindings || {
+            echo "::error::src/bindings is out of date. Run 'cargo test --workspace' and commit the result."
+            exit 1
+          }
+
+  e2e:
+    name: End-to-end (Linux, real binary)
+    runs-on: ubuntu-24.04
+    needs: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: System libraries and WebDriver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev \
+            webkit2gtk-driver xvfb dbus-x11
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: tauri-driver
+        run: cargo install tauri-driver --locked
+      - run: npm ci
+      - name: Build the application (debug, no installers)
+        run: npx tauri build --debug --no-bundle
+      - name: Run end-to-end tests
+        env:
+          E2E_SCREENSHOTS: e2e-screenshots
+        run: xvfb-run -a -s "-screen 0 1280x800x24" dbus-run-session -- node --test e2e/app.e2e.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: e2e-screenshots
+          retention-days: 7
+          if-no-files-found: ignore
+
+  build:
+    name: Build ${{ matrix.label }}
+    needs: frontend
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: windows-x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis,msi
+          - label: windows-x86
+            runner: windows-latest
+            target: i686-pc-windows-msvc
+            bundles: nsis,msi
+          - label: windows-arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            bundles: nsis
+          - label: macos-intel
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+          - label: macos-arm64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+          - label: ubuntu-amd64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,appimage
+          - label: ubuntu-arm64
+            runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            bundles: deb,appimage
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+        with:
+          target: ${{ matrix.target }}
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Build installers (unsigned verification build)
+        shell: bash
+        env:
+          # CI has no signing key: verify compilation and bundling only.
+          TAURI_CONFIG_OVERRIDE: '{"bundle":{"createUpdaterArtifacts":false}}'
+        run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config "$TAURI_CONFIG_OVERRIDE"
+      - name: Collect installers
+        shell: bash
+        env:
+          REQUIRE_SIGNATURES: "0"
+        run: |
+          cargo build --release --locked -p elyvon-update --bin elyvon-release
+          node scripts/collect-artifacts.mjs --target ${{ matrix.target }} --version "$(node -p "require('./package.json').version")" --out ci-artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-${{ matrix.label }}
+          path: ci-artifacts
+          retention-days: 3
