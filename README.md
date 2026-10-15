@@ -85,3 +85,18 @@ que puede desactivarse en *Settings › Updates*.
 © 2026 Elyvon. Todos los derechos reservados. No se ha elegido todavía una
 licencia de distribución; las dependencias directas tienen licencias permisivas
 (MIT/Apache-2.0) compatibles con distribución comercial.
+
+## Referencia visual del frontend
+
+La reproducción visual de las capturas está disponible en `/reference.html`
+durante `npm run dev` y en la compilación de producción. Es una página de
+referencia con datos de muestra estáticos (mezclador, biblioteca, Live Loops,
+secuenciador y acordes), separada del punto de entrada de la aplicación Tauri.
+La aplicación nativa conserva su conexión al proyecto y al núcleo existentes;
+los ajustes de cromado y densidad se aplican desde
+`src/styles/reference-chrome.css`.
+
+Las compilaciones de instaladores de CI se limitan por ahora a Windows x64 y
+x86. `Publish Windows preview` publica los instaladores existentes de la
+ejecución de CI indicada y documenta su commit de origen; no los presenta
+como una compilación del frontend posterior.

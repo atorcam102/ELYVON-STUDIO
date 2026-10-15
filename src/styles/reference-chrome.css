@@ -1,0 +1,53 @@
+/* Presentation only: retain the native application's existing state and IPC. */
+:root {
+  --panel: #505050;
+  --panel-hi: #5b5b5b;
+  --header-col: #535353;
+  --header-col-sel: #5d5d5d;
+  --workspace: #24292b;
+  --ruler: #383c3f;
+  --mixer-bg: #4e4e4e;
+  --strip: #515151;
+  --strip-sep: #414141;
+  --slot-blue: #206eaa;
+  --slot-output: #606060;
+  --lcd: #30343b;
+  --topbar-h: 58px;
+}
+.controlbar {
+  background: #a3a3a3;
+  color: #505050;
+  border-bottom-color: #777;
+  box-shadow: inset 0 1px #b2b2b2;
+}
+.controlbar .cb-btn { color: #555; border-radius: 3px; }
+.controlbar .cb-btn:disabled { color: #777; }
+.controlbar .cb-group { background: #999; border: 1px solid #939393; border-radius: 4px; gap: 0; }
+.controlbar .cb-btn--view.is-active { color: #f3f3f3; background: #6e6e6e; }
+.controlbar .cb-transport .cb-btn { background: transparent; box-shadow: none; width: 28px; }
+.controlbar .cb-btn--play { background: #27813c; color: #fff !important; }
+.controlbar .project-title__name { color: #303030; }
+.controlbar .project-title__path { color: #5c5c5c; }
+.controlbar .lcd { background: #30343b; border-radius: 5px; }
+.controlbar .status__pill { background: #777; color: #f3f3f3; }
+.bottom-panel__bar, .panel-header, .mixer__bar { background: #555; }
+.segmented, .segmented > button { border-radius: 3px; }
+.mixer__bar { gap: 8px; height: 29px; }
+.strip-labels { width: 40px; font-size: 9px; color: #bfbfbf; }
+.strip { width: 68px; padding: 7px 5px 0; }
+.strip.is-selected { background: #5b5b5b; }
+.strip .slot { height: 14px; line-height: 14px; font-size: 9px; }
+.strip .slot--output { color: #ddd; }
+.strip .slot--group { color: #dfc04c; background: #3f3f3f; }
+.strip__fx { min-height: 65px; border-radius: 3px; background: #4c4c4c; gap: 2px; }
+.strip__fx .slot { background: #206eaa; box-shadow: inset 0 1px #3984bc; }
+.strip__db-box { height: 14px; line-height: 14px; font-size: 9px; background: #383838; }
+.strip__name { margin-left: -5px; margin-right: -5px; min-height: 30px; font-size: 9px; }
+.fader-scale { color: #9b9b9b; font-size: 7px; }
+.track-header__name { font-size: 11px; }
+@media (max-width: 1200px) {
+  .strip { width: 57px; padding-left: 4px; padding-right: 4px; }
+  .strip__name { margin-left: -4px; margin-right: -4px; font-size: 8px; }
+  .strip .slot { font-size: 8px; }
+  .controlbar__side, .controlbar__center { gap: 6px; }
+}

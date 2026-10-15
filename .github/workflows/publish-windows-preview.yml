@@ -1,0 +1,118 @@
+name: Publish Windows preview
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/publish-windows-preview.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: publish-windows-preview-1
+  cancel-in-progress: false
+
+env:
+  SOURCE_RUN: "38747993155"
+  SOURCE_COMMIT: "40acb8ef3f2bf7ed96f1a5e267c2d6323c117b1f"
+  RELEASE_TAG: "v0.1.0-windows-preview.1"
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  publish:
+    name: Publish existing Windows x64 and x86 installers
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify build provenance and Windows job results
+        run: |
+          gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" > source-run.json
+          gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN/jobs?per_page=100" > source-jobs.json
+          python3 - <<'PY'
+          import json, os
+          run = json.load(open('source-run.json'))
+          assert run['head_sha'] == os.environ['SOURCE_COMMIT'], 'Unexpected source commit'
+          assert run['repository']['full_name'] == os.environ['GH_REPO'], 'Unexpected repository'
+          assert run['path'] == '.github/workflows/ci.yml', 'Unexpected source workflow'
+          jobs = json.load(open('source-jobs.json'))['jobs']
+          for name in ['Build windows-x64', 'Build windows-x86']:
+              matches = [job for job in jobs if job['name'] == name]
+              assert len(matches) == 1 and matches[0]['conclusion'] == 'success', f'{name} did not succeed'
+          PY
+      - name: Download existing Windows x64 installers
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-windows-x64
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+          path: release
+      - name: Download existing Windows x86 installers
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-windows-x86
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+          path: release
+      - name: Validate installers and generate checksums
+        working-directory: release
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          expected = {f'Elyvon-Studio-v0.1.0-windows-{arch}{suffix}' for arch in ['x64', 'x86'] for suffix in ['-setup.exe', '.msi']}
+          actual = {p.name for p in Path('.').iterdir() if p.is_file()}
+          assert actual == expected, f'Unexpected installer set: {actual}'
+          lines = []
+          for name in sorted(expected):
+              data = Path(name).read_bytes()
+              assert len(data) > 100000, f'Installer is unexpectedly small: {name}'
+              if name.endswith('.exe'):
+                  assert data[:2] == b'MZ', f'Invalid Windows executable: {name}'
+              else:
+                  assert data[:8] == bytes.fromhex('d0cf11e0a1b11ae1'), f'Invalid MSI container: {name}'
+              lines.append(f'{hashlib.sha256(data).hexdigest()}  {name}\n')
+          Path('SHA256SUMS.txt').write_text(''.join(lines))
+          PY
+          sha256sum --check SHA256SUMS.txt
+      - name: Publish Windows preview release
+        run: |
+          cat > release-notes.md <<'NOTES'
+          ## Elyvon Studio 0.1.0 — Windows preview
+
+          Instaladores para **Windows x64 y x86**, reutilizados de la compilación de CI existente.
+
+          - `*-setup.exe`: instalador NSIS.
+          - `*.msi`: instalador MSI.
+          - `SHA256SUMS.txt`: hashes SHA-256 de los cuatro instaladores.
+
+          **Origen:** commit `40acb8ef3f2bf7ed96f1a5e267c2d6323c117b1f`, [ejecución de CI 38747993155](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38747993155).
+
+          Es una versión previa de CI sin firma de actualización. No incluye `latest.json` ni activa actualizaciones automáticas. Estos binarios corresponden al commit indicado; los cambios de frontend posteriores en `main` requieren una nueva compilación.
+          NOTES
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            echo 'The existing preview release is preserved; verify its assets below.'
+          else
+            gh release create "$RELEASE_TAG" --target "$SOURCE_COMMIT" --prerelease \
+              --title "Elyvon Studio 0.1.0 — Windows x64 / x86 preview" \
+              --notes-file release-notes.md release/*
+          fi
+      - name: Verify published files match the source installers
+        run: |
+          gh release view "$RELEASE_TAG" --json url,isDraft,isPrerelease,assets > published-release.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          release = json.load(open('published-release.json'))
+          assert not release['isDraft'] and release['isPrerelease']
+          expected = {p.name: p.stat().st_size for p in Path('release').iterdir() if p.is_file()}
+          actual = {asset['name']: asset['size'] for asset in release['assets']}
+          assert actual == expected, f'Published assets differ: {actual}'
+          print(release['url'])
+          PY
+          gh release download "$RELEASE_TAG" --dir verify-download
+          cd verify-download
+          sha256sum --check SHA256SUMS.txt
+          echo "Published $RELEASE_TAG from $SOURCE_COMMIT" >> "$GITHUB_STEP_SUMMARY"

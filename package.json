@@ -19,6 +19,7 @@
     "check:versions": "node scripts/check-versions.mjs"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
     "@tauri-apps/api": "~2.12.4",
     "@tauri-apps/plugin-dialog": "~2.8.3",
     "@tauri-apps/plugin-log": "~2.10.1",
