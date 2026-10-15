@@ -1,0 +1,41 @@
+[package]
+name = "elyvon-studio"
+description = "Elyvon Studio — desktop shell (Tauri)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+publish.workspace = true
+repository.workspace = true
+default-run = "elyvon-studio"
+
+[lib]
+name = "elyvon_studio_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+elyvon-core.workspace = true
+elyvon-project.workspace = true
+elyvon-audio.workspace = true
+elyvon-update.workspace = true
+
+tauri = { version = "2.12", features = [] }
+tauri-plugin-dialog = "2.8"
+tauri-plugin-log = "2.10"
+tauri-plugin-updater = "2.14"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+log.workspace = true
+ts-rs.workspace = true
+semver.workspace = true
+tokio = { version = "1", features = ["sync", "time", "macros"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

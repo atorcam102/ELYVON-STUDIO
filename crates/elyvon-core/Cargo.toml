@@ -1,0 +1,21 @@
+[package]
+name = "elyvon-core"
+description = "Product-agnostic building blocks shared by Elyvon applications: musical time, colours, atomic file IO."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+tempfile.workspace = true
+ts-rs.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

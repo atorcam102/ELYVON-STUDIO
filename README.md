@@ -1,1 +1,87 @@
-# Elyvon
+# Elyvon Studio
+
+**Elyvon Studio** es la estación de trabajo de audio digital (DAW) de Elyvon y la
+primera aplicación de la futura suite creativa Elyvon. Es una aplicación de
+escritorio nativa (Rust + Tauri 2) con interfaz React/TypeScript, que funciona
+sin conexión y se distribuye con instaladores independientes por sistema y
+arquitectura.
+
+> **Estado: Fase 1 (v0.1.0).** Están implementados la arquitectura, la interfaz
+> principal, la gestión de proyectos y la infraestructura de compilación y
+> actualizaciones. **El motor de audio todavía no existe**: reproducción,
+> grabación y medidores reales aparecen como no disponibles. Ver
+> [ROADMAP](docs/ROADMAP.md).
+
+## Qué hace hoy
+
+| Área | Estado |
+| --- | --- |
+| Pistas de audio, instrumento y MIDI: crear, renombrar, duplicar, borrar, reordenar, color, mute/solo, selección múltiple | ✅ |
+| Timeline: regla con compases, ciclo, cursor, zoom, cuadrícula con snap, mover regiones (tiempo y pista), crear regiones MIDI vacías | ✅ |
+| Inspector, mezclador (volumen, pan, mute, solo), vista previa de piano roll (solo lectura), navegador de archivos | ✅ |
+| Proyectos `.elyvon`: nuevo, abrir, guardar (atómico), guardar como, deshacer/rehacer, aviso de cambios sin guardar, recuperación tras fallo | ✅ |
+| Menús nativos y atajos (⌘ en macOS, Ctrl en Windows/Linux), preferencias, logs | ✅ |
+| Actualizaciones firmadas vía GitHub Releases, siempre con confirmación | ✅ (requiere configurar la clave de firma, ver [RELEASES](docs/RELEASES.md)) |
+| Reproducción, grabación, edición de audio, plug-ins, instrumentos | ⏳ fases siguientes |
+
+Los controles que dependen del motor de audio están deshabilitados y lo
+indican; los medidores del mezclador solo muestran una simulación si se activa
+explícitamente ("Simulate meters").
+
+## Plataformas
+
+| Sistema | Arquitectura | Instaladores |
+| --- | --- | --- |
+| Windows 10/11 | x64, x86, ARM64 | NSIS `.exe` (+ `.msi` en x64/x86) |
+| macOS 11+ | Intel, Apple Silicon | `.dmg` (+ `.app.tar.gz` para actualizaciones) |
+| Ubuntu 22.04+ | x64, ARM64 | `.deb`, `.AppImage` |
+
+El estado real de compilación de cada objetivo lo muestra el workflow
+[CI](.github/workflows/ci.yml) (job *Build*). No se considera compatible un
+objetivo cuya compilación no esté en verde.
+
+## Desarrollo rápido
+
+Requisitos: Rust estable (1.88+), Node.js 22.12+, y en Linux las bibliotecas de
+WebKitGTK (ver [CONTRIBUTING](CONTRIBUTING.md)).
+
+```bash
+npm ci
+npm run tauri dev        # aplicación con recarga en caliente
+npm test                 # pruebas del frontend (Vitest)
+cargo test --workspace   # pruebas Rust (+ regenera src/bindings)
+npm run tauri build      # instaladores para la plataforma actual
+```
+
+## Estructura
+
+```
+crates/elyvon-core      tiempo musical, colores, E/S atómica (reutilizable por la suite)
+crates/elyvon-project   modelo, formato .elyvon, ediciones, undo, recuperación
+crates/elyvon-audio     contratos del futuro motor de audio (sin motor)
+crates/elyvon-update    política de actualizaciones, plataformas, manifiesto, CLI elyvon-release
+src-tauri/              shell de escritorio: comandos IPC, menús, ajustes, updater
+src/                    interfaz React (features/, components/, state/, styles/)
+e2e/                    pruebas end-to-end contra el binario real (WebDriver)
+docs/                   arquitectura, formato de proyecto, releases, roadmap
+```
+
+## Documentación
+
+- [Arquitectura](docs/ARCHITECTURE.md)
+- [Formato de proyecto `.elyvon`](docs/PROJECT_FORMAT.md)
+- [Releases, firma y actualizaciones](docs/RELEASES.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Contribuir](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
+
+## Privacidad
+
+Sin telemetría. La única petición de red es la comprobación de actualizaciones,
+que puede desactivarse en *Settings › Updates*.
+
+## Licencia
+
+© 2026 Elyvon. Todos los derechos reservados. No se ha elegido todavía una
+licencia de distribución; las dependencias directas tienen licencias permisivas
+(MIT/Apache-2.0) compatibles con distribución comercial.

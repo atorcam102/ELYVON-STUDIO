@@ -1,0 +1,4 @@
+[env]
+# ts-rs writes the TypeScript bindings generated from the Rust IPC types here
+# (`cargo test` regenerates them; CI fails if they drift).
+TS_RS_EXPORT_DIR = { value = "src/bindings", relative = true }

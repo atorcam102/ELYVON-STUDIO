@@ -1,0 +1,73 @@
+{
+  "format": "elyvon-studio-project",
+  "schemaVersion": 1,
+  "savedWith": "0.1.0",
+  "project": {
+    "id": "0b0f8d52-5d6e-4b8e-9a51-3f0e0c7d9a11",
+    "name": "Fixture Song",
+    "transport": {
+      "tempo": 98.5,
+      "timeSignature": { "numerator": 6, "denominator": 8 },
+      "key": { "tonic": "F#", "mode": "minor" },
+      "loopRange": { "enabled": true, "start": 2880, "end": 11520 }
+    },
+    "lengthBars": 48,
+    "tracks": [
+      {
+        "id": "6f2b8a1e-0d4c-4a7b-8f3e-1c2d3e4f5a61",
+        "name": "Piano",
+        "kind": "instrument",
+        "color": "#5B8DEF",
+        "muted": false,
+        "soloed": true,
+        "volumeDb": -2.5,
+        "pan": -0.2,
+        "regions": [
+          {
+            "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+            "name": "Intro",
+            "start": 0,
+            "length": 5760,
+            "content": {
+              "type": "midi",
+              "notes": [
+                { "pitch": 66, "velocity": 90, "start": 0, "length": 480 },
+                { "pitch": 69, "velocity": 70, "start": 480, "length": 480 }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "7a3c9b2f-1e5d-4b8c-9a4f-2d3e4f5a6b72",
+        "name": "Vocals",
+        "kind": "audio",
+        "color": "#3FB99C",
+        "muted": true,
+        "soloed": false,
+        "volumeDb": -96,
+        "pan": 1,
+        "regions": [
+          {
+            "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+            "name": "Take 1",
+            "start": 2880,
+            "length": 2880,
+            "content": { "type": "audio", "source": { "path": "Audio/take1.wav" } }
+          }
+        ]
+      },
+      {
+        "id": "8b4d0c3a-2f6e-4c9d-8b5a-3e4f5a6b7c83",
+        "name": "Synth Out",
+        "kind": "midi",
+        "color": "#E0A13B",
+        "muted": false,
+        "soloed": false,
+        "volumeDb": 6,
+        "pan": 0,
+        "regions": []
+      }
+    ]
+  }
+}
