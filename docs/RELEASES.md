@@ -11,8 +11,12 @@ Las siete entradas del workflow Release descrito abajo son configuración hereda
 no equivalen a siete targets compilados o probados. No se ha verificado instalación
 en hardware Windows, macOS o Linux ARM. Véase [STATUS](STATUS.md).
 
-La [Release Windows preview 2](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.1.0-windows-preview.2)
-contiene cuatro instaladores independientes EXE/MSI y sus hashes. No lleva firma de
+La [Release Windows preview 3](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.1.0-windows-preview.3)
+contiene cuatro instaladores independientes EXE/MSI y sus hashes, del commit `974b09c`
+y [CI 38768320136](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38768320136).
+Se publicó y verificó mediante el [workflow 38770622156](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38770622156).
+EXE (NSIS) y MSI (Windows Installer) contienen la misma aplicación por arquitectura;
+solo se instala uno. Para la mayoría de equipos Windows de 64 bits se recomienda el x64 EXE. No lleva firma de
 updater ni Authenticode. La clave pública embebida sigue en UNCONFIGURED; la existencia
 de secretos privados del repositorio no se pudo comprobar (API 403), por lo que no se
 presenta como ausente ni como configurada. El test con clave de producción sigue pendiente.

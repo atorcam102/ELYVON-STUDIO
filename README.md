@@ -64,27 +64,31 @@ Screenshots show the main frontend from `main`, rendered in Chromium at **1280 �
 
 Current distribution focuses on **Windows x64 and x86**.
 
+**For most users with 64-bit Windows, choose the x64 EXE installer.** Download and install only one package for your architecture.
+
+Each architecture has two installation formats: **EXE** (`-setup.exe`, NSIS) is the standard setup wizard; **MSI** uses Windows Installer and is useful for managed or automated deployments. Both formats contain the same application and features.
+
 | Architecture | EXE installer | MSI installer |
 | --- | --- | --- |
-| **Windows x64 · 64-bit** | [Download EXE](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.2/Elyvon-Studio-v0.1.0-windows-x64-setup.exe) | [Download MSI](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.2/Elyvon-Studio-v0.1.0-windows-x64.msi) |
-| **Windows x86 · 32-bit** | [Download EXE](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.2/Elyvon-Studio-v0.1.0-windows-x86-setup.exe) | [Download MSI](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.2/Elyvon-Studio-v0.1.0-windows-x86.msi) |
+| **Windows x64 · 64-bit** | [Download EXE](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.3/Elyvon-Studio-v0.1.0-windows-x64-setup.exe) | [Download MSI](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.3/Elyvon-Studio-v0.1.0-windows-x64.msi) |
+| **Windows x86 · 32-bit** | [Download EXE](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.3/Elyvon-Studio-v0.1.0-windows-x86-setup.exe) | [Download MSI](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.3/Elyvon-Studio-v0.1.0-windows-x86.msi) |
 
-[View the release and notes](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.1.0-windows-preview.2) · [SHA-256 checksums](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.2/SHA256SUMS.txt)
+[View the release and notes](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.1.0-windows-preview.3) · [SHA-256 checksums](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.3/SHA256SUMS.txt)
 
-**Windows preview 2 includes the redesigned native interface shown above**, built from commit `fbc4566`. Its installers have neither updater signatures nor Authenticode signatures.
+**Windows preview 3 includes the redesigned native interface and the Phase 02 technical baseline**, built from commit `974b09c` ([successful source CI](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38768320136)). Its installers have neither updater signatures nor Authenticode signatures.
 
 The [current CI workflow](.github/workflows/ci.yml) produces EXE and MSI installers for Windows x64/x86. Configuration for other platforms remains in the repository; their distribution is outside the current scope.
 
 ### Builds from main
 
-For installers containing the newer Phase 02 contracts and audit changes, open the latest successful [CI run on `main`](https://github.com/atorcam102/ELYVON-STUDIO/actions/workflows/ci.yml?query=branch%3Amain) and download the appropriate **Artifacts** archive:
+For builds newer than the published preview, open the latest successful [CI run on `main`](https://github.com/atorcam102/ELYVON-STUDIO/actions/workflows/ci.yml?query=branch%3Amain) and download the appropriate **Artifacts** archive:
 
 | Architecture | CI artifact | Contents |
 | --- | --- | --- |
 | Windows x64 · 64-bit | `ci-windows-x64` | Separate EXE and MSI installers for `x86_64-pc-windows-msvc` |
 | Windows x86 · 32-bit | `ci-windows-x86` | Separate EXE and MSI installers for `i686-pc-windows-msvc` |
 
-These verification builds are unsigned. CI artifacts expire after **3 days** and downloading them requires a GitHub login. The published preview linked above remains available in Releases and was built before Phase 02.
+These verification builds are unsigned. CI artifacts expire after **3 days** and downloading them requires a GitHub login. Published releases remain available after their source CI artifacts expire.
 
 Each CI run also checks the frontend, Rust workspace, generated TypeScript bindings, dependency licences/advisories and workflow syntax. The Linux test runner builds and exercises the real desktop binary, including saving a project, restarting the process and reopening it. `native-evidence` contains GUI screenshots and startup, idle-memory and timeline measurements; `audit-evidence` contains dependency reports. Both evidence archives are retained for 30 days.
 
