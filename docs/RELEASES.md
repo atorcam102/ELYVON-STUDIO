@@ -15,9 +15,18 @@ maintainer revisa el borrador y pulsa "Publish"
    ──► releases/latest/download/latest.json ofrece la nueva versión a los usuarios
 ```
 
-Nunca se publica automáticamente una versión estable: el workflow crea siempre
-un borrador. Los usuarios solo reciben la actualización cuando un responsable lo
-publica.
+Con la clave de firma configurada nunca se publica automáticamente una versión
+estable: el workflow crea un borrador y los usuarios solo reciben la
+actualización cuando un responsable lo publica.
+
+**Modo sin clave (estado actual).** Si `TAURI_SIGNING_PRIVATE_KEY` no existe,
+el workflow compila igualmente los siete instaladores, pero sin paquetes de
+actualización ni `latest.json`, y los publica como **pre-release descargable**
+con un aviso al principio de las notas. Esas compilaciones llevan
+`pubkey = "UNCONFIGURED"`, por lo que no buscan actualizaciones y lo indican en
+*Settings › Updates*; el endpoint `releases/latest/…` nunca sirve pre-releases.
+En cuanto se configure la clave, la siguiente versión (p. ej. v0.1.1) sale por
+el flujo firmado y desde ella las actualizaciones automáticas funcionan.
 
 ## Matriz de compilación
 

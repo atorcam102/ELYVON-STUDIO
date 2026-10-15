@@ -22,8 +22,8 @@ jobs:
     name: Frontend (typecheck, lint, test, build)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: System libraries
         run: |
           sudo apt-get update
@@ -74,8 +74,8 @@ jobs:
     runs-on: ubuntu-24.04
     needs: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -140,7 +140,7 @@ jobs:
             bundles: deb,appimage
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-build
         with:
           target: ${{ matrix.target }}
@@ -154,7 +154,7 @@ jobs:
       - name: Collect installers
         shell: bash
         env:
-          REQUIRE_SIGNATURES: "0"
+          UPDATER_ARTIFACTS: "0"
         run: |
           cargo build --release --locked -p elyvon-update --bin elyvon-release
           node scripts/collect-artifacts.mjs --target ${{ matrix.target }} --version "$(node -p "require('./package.json').version")" --out ci-artifacts
