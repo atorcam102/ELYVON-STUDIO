@@ -310,7 +310,7 @@ mod tests {
     fn url(platform: &str, kind: ArtifactKind) -> String {
         let p = Platform::from_rust_target(platform).unwrap();
         format!(
-            "https://github.com/atorcam102/Elyvon/releases/download/v0.2.0/{}",
+            "https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.2.0/{}",
             STUDIO_NAMING.file_name("0.2.0", p, kind)
         )
     }
@@ -480,7 +480,7 @@ mod tests {
             dir.path(),
             &STUDIO_NAMING,
             "0.2.0",
-            "https://github.com/atorcam102/Elyvon/releases/download/v0.2.0/",
+            "https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.2.0/",
             Some("notes".into()),
             None,
         )

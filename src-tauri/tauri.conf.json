@@ -38,7 +38,7 @@
     "category": "Music",
     "shortDescription": "Digital audio workstation",
     "longDescription": "Elyvon Studio is a professional digital audio workstation by Elyvon.",
-    "homepage": "https://github.com/atorcam102/Elyvon",
+    "homepage": "https://github.com/atorcam102/ELYVON-STUDIO",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -70,7 +70,7 @@
     "updater": {
       "pubkey": "UNCONFIGURED",
       "endpoints": [
-        "https://github.com/atorcam102/Elyvon/releases/latest/download/latest.json"
+        "https://github.com/atorcam102/ELYVON-STUDIO/releases/latest/download/latest.json"
       ],
       "requireSignedVersion": true,
       "windows": {

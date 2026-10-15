@@ -1,11 +1,17 @@
 name: Release
 
-# Builds signed installers for every supported platform from a SemVer tag
-# (e.g. v0.1.0) and creates a *draft* GitHub release. A maintainer reviews the
-# draft and publishes it; only then does `releases/latest/download/latest.json`
-# (the updater endpoint) start offering the new version. Tags with a
-# pre-release suffix (v0.2.0-beta.1) are marked as pre-releases, which the
-# updater endpoint never serves.
+# Builds installers for every supported platform from a SemVer tag (v0.1.0).
+#
+# * Signing key configured (TAURI_SIGNING_PRIVATE_KEY + public key in
+#   tauri.conf.json): installers + signed updater packages + latest.json, all
+#   signatures verified, published as a *draft*. A maintainer reviews and
+#   publishes it; only then does the updater endpoint offer the version.
+# * No signing key yet: the same seven installers *without* updater artifacts
+#   are published as a downloadable *pre-release*, clearly labelled. Such
+#   builds cannot self-update (the app reports it) and the updater endpoint
+#   never serves pre-releases. Nothing pretends to be signed.
+#
+# Tags with a pre-release suffix (v0.2.0-beta.1) are always pre-releases.
 
 on:
   push:
@@ -35,11 +41,12 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
+      signed: ${{ steps.keys.outputs.signed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -52,13 +59,16 @@ jobs:
           if [[ "$VERSION" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
       - name: Changelog has an entry for this version
         run: node scripts/release-notes.mjs "${TAG#v}" > /dev/null
-      - name: Signing secrets are present
+      - id: keys
+        name: Signing mode
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set. Releases are never published without update signatures. See docs/RELEASES.md."
-            exit 1
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set: building installers without updater artifacts and publishing them as a pre-release. See docs/RELEASES.md."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
           fi
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -66,9 +76,11 @@ jobs:
           key: release-tool
       - run: cargo build --release --locked -p elyvon-update --bin elyvon-release
       - name: Embedded public key is configured
+        if: steps.keys.outputs.signed == 'true'
         run: ./target/release/elyvon-release pubkey --config src-tauri/tauri.conf.json
       - run: npm ci
       - name: Private key matches the embedded public key
+        if: steps.keys.outputs.signed == 'true'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -114,7 +126,7 @@ jobs:
             bundles: deb,appimage
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.TAG }}
       - uses: ./.github/actions/setup-build
@@ -138,9 +150,10 @@ jobs:
             echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
           fi
 
-      - name: Build signed installers
+      - name: Build installers
         shell: bash
         env:
+          SIGNED: ${{ needs.preflight.outputs.signed }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -150,10 +163,17 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           if [ -n "${{ secrets.APPLE_SIGNING_IDENTITY }}" ]; then export APPLE_SIGNING_IDENTITY="${{ secrets.APPLE_SIGNING_IDENTITY }}"; fi
-          npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          if [ "$SIGNED" = "true" ]; then
+            npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          else
+            npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} \
+              --config '{"bundle":{"createUpdaterArtifacts":false}}'
+          fi
 
       - name: Collect and rename artifacts
         shell: bash
+        env:
+          UPDATER_ARTIFACTS: ${{ needs.preflight.outputs.signed == 'true' && '1' || '0' }}
         run: |
           cargo build --release --locked -p elyvon-update --bin elyvon-release
           node scripts/collect-artifacts.mjs --target ${{ matrix.target }} --version "${{ needs.preflight.outputs.version }}" --out release-artifacts
@@ -172,10 +192,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
       - uses: dtolnay/rust-toolchain@stable
@@ -190,6 +210,7 @@ jobs:
           merge-multiple: true
 
       - name: Updater manifest (complete, every signature verified)
+        if: needs.preflight.outputs.signed == 'true'
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
@@ -208,22 +229,35 @@ jobs:
       - name: Checksums
         working-directory: release
         run: |
-          sha256sum Elyvon-Studio-* latest.json > SHA256SUMS.txt
+          sha256sum Elyvon-Studio-* $(ls latest.json 2>/dev/null) > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Release notes
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
-        run: node scripts/release-notes.mjs "$VERSION" > release-body.md
+          SIGNED: ${{ needs.preflight.outputs.signed }}
+        run: |
+          if [ "$SIGNED" = "true" ]; then
+            node scripts/release-notes.mjs "$VERSION" > release-body.md
+          else
+            node scripts/release-notes.mjs "$VERSION" --unsigned > release-body.md
+          fi
 
-      - name: Create draft release
+      - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.preflight.outputs.version }}
           PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
+          SIGNED: ${{ needs.preflight.outputs.signed }}
         run: |
-          FLAGS="--draft --verify-tag"
-          if [ "$PRERELEASE" = "true" ]; then FLAGS="$FLAGS --prerelease"; fi
+          if [ "$SIGNED" = "true" ]; then
+            # Signed builds wait for a human to publish them.
+            FLAGS="--draft --verify-tag"
+            if [ "$PRERELEASE" = "true" ]; then FLAGS="$FLAGS --prerelease"; fi
+          else
+            # Unsigned builds are downloadable but never "latest".
+            FLAGS="--prerelease --latest=false --verify-tag"
+          fi
           gh release create "$TAG" $FLAGS \
             --title "Elyvon Studio $VERSION" \
             --notes-file release-body.md \

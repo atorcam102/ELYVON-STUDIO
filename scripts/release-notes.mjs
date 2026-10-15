@@ -2,6 +2,7 @@
 //
 //   node scripts/release-notes.mjs 0.1.0               # full GitHub release body
 //   node scripts/release-notes.mjs 0.1.0 --notes-only  # changelog section only (updater dialog)
+//   node scripts/release-notes.mjs 0.1.0 --unsigned    # body for a build without update signing
 //
 // Exits with an error if the changelog has no section for the version, so a
 // release cannot ship without notes.
@@ -10,8 +11,9 @@ import { readFileSync } from "node:fs";
 
 const version = process.argv[2]?.replace(/^v/, "");
 const notesOnly = process.argv.includes("--notes-only");
+const unsigned = process.argv.includes("--unsigned");
 if (!version) {
-  console.error("usage: release-notes.mjs <version> [--notes-only]");
+  console.error("usage: release-notes.mjs <version> [--notes-only] [--unsigned]");
   process.exit(2);
 }
 
@@ -40,7 +42,19 @@ const rows = [
   ["Ubuntu 22.04+ · ARM64", `Elyvon-Studio-${v}-ubuntu-arm64.deb`, `Elyvon-Studio-${v}-ubuntu-arm64.AppImage`],
 ];
 
-console.log(`${notes}
+const preview = unsigned
+  ? `> **Preview build.** These installers were built by the release pipeline without the update-signing key,
+> so this version **cannot update itself**: Elyvon Studio says so in *Settings › Updates*. Install later versions
+> manually from this page. Installers are not code-signed yet (Windows SmartScreen and macOS Gatekeeper will warn).
+
+`
+  : "";
+
+const updatesText = unsigned
+  ? "This preview build does not check for or install updates. Download newer versions from the Releases page."
+  : "Installed copies update themselves from this page: Elyvon Studio checks for updates (if enabled in Settings), shows these notes and installs only after you confirm. Every update is verified against the signing key built into the application.";
+
+console.log(`${preview}${notes}
 
 ## Downloads
 
@@ -56,7 +70,7 @@ ${rows.map(([s, a, b]) => `| ${s} | \`${a}\` | ${b === "—" ? "—" : `\`${b}\`
 - **macOS:** open the \`.dmg\` and drag Elyvon Studio to Applications. Builds without an Apple Developer ID are ad-hoc signed; on first launch use *Right-click › Open*.
 - **Ubuntu:** \`sudo apt install ./Elyvon-Studio-${v}-ubuntu-<arch>.deb\`, or make the \`.AppImage\` executable (\`chmod +x\`) and run it.
 
-Installed copies update themselves from this page: Elyvon Studio checks for updates (if enabled in Settings), shows these notes and installs only after you confirm. Every update is verified against the signing key built into the application.
+${updatesText}
 
 ## Verification
 

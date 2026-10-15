@@ -25,6 +25,7 @@ const bundle = join(root, "target", target, "release", "bundle");
 const tool = join(root, "target", "release", process.platform === "win32" ? "elyvon-release.exe" : "elyvon-release");
 
 // kind → [bundle subdirectory, file suffix, has updater signature]
+// `app` (.app.tar.gz) exists only as an updater payload.
 const KINDS = {
   nsis: ["nsis", "-setup.exe", true],
   msi: ["msi", ".msi", true],
@@ -48,9 +49,12 @@ const kinds = PER_TARGET[target];
 if (!kinds) throw new Error(`unsupported target ${target}`);
 mkdirSync(out, { recursive: true });
 
-const requireSignatures = process.env.REQUIRE_SIGNATURES !== "0";
+// UPDATER_ARTIFACTS=0: build made with createUpdaterArtifacts=false (no
+// signing key) — there are no signatures and no updater-only payloads.
+const updaterArtifacts = process.env.UPDATER_ARTIFACTS !== "0";
 let copied = 0;
 for (const kind of kinds) {
+  if (kind === "app" && !updaterArtifacts) continue;
   const [dir, suffix, signed] = KINDS[kind];
   const from = join(bundle, dir);
   const files = existsSync(from) ? readdirSync(from).filter((f) => f.endsWith(suffix)) : [];
@@ -61,12 +65,13 @@ for (const kind of kinds) {
   copyFileSync(join(from, files[0]), join(out, name));
   console.log(`${files[0]} -> ${name}`);
   copied++;
-  if (signed) {
+  // Never ship a signature without updater artifacts (could be stale from a cache).
+  if (signed && updaterArtifacts) {
     const sig = join(from, `${files[0]}.sig`);
     if (existsSync(sig)) {
       copyFileSync(sig, join(out, `${name}.sig`));
       console.log(`  + ${name}.sig`);
-    } else if (requireSignatures) {
+    } else {
       throw new Error(`missing updater signature ${sig} (is TAURI_SIGNING_PRIVATE_KEY set?)`);
     }
   }

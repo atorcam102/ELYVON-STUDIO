@@ -15,9 +15,18 @@ maintainer revisa el borrador y pulsa "Publish"
    ──► releases/latest/download/latest.json ofrece la nueva versión a los usuarios
 ```
 
-Nunca se publica automáticamente una versión estable: el workflow crea siempre
-un borrador. Los usuarios solo reciben la actualización cuando un responsable lo
-publica.
+Con la clave de firma configurada nunca se publica automáticamente una versión
+estable: el workflow crea un borrador y los usuarios solo reciben la
+actualización cuando un responsable lo publica.
+
+**Modo sin clave (estado actual).** Si `TAURI_SIGNING_PRIVATE_KEY` no existe,
+el workflow compila igualmente los siete instaladores, pero sin paquetes de
+actualización ni `latest.json`, y los publica como **pre-release descargable**
+con un aviso al principio de las notas. Esas compilaciones llevan
+`pubkey = "UNCONFIGURED"`, por lo que no buscan actualizaciones y lo indican en
+*Settings › Updates*; el endpoint `releases/latest/…` nunca sirve pre-releases.
+En cuanto se configure la clave, la siguiente versión (p. ej. v0.1.1) sale por
+el flujo firmado y desde ella las actualizaciones automáticas funcionan.
 
 ## Matriz de compilación
 
@@ -82,7 +91,7 @@ tipo de instalador:
   "notes": "…sección del CHANGELOG…",
   "pub_date": "2026-10-15T12:00:00Z",
   "platforms": {
-    "windows-x86_64-nsis": { "url": "https://github.com/atorcam102/Elyvon/releases/download/v0.1.0/Elyvon-Studio-v0.1.0-windows-x64-setup.exe", "signature": "…" },
+    "windows-x86_64-nsis": { "url": "https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0/Elyvon-Studio-v0.1.0-windows-x64-setup.exe", "signature": "…" },
     "windows-i686-msi": { … },
     "darwin-aarch64-app": { … },
     "linux-x86_64-deb": { … },
@@ -100,7 +109,7 @@ vinculada a la versión).
 ## Cómo decide la aplicación
 
 1. `tauri-plugin-updater` descarga `latest.json` desde
-   `https://github.com/atorcam102/Elyvon/releases/latest/download/latest.json`
+   `https://github.com/atorcam102/ELYVON-STUDIO/releases/latest/download/latest.json`
    (TLS obligatorio; GitHub excluye borradores y pre-releases de `latest`).
 2. El tipo de instalador lo graba el empaquetador en el binario; el plugin busca
    `{os}-{arch}-{instalador}` (p. ej. `linux-x86_64-deb`). La arquitectura es la
