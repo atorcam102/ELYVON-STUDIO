@@ -1,69 +1,153 @@
+<p align="center">
+  <img src="assets/brand/elyvon-studio-icon-1024.png" width="80" alt="Icono de Elyvon Studio">
+</p>
+
 # Elyvon Studio
 
-**Elyvon Studio** es la estación de trabajo de audio digital (DAW) de Elyvon y la
-primera aplicación de la futura suite creativa Elyvon. Es una aplicación de
-escritorio nativa (Rust + Tauri 2) con interfaz React/TypeScript, que funciona
-sin conexión y se distribuye con instaladores independientes por sistema y
-arquitectura.
+[![CI](https://github.com/atorcam102/ELYVON-STUDIO/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/atorcam102/ELYVON-STUDIO/actions/workflows/ci.yml)
 
-> **Estado: Fase 1 (v0.1.0).** Están implementados la arquitectura, la interfaz
-> principal, la gestión de proyectos y la infraestructura de compilación y
-> actualizaciones. **El motor de audio todavía no existe**: reproducción,
-> grabación y medidores reales aparecen como no disponibles. Ver
-> [ROADMAP](docs/ROADMAP.md).
+Estación de trabajo de audio digital de escritorio en desarrollo, construida con **Rust, Tauri 2, React y TypeScript**. Actualmente permite organizar pistas y regiones, inspeccionar notas MIDI y gestionar proyectos `.elyvon`, con una interfaz de estudio en tonos grafito.
 
-## Qué hace hoy
+**Estado: v0.1.0 · Fase 1.** La gestión de proyectos y sus controles de edición están implementados. El motor de audio está pendiente: esta versión todavía no reproduce ni graba sonido.
 
-| Área | Estado |
+![Interfaz principal de Elyvon Studio: sesión de demostración con seis pistas, arreglo y mezclador](docs/screenshots/01-arrangement-mixer.png)
+
+*Interfaz actual de `main`: transporte con LCD, pistas por colores, regiones MIDI y mezclador. Las formas de onda de la demo son ilustrativas.*
+
+[Descargas para Windows](#descargas-para-windows) · [Funcionalidades](#funcionalidades-actuales) · [Más capturas](#capturas-de-la-interfaz) · [Desarrollo](#desarrollo)
+
+## Funcionalidades actuales
+
+| Área | Qué puedes hacer ahora |
 | --- | --- |
-| Pistas de audio, instrumento y MIDI: crear, renombrar, duplicar, borrar, reordenar, color, mute/solo, selección múltiple | ✅ |
-| Timeline: regla con compases, ciclo, cursor, zoom, cuadrícula con snap, mover regiones (tiempo y pista), crear regiones MIDI vacías | ✅ |
-| Inspector, mezclador (volumen, pan, mute, solo), vista previa de piano roll (solo lectura), navegador de archivos | ✅ |
-| Proyectos `.elyvon`: nuevo, abrir, guardar (atómico), guardar como, deshacer/rehacer, aviso de cambios sin guardar, recuperación tras fallo | ✅ |
-| Menús nativos y atajos (⌘ en macOS, Ctrl en Windows/Linux), preferencias, logs | ✅ |
-| Actualizaciones firmadas vía GitHub Releases, siempre con confirmación | ✅ (requiere configurar la clave de firma, ver [RELEASES](docs/RELEASES.md)) |
-| Reproducción, grabación, edición de audio, plug-ins, instrumentos | ⏳ fases siguientes |
+| **Proyectos** | Crear, abrir y guardar proyectos `.elyvon`; usar Guardar como y conservar nombres, pistas, regiones y ajustes musicales. |
+| **Historial y recuperación** | Deshacer y rehacer ediciones, recibir avisos de cambios sin guardar y recuperar instantáneas tras un cierre inesperado. El guardado de archivos es atómico. |
+| **Pistas** | Crear pistas de audio, instrumento y MIDI; renombrar, duplicar, eliminar, reordenar, cambiar colores y seleccionar varias pistas. |
+| **Arreglo** | Navegar por compases, mover el cursor, ajustar el zoom y trabajar con cuadrícula y snap. Mover regiones en el tiempo o entre pistas compatibles y crear regiones MIDI vacías. |
+| **Ajustes musicales** | Cambiar tempo, compás y tonalidad; definir y editar el rango de ciclo del proyecto. |
+| **Mezclador** | Editar volumen, panorama, mute y solo por pista. Estos valores se guardan en el proyecto; todavía no procesan señal de audio. |
+| **Piano roll** | Inspeccionar las notas de una región MIDI y su distribución en el tiempo. Es una vista previa de solo lectura. |
+| **Biblioteca de archivos** | Explorar carpetas y abrir proyectos `.elyvon` desde la barra lateral izquierda. |
+| **Espacio de trabajo** | Mostrar, ocultar y redimensionar biblioteca, inspector y editores; alternar entre mezclador y piano roll. |
+| **Controles de escritorio** | Usar menús nativos, atajos de teclado, preferencias y registros de diagnóstico. |
+| **Sesión de demostración** | Explorar un arreglo de seis pistas: Drums, Bass, Keys, Hardware Lead, Lead Vocal y Guitar. Los proyectos nuevos empiezan vacíos. |
 
-Los controles que dependen del motor de audio están deshabilitados y lo
-indican; los medidores del mezclador solo muestran una simulación si se activa
-explícitamente ("Simulate meters").
+### Qué sigue pendiente
 
-## Plataformas
+- Reproducción, grabación y selección de dispositivos de audio.
+- Importación y edición de archivos de audio; exportación y bounce.
+- Entrada/salida MIDI y edición de notas en el piano roll.
+- Instrumentos integrados, sampler, efectos, buses y hosting de plug-ins.
+- Biblioteca de loops con escucha previa.
 
-| Sistema | Arquitectura | Instaladores |
+Los controles de reproducción y grabación permanecen deshabilitados cuando el motor no está disponible. Los slots de efectos son espacios visuales sin procesamiento. Los medidores solo se animan al activar explícitamente **Simulate meters**.
+
+El repositorio incluye infraestructura de actualizaciones con validación de versión, plataforma y firma. La preview sin firma publicada actualmente **no activa actualizaciones automáticas**. Consulta [releases y firmas](docs/RELEASES.md) para su configuración.
+
+## Capturas de la interfaz
+
+### Biblioteca e inspector
+
+Biblioteca a la izquierda, propiedades de la pista seleccionada y controles del proyecto junto al arreglo.
+
+![Biblioteca de archivos e inspector abiertos junto a la pista Keys y al arreglo](docs/screenshots/02-library-inspector.png)
+
+### Vista previa del piano roll
+
+Las notas de la región **Chords** de Keys se muestran debajo del arreglo. La indicación **READ-ONLY PREVIEW** identifica el alcance actual del editor.
+
+![Piano roll de la región Chords con sus notas y el arreglo de la sesión demo](docs/screenshots/03-piano-roll.png)
+
+Las capturas muestran el frontend principal de `main` renderizado en Chromium a **1280 × 800**, con el puente de prueba oficial de Tauri y los datos de la sesión demo. No son capturas del instalador de Windows. [Detalles de las capturas](docs/screenshots/README.md).
+
+## Descargas para Windows
+
+La distribución actual se centra en **Windows x64 y x86**.
+
+| Arquitectura | Instalador EXE | Instalador MSI |
 | --- | --- | --- |
-| Windows 10/11 | x64, x86, ARM64 | NSIS `.exe` (+ `.msi` en x64/x86) |
-| macOS 11+ | Intel, Apple Silicon | `.dmg` (+ `.app.tar.gz` para actualizaciones) |
-| Ubuntu 22.04+ | x64, ARM64 | `.deb`, `.AppImage` |
+| **Windows x64 · 64 bits** | [Descargar EXE](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.1/Elyvon-Studio-v0.1.0-windows-x64-setup.exe) | [Descargar MSI](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.1/Elyvon-Studio-v0.1.0-windows-x64.msi) |
+| **Windows x86 · 32 bits** | [Descargar EXE](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.1/Elyvon-Studio-v0.1.0-windows-x86-setup.exe) | [Descargar MSI](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.1/Elyvon-Studio-v0.1.0-windows-x86.msi) |
 
-El estado real de compilación de cada objetivo lo muestra el workflow
-[CI](.github/workflows/ci.yml) (job *Build*). No se considera compatible un
-objetivo cuya compilación no esté en verde.
+[Ver la release y sus notas](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.1.0-windows-preview.1) · [Hashes SHA-256](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0-windows-preview.1/SHA256SUMS.txt)
 
-## Desarrollo rápido
+La preview enlazada se compiló desde `40acb8e`. **Las capturas muestran el rediseño posterior de `main`**, que requiere un nuevo instalador para aparecer en esa descarga. Los binarios de esta preview no tienen firma de actualización ni firma Authenticode.
 
-Requisitos: Rust estable (1.88+), Node.js 22.12+, y en Linux las bibliotecas de
-WebKitGTK (ver [CONTRIBUTING](CONTRIBUTING.md)).
+La [CI actual](.github/workflows/ci.yml) genera instaladores EXE y MSI para Windows x64/x86. El repositorio también conserva configuración para otras plataformas; su distribución queda fuera del alcance actual.
+
+## Primeros pasos
+
+1. Abre Elyvon Studio y crea un proyecto o elige **Or explore the demo session** en el arreglo vacío. También puedes abrir la demo desde el menú nativo **File**.
+2. Añade pistas desde **Functions** o el botón **+**. Usa el inspector para ver sus propiedades.
+3. Selecciona y organiza regiones en el arreglo. En pistas de instrumento o MIDI, un doble clic sobre el espacio vacío crea una región MIDI.
+4. Ajusta volumen, panorama, mute y solo en el mezclador. Selecciona una región MIDI y abre **Piano Roll** para inspeccionar sus notas.
+5. Guarda el proyecto como archivo `.elyvon`.
+
+### Atajos principales en Windows
+
+| Acción | Atajo |
+| --- | --- |
+| Nuevo / abrir proyecto | `Ctrl+N` / `Ctrl+O` |
+| Guardar / guardar como | `Ctrl+S` / `Ctrl+Shift+S` |
+| Deshacer / rehacer | `Ctrl+Z` / `Ctrl+Shift+Z` o `Ctrl+Y` |
+| Duplicar pistas | `Ctrl+D` |
+| Eliminar selección | `Delete` |
+| Inspector / biblioteca / editores | `I` / `B` / `E` |
+| Mezclador | `X` |
+| Activar o desactivar el rango de ciclo | `L` |
+| Llevar el cursor al inicio | `Home` |
+
+La lista completa está en **Settings → Shortcuts**.
+
+## Desarrollo
+
+### Requisitos
+
+- **Node.js 22.12 o superior** y npm.
+- **Rust estable 1.88 o superior**.
+- Para Windows: herramientas de compilación de C++ de Microsoft y WebView2, según los [requisitos de Tauri](https://v2.tauri.app/start/prerequisites/).
+- Las dependencias nativas de otros entornos de desarrollo se describen en [CONTRIBUTING](CONTRIBUTING.md).
+
+### Ejecutar la aplicación
 
 ```bash
 npm ci
-npm run tauri dev        # aplicación con recarga en caliente
-npm test                 # pruebas del frontend (Vitest)
-cargo test --workspace   # pruebas Rust (+ regenera src/bindings)
-npm run tauri build      # instaladores para la plataforma actual
+npm run tauri dev
 ```
 
-## Estructura
+Este comando inicia Vite y la aplicación de escritorio con su puente nativo.
 
+### Comprobaciones y compilación
+
+```bash
+npm run typecheck
+npm run lint
+npm test
+npm run build                 # frontend de producción
+cargo test --workspace        # pruebas Rust y regeneración de bindings
+npm run tauri -- build --no-bundle  # aplicación nativa sin instaladores
 ```
-crates/elyvon-core      tiempo musical, colores, E/S atómica (reutilizable por la suite)
-crates/elyvon-project   modelo, formato .elyvon, ediciones, undo, recuperación
-crates/elyvon-audio     contratos del futuro motor de audio (sin motor)
-crates/elyvon-update    política de actualizaciones, plataformas, manifiesto, CLI elyvon-release
-src-tauri/              shell de escritorio: comandos IPC, menús, ajustes, updater
-src/                    interfaz React (features/, components/, state/, styles/)
-e2e/                    pruebas end-to-end contra el binario real (WebDriver)
-docs/                   arquitectura, formato de proyecto, releases, roadmap
+
+La generación y publicación de instaladores está documentada en [RELEASES](docs/RELEASES.md).
+
+### Referencia visual
+
+La página `/reference.html`, accesible con `npm run dev`, conserva maquetas de Live Loops, secuenciador y acordes para comparar diseños. **Son vistas de referencia con datos estáticos**, no funciones de producción de la aplicación principal.
+
+## Estructura del repositorio
+
+```text
+crates/elyvon-core/      Tiempo musical, colores y escritura atómica
+crates/elyvon-project/   Modelo de proyecto, formato .elyvon, historial y recuperación
+crates/elyvon-audio/     Contratos del futuro motor de audio
+crates/elyvon-update/    Política de actualizaciones, manifiestos y CLI de releases
+src-tauri/              Aplicación de escritorio, IPC, menús y preferencias
+src/features/           Transporte, pistas, arreglo, mezclador, inspector y biblioteca
+src/components/         Controles compartidos de la interfaz
+src/styles/             Tema, disposición y estilos del diseño actual
+src/reference/          Maquetas visuales de referencia
+e2e/                    Pruebas contra el binario real mediante WebDriver
+docs/screenshots/       Capturas del frontend actual
 ```
 
 ## Documentación
@@ -75,33 +159,8 @@ docs/                   arquitectura, formato de proyecto, releases, roadmap
 - [Contribuir](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
 
-## Privacidad
+## Privacidad y licencia
 
-Sin telemetría. La única petición de red es la comprobación de actualizaciones,
-que puede desactivarse en *Settings › Updates*.
+Sin telemetría. La comprobación de actualizaciones utiliza la red y puede desactivarse en **Settings → Updates**.
 
-## Licencia
-
-© 2026 Elyvon. Todos los derechos reservados. No se ha elegido todavía una
-licencia de distribución; las dependencias directas tienen licencias permisivas
-(MIT/Apache-2.0) compatibles con distribución comercial.
-
-## Referencia visual del frontend
-
-La reproducción visual de las capturas está disponible en `/reference.html`
-durante `npm run dev` y en la compilación de producción. Es una página de
-referencia con datos de muestra estáticos (mezclador, biblioteca, Live Loops,
-secuenciador y acordes), separada del punto de entrada de la aplicación Tauri.
-El diseño se aplica directamente a los componentes de la aplicación nativa:
-transporte con LCD, herramientas del arreglo, cabeceras compactas, mezclador
-y biblioteca lateral izquierda. La página `/reference.html` se conserva solo
-para comparación. La aplicación mantiene las acciones y los datos existentes
-de Tauri. Los estilos principales están en `src/styles/reference-chrome.css`.
-Las regiones de audio de la sesión demo muestran una ilustración estática
-rotulada «Demo preview · No audio file»; no generan sonido ni sustituyen
-señal real. Las regiones sin archivo de proyectos normales siguen vacías.
-
-Las compilaciones de instaladores de CI se limitan por ahora a Windows x64 y
-x86. `Publish Windows preview` publica los instaladores existentes de la
-ejecución de CI indicada y documenta su commit de origen; no los presenta
-como una compilación del frontend posterior.
+© 2026 Elyvon. Todos los derechos reservados. Todavía no se ha establecido una licencia de distribución para el proyecto.
