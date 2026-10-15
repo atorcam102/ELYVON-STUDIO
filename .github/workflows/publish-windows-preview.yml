@@ -11,13 +11,13 @@ permissions:
   actions: read
 
 concurrency:
-  group: publish-windows-preview-1
+  group: publish-windows-preview-2
   cancel-in-progress: false
 
 env:
-  SOURCE_RUN: "38747993155"
-  SOURCE_COMMIT: "40acb8ef3f2bf7ed96f1a5e267c2d6323c117b1f"
-  RELEASE_TAG: "v0.1.0-windows-preview.1"
+  SOURCE_RUN: "38757410164"
+  SOURCE_COMMIT: "fbc456623aced9396cc235f6fd2f5d5697a1cd14"
+  RELEASE_TAG: "v0.1.0-windows-preview.2"
   GH_TOKEN: ${{ github.token }}
   GH_REPO: ${{ github.repository }}
 
@@ -35,6 +35,7 @@ jobs:
           import json, os
           run = json.load(open('source-run.json'))
           assert run['head_sha'] == os.environ['SOURCE_COMMIT'], 'Unexpected source commit'
+          assert run['conclusion'] == 'success', 'Source CI did not complete successfully'
           assert run['repository']['full_name'] == os.environ['GH_REPO'], 'Unexpected repository'
           assert run['path'] == '.github/workflows/ci.yml', 'Unexpected source workflow'
           jobs = json.load(open('source-jobs.json'))['jobs']
@@ -80,23 +81,39 @@ jobs:
       - name: Publish Windows preview release
         run: |
           cat > release-notes.md <<'NOTES'
-          ## Elyvon Studio 0.1.0 — Windows preview
+          ## Elyvon Studio 0.1.0 — Windows preview 2
 
-          Instaladores para **Windows x64 y x86**, reutilizados de la compilación de CI existente.
+          This preview includes the new studio interface applied to the native application:
 
-          - `*-setup.exe`: instalador NSIS.
-          - `*.msi`: instalador MSI.
-          - `SHA256SUMS.txt`: hashes SHA-256 de los cuatro instaladores.
+          - Graphite workspace, compact LCD transport and arrangement toolbar.
+          - Compact track headers, colour-coded regions and redesigned mixer channels.
+          - Library on the left, with the inspector and piano roll available alongside the arrangement.
+          - Existing project editing, save, undo/redo, mute, solo and volume controls preserved.
 
-          **Origen:** commit `40acb8ef3f2bf7ed96f1a5e267c2d6323c117b1f`, [ejecución de CI 38747993155](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38747993155).
+          ### Downloads
 
-          Es una versión previa de CI sin firma de actualización. No incluye `latest.json` ni activa actualizaciones automáticas. Estos binarios corresponden al commit indicado; los cambios de frontend posteriores en `main` requieren una nueva compilación.
+          Installers for **Windows x64 (64-bit)** and **Windows x86 (32-bit)**:
+
+          - `*-setup.exe`: NSIS installer.
+          - `*.msi`: MSI installer.
+          - `SHA256SUMS.txt`: SHA-256 checksums for all four installers.
+
+          **Build source:** commit `fbc456623aced9396cc235f6fd2f5d5697a1cd14`, [successful CI run 38757410164](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38757410164).
+
+          These are the existing CI installers, published without rebuilding or replacing the previous release. The application version remains 0.1.0.
+
+          ### Current limitations
+
+          This is a development preview. Audio playback, recording, instruments and plug-in processing are not implemented yet. Waveforms in the demo are labelled illustrations; the piano roll is read-only.
+
+          Installers are not Authenticode-signed and have no updater signatures. This release does not include `latest.json` or enable automatic updates.
+
           NOTES
           if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
             echo 'The existing preview release is preserved; verify its assets below.'
           else
             gh release create "$RELEASE_TAG" --target "$SOURCE_COMMIT" --prerelease \
-              --title "Elyvon Studio 0.1.0 — Windows x64 / x86 preview" \
+              --title "Elyvon Studio 0.1.0 — Windows x64 / x86 preview 2" \
               --notes-file release-notes.md release/*
           fi
       - name: Verify published files match the source installers
@@ -113,6 +130,7 @@ jobs:
           print(release['url'])
           PY
           gh release download "$RELEASE_TAG" --dir verify-download
+          cmp release/SHA256SUMS.txt verify-download/SHA256SUMS.txt
           cd verify-download
           sha256sum --check SHA256SUMS.txt
           echo "Published $RELEASE_TAG from $SOURCE_COMMIT" >> "$GITHUB_STEP_SUMMARY"
