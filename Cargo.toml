@@ -14,7 +14,7 @@ edition = "2024"
 rust-version = "1.88"
 authors = ["Elyvon"]
 publish = false
-repository = "https://github.com/atorcam102/Elyvon"
+repository = "https://github.com/atorcam102/ELYVON-STUDIO"
 
 [workspace.dependencies]
 elyvon-core = { path = "crates/elyvon-core" }

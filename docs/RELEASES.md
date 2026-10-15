@@ -82,7 +82,7 @@ tipo de instalador:
   "notes": "…sección del CHANGELOG…",
   "pub_date": "2026-10-15T12:00:00Z",
   "platforms": {
-    "windows-x86_64-nsis": { "url": "https://github.com/atorcam102/Elyvon/releases/download/v0.1.0/Elyvon-Studio-v0.1.0-windows-x64-setup.exe", "signature": "…" },
+    "windows-x86_64-nsis": { "url": "https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.1.0/Elyvon-Studio-v0.1.0-windows-x64-setup.exe", "signature": "…" },
     "windows-i686-msi": { … },
     "darwin-aarch64-app": { … },
     "linux-x86_64-deb": { … },
@@ -100,7 +100,7 @@ vinculada a la versión).
 ## Cómo decide la aplicación
 
 1. `tauri-plugin-updater` descarga `latest.json` desde
-   `https://github.com/atorcam102/Elyvon/releases/latest/download/latest.json`
+   `https://github.com/atorcam102/ELYVON-STUDIO/releases/latest/download/latest.json`
    (TLS obligatorio; GitHub excluye borradores y pre-releases de `latest`).
 2. El tipo de instalador lo graba el empaquetador en el binario; el plugin busca
    `{os}-{arch}-{instalador}` (p. ej. `linux-x86_64-deb`). La arquitectura es la
