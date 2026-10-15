@@ -15,6 +15,23 @@ an identifier in a CI policy does not discharge those obligations. No commercial
 Apple instrument, private project format or proprietary DSP is included in the new test fixtures.
 The origin/licensing of historical brand assets is not established by this technical audit.
 
+## Audio engine dependencies (Phase 03)
+
+| Crate | Version | Licence | Use |
+| --- | --- | --- | --- |
+| cpal | 0.18.2 | Apache-2.0 | Audio device I/O (WASAPI, CoreAudio, ALSA) |
+| rtrb | 0.4.0 | MIT OR Apache-2.0 | Wait-free command ring buffer |
+| audio_thread_priority | 0.35.1 | **MPL-2.0** | Real-time thread priority (CPAL `realtime` feature) |
+| alsa / alsa-sys | 0.11.0 / 0.4.0 | Apache-2.0 OR MIT / MIT | Linux ALSA bindings |
+| coreaudio-rs, objc2-core-audio, objc2-audio-toolbox, objc2-avf-audio | see Cargo.lock | MIT/Apache-2.0/Zlib | macOS CoreAudio bindings |
+| dasp_sample, mach2, num-derive | see Cargo.lock | MIT/Apache-2.0/BSD-2-Clause | Transitive helpers |
+
+MPL-2.0 is file-level copyleft: shipping binaries requires including its licence notice and making
+the source of the (unmodified) MPL files available, e.g. by reference to the published crate. This
+is a shipping obligation to discharge before stable distribution, not a legal clearance. The Linux
+build links the system `libasound` (LGPL-2.1) dynamically. No ASIO SDK, JACK or proprietary audio
+code is included; the test tone is generated mathematically and no audio samples are shipped.
+
 ## Phosphor Icons React
 
 The interface uses @phosphor-icons/react 2.1.10 (MIT), from

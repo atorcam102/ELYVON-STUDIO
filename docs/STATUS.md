@@ -1,3 +1,22 @@
+# Repository status
+
+## Phase 03 — native audio engine and devices (PARTIAL)
+
+**Date:** 2026-10-15. Branch `claude/elegant-feynman-biwgpv` on top of main `22634ed`.
+Engine design and platform matrix: [AUDIO_ENGINE](AUDIO_ENGINE.md); commands and results:
+[Phase 03 validation](audit/PHASE03_VALIDATION.md); decision: [ADR 5](ADR/0005-cpal-device-layer-around-a-driverless-engine-core.md).
+
+| Acceptance criterion | State | Evidence / gap |
+| --- | --- | --- |
+| Test tone audible on a real device, play/stop, true meters | **Partial** | Tone, transport and meters verified headlessly, through a real CPAL→ALSA stream (`null` PCM) and in the native GUI (meters read −18.0 dBFS). **Not heard on physical hardware**: no sound card in the container or CI runners. |
+| Callback does no forbidden work; xruns measured; stats logged off the callback | **Met (automated)** | Allocation counter across 64/128/256/512 × 44.1/48/96 kHz and 6 sample formats; backend xrun/late/gap counters; logging from the manager thread only. Locks/IO checked by design review, not by a tool. |
+| Hot-unplug and missing devices never block or corrupt the project; per-platform support documented | **Partial** | Scripted unplug/missing/busy/reconnect tests and project-untouched E2E; matrix documented. **No physical unplug test** on any platform. |
+
+Audio support is not declared for any platform until the hardware procedure in AUDIO_ENGINE.md
+has been run there. Phase 02 correction made in this phase: the declared minimum Rust version was
+wrong (1.88; locked Tauri 2.12 crates need 1.90 — `cargo +1.88 check` fails, `+1.90` passes); it is
+now 1.90 with a CI `msrv` job. STATUS/FEATURE_MATRIX now reference the current Windows preview 3.
+
 # Repository audit and technical contracts — Phase 02
 
 **Audit date:** 2026-10-15. **Entry revision:** [`b30cd67`](https://github.com/atorcam102/ELYVON-STUDIO/commit/b30cd673309fe416099db888fa5cb043506d69f8).
@@ -18,14 +37,18 @@ This is a technical audit, not a claim that a playable DAW or every platform is 
 - Historical [Release run 38760423899](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38760423899)
   failed before building: `v0.1.0-windows-preview.2` differs from application version `0.1.0`.
   Preview tag pushes are now excluded from that rebuild workflow; explicit dispatch still validates versions.
-- Current phase: [PR #2](https://github.com/atorcam102/ELYVON-STUDIO/pull/2),
+- Current [Windows preview 3 Release](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.1.0-windows-preview.3)
+  republishes the unchanged x64/x86 EXE/MSI artifacts of main commit `974b09c`
+  ([CI 38768320136](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38768320136)) via
+  `publish-windows-preview.yml`. Same limits as preview 2: unsigned, no updater feed, no device test.
+- Phase 02 implementation: [PR #2](https://github.com/atorcam102/ELYVON-STUDIO/pull/2),
   [CI 38765992553](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38765992553),
   [native raw measurements](audit/native-metrics-38765992553.json). Frontend, dependencies, native workspace/E2E/measurements and Windows x64/x86
   installer checks passed; exact context and observed 216 ms maximum frame interval are in the validation report.
 - This phase adds frozen wire/signal fixtures, a native process restart regression, a native measurement
   runner, dependency policy and CI artifacts. See [validation](audit/VALIDATION.md).
 
-Run from the checkout, with Node >=22.12, stable Rust >=1.88 and Tauri native prerequisites:
+Run from the checkout, with Node >=22.12, stable Rust >=1.90 and Tauri native prerequisites:
 
 ```bash
 npm ci
@@ -55,7 +78,7 @@ including optional/platform/dev packages. These are lockfile counts, not counts 
 | Component | Locked version / state | Source |
 | --- | --- | --- |
 | App / project file | 0.1.0 / schema 1 | Cargo.toml, package.json, tauri.conf.json; check:versions |
-| Rust | edition 2024, minimum 1.88; CI uses stable | Cargo.toml; no pinned rust-toolchain file |
+| Rust | edition 2024, minimum 1.90 (corrected from 1.88: locked Tauri 2.12 crates require 1.90); CI uses stable and checks 1.90 | Cargo.toml; no pinned rust-toolchain file |
 | Tauri native / build | 2.12.4 / 2.7.3 | Cargo.lock |
 | Tauri JS API / CLI | 2.12.4 / 2.12.3 | package-lock.json |
 | Updater / dialog / log (Rust) | 2.14.0 / 2.8.3 / 2.10.1 | Cargo.lock |
@@ -74,8 +97,8 @@ separate evidence. **No physical hardware test was performed in this audit.**
 
 | OS / CPU | Rust target | Regular CI / runner | Installer evidence | GUI / device evidence |
 | --- | --- | --- | --- | --- |
-| Windows x64 Intel/AMD | x86_64-pc-windows-msvc | windows-latest | EXE + MSI built, published preview 2 | No Windows launch/install/device test |
-| Windows x86 32-bit | i686-pc-windows-msvc | windows-latest, cross target | Separate EXE + MSI built, published preview 2 | No 32-bit host install/launch test |
+| Windows x64 Intel/AMD | x86_64-pc-windows-msvc | windows-latest | EXE + MSI built, published previews 2 and 3 | No Windows launch/install/device test |
+| Windows x86 32-bit | i686-pc-windows-msvc | windows-latest, cross target | Separate EXE + MSI built, published previews 2 and 3 | No 32-bit host install/launch test |
 | Windows ARM64 | aarch64-pc-windows-msvc | No regular build; legacy release config: windows-11-arm | No verified artifact | Untested |
 | macOS Intel | x86_64-apple-darwin | No regular build; legacy: macos-15-intel | No verified artifact | Untested; signing/notarisation unknown |
 | macOS Apple Silicon | aarch64-apple-darwin | No regular build; legacy: macos-latest | No verified artifact | Untested; signing/notarisation unknown |
@@ -103,7 +126,7 @@ references. Recovery and atomic saves already existed; this phase does not repla
 ## Updater, permissions and secrets review
 
 - `pubkey` is `UNCONFIGURED`. Unsigned previews correctly report updating unavailable;
-  no latest.json or signatures are attached to preview 2. The presence of a SHA-256 file does not
+  no latest.json or signatures are attached to previews 2 or 3. The presence of a SHA-256 file does not
   replace code signing or trusted updater signatures.
 - Release preflight checks tag == app version, public key configuration and a test signature
   against the embedded key when signing secrets are supplied. Unit fixtures already cover
@@ -134,7 +157,9 @@ references. Recovery and atomic saves already existed; this phase does not repla
 | --- | --- | --- |
 | B-01 | RustSec RUSTSEC-2024-0370: proc-macro-error 1.0.4 via GTK3/glib-macros is unmaintained. No safe upstream upgrade reported. Specific maintenance-only exception in deny.toml; no vulnerability exception. Duplicate transitive crate versions remain warnings. | Reassess upstream GTK/Tauri path before stable; keep inventory and advisory checks active. |
 | B-02 | No first-party distribution licence; package-level licences inventoried and checked. Phosphor attribution recorded. Complete third-party licence texts are not bundled in installers. | Decide licence and ship required notices, including OS/bundled library obligations; no legal clearance claimed. |
-| B-03 | Desktop dependencies unavailable in cloud container; apt installation denied. Core Rust and frontend are runnable; native GUI evidence comes from CI. | See native CI evidence; hardware Windows x86/x64 install/open/save/restart remains required. |
+| B-03 | Phase 02 container could not install desktop dependencies. **Phase 03 container could** (Ubuntu 24.04, apt available): the native binary was built and the full WebKit E2E suite ran locally. | Hardware Windows x86/x64 install/open/save/restart remains required. |
+| B-08 | E2E harness kept an unread stdout pipe to the app and killed the driver before the app exited: orphaned apps (6/10 runs on Phase 02 main) and occasional suite hangs. **Fixed in Phase 03**; the suite asserts a clean app exit. | Watch CI for regressions. |
+| B-07 | Phase 03 audio: no physical device, speaker or unplug test on any target; Ubuntu ARM64 not built; JACK/native PipeWire/ASIO/WASAPI-exclusive not compiled in. | Run the AUDIO_ENGINE.md hardware procedure per target before declaring audio support. |
 | B-04 | Production key/signing installation test and separate beta channel unverified/unimplemented. | Configure through maintainer secret settings and verify signed upgrades on device before stable. |
 | B-05 | Legacy release workflow still contains seven builds while regular distribution is Windows only. Preview tag collision is fixed; no broader release was dispatched. | Scope/gate that workflow for a future explicitly authorised release; verify each target independently. |
 | B-06 | Timeline benchmark uses the small Rust demo, debug mode and a virtual display; two of 120 frame intervals exceeded 50 ms (maximum 216 ms). | Release-mode large-session benchmark and real hardware budgets remain unset/unmeasured. |

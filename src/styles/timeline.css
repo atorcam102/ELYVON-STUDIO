@@ -917,3 +917,29 @@
   color: rgb(255 255 255 / 0.9);
   white-space: nowrap;
 }
+
+/* Real device output meters (Phase 03). */
+.strip--output {
+  justify-content: flex-start;
+}
+
+.strip--output .strip__fader-row--output {
+  gap: 3px;
+}
+
+.strip--output .strip__unavailable {
+  flex: none;
+  padding: 6px 4px;
+}
+
+.strip--output.is-unavailable .strip__fader-row {
+  opacity: 0.45;
+}
+
+.strip__db-box--peak.is-clipped {
+  color: #ff6b61;
+}
+
+.meter--live .meter__bar {
+  transition: transform 60ms linear;
+}

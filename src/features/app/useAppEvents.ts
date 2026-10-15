@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { hasPrimaryModifier, isEditableTarget, isWindows } from "../../lib/platform";
 import { ipc } from "../../lib/ipc";
 import { useApp } from "../../state/app";
+import { useAudio } from "../../state/audio";
 import { useDialogs } from "../../state/dialogs";
 import { useProject } from "../../state/project";
 import { useUi } from "../../state/ui";
@@ -111,6 +112,10 @@ function onKeyDown(e: KeyboardEvent) {
   if (isEditableTarget(e.target) || mod || e.altKey) return;
 
   switch (e.key) {
+    case " ":
+      // Play/stop; ignored while the engine is not running.
+      e.preventDefault();
+      return void useAudio.getState().togglePlay();
     case "Delete":
     case "Backspace":
       e.preventDefault();

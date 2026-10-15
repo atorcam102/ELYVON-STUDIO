@@ -5,13 +5,14 @@ members = [
     "crates/elyvon-project",
     "crates/elyvon-audio",
     "crates/elyvon-update",
+    "crates/elyvon-audio-device",
     "src-tauri",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.90"
 authors = ["Elyvon"]
 publish = false
 repository = "https://github.com/atorcam102/ELYVON-STUDIO"
@@ -21,6 +22,7 @@ elyvon-core = { path = "crates/elyvon-core" }
 elyvon-project = { path = "crates/elyvon-project" }
 elyvon-audio = { path = "crates/elyvon-audio" }
 elyvon-update = { path = "crates/elyvon-update" }
+elyvon-audio-device = { path = "crates/elyvon-audio-device" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -30,6 +32,8 @@ semver = { version = "1", features = ["serde"] }
 log = "0.4"
 ts-rs = { version = "12", features = ["uuid-impl", "serde-json-impl", "no-serde-warnings"] }
 tempfile = "3"
+rtrb = "0.4"
+cpal = { version = "0.18.2", features = ["realtime"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

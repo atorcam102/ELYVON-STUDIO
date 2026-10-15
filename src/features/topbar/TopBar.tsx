@@ -13,7 +13,7 @@ import {
   PITCH_CLASSES,
 } from "../../lib/music";
 import { shortcutLabel } from "../../lib/platform";
-import { engineAvailable, useApp } from "../../state/app";
+import { engineRunning, useAudio } from "../../state/audio";
 import { useProject } from "../../state/project";
 import { useUi } from "../../state/ui";
 import { hasUpdateBadge, useUpdates } from "../../state/updates";
@@ -156,13 +156,21 @@ function FileButtons() {
   );
 }
 
+function engineReason(status: ReturnType<typeof useAudio.getState>["status"]): string {
+  return status?.message ?? "The audio engine is starting.";
+}
+
 function Transport() {
-  const engine = useApp((s) => s.engine);
+  const status = useAudio((s) => s.status);
+  const playing = useAudio((s) => s.transportIntent === "playing");
+  const play = useAudio((s) => s.play);
+  const stop = useAudio((s) => s.stop);
   const setCursor = useUi((s) => s.setCursor);
-  const available = engineAvailable(engine);
-  const reason = engine?.state === "unavailable" ? engine.reason : "";
-  const label = (what: string) =>
-    available ? what : `${what} — unavailable: ${reason}`;
+  const available = engineRunning(status);
+  const label = (what: string, shortcut?: string) =>
+    available
+      ? `${what}${shortcut ? ` (${shortcut})` : ""}`
+      : `${what} — unavailable: ${engineReason(status)}`;
   return (
     <div className="cb-transport" role="group" aria-label="Transport">
       <CbButton
@@ -170,19 +178,26 @@ function Transport() {
         label="Go to beginning"
         onClick={() => setCursor(0)}
       />
-      <CbButton icon="stop" label={label("Stop")} disabled={!available} />
+      <CbButton
+        icon="stop"
+        label={label("Stop", "Space")}
+        disabled={!available}
+        onClick={() => void stop()}
+      />
       <CbButton
         icon="play"
         tone="play"
-        label={label("Play")}
+        label={label("Play", "Space")}
         disabled={!available}
+        active={playing}
         size={17}
+        onClick={() => void play()}
       />
       <CbButton
         icon="record"
         tone="record"
-        label={label("Record")}
-        disabled={!available}
+        label="Record — not available yet: recording arrives in a later phase"
+        disabled
       />
     </div>
   );
@@ -400,11 +415,43 @@ function ProjectTitle() {
   );
 }
 
+function statusText(status: ReturnType<typeof useAudio.getState>["status"]): string {
+  if (!status) return "Engine";
+  switch (status.state) {
+    case "running": {
+      const o = status.output;
+      if (!o) return "Engine";
+      const rate = `${(o.sampleRate / 1000).toFixed(o.sampleRate % 1000 ? 1 : 0)} kHz`;
+      return o.headless ? `Headless · ${rate}` : `Engine · ${rate}`;
+    }
+    case "starting":
+      return "Engine starting";
+    case "disabled":
+      return "Engine off";
+    case "noDevice":
+      return "No audio device";
+    case "deviceLost":
+      return "Device lost";
+    case "error":
+      return "Audio error";
+  }
+}
+
 function StatusIndicator() {
-  const engine = useApp((s) => s.engine);
+  const status = useAudio((s) => s.status);
   const pending = useProject((s) => s.pending);
   const updates = useUpdates((s) => s.state);
   const setUpdateOpen = useUi((s) => s.setUpdateOpen);
+  const openSettings = useUi((s) => s.openSettings);
+  const running = engineRunning(status);
+  const warn = running && (status?.notices.length ?? 0) > 0;
+  const title = running
+    ? [
+        `${status?.output?.deviceName} (${status?.output?.host})`,
+        ...(status?.notices.map((n) => n.message) ?? []),
+        "Click to open Settings › Audio.",
+      ].join("\n")
+    : `${engineReason(status)}\nClick to open Settings › Audio.`;
   return (
     <div className="status">
       {pending > 0 && <span className="status__busy" aria-label="Working" />}
@@ -419,19 +466,16 @@ function StatusIndicator() {
           <span>Update</span>
         </button>
       )}
-      <div
-        className={`status__pill ${engineAvailable(engine) ? "is-ok" : "is-offline"}`}
-        title={
-          engine?.state === "unavailable"
-            ? engine.reason
-            : "Audio engine running"
-        }
+      <button
+        type="button"
+        className={`status__pill ${running ? (warn ? "is-warn" : "is-ok") : "is-offline"}`}
+        title={title}
+        aria-label={`Audio engine: ${statusText(status)}`}
+        onClick={() => openSettings("audio")}
       >
         <span className="status__dot" />
-        <span className="status__text">
-          {engineAvailable(engine) ? "Engine" : "Engine offline"}
-        </span>
-      </div>
+        <span className="status__text">{statusText(status)}</span>
+      </button>
     </div>
   );
 }

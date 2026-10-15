@@ -8,7 +8,7 @@
 
 A desktop digital audio workstation in development, built with **Rust, Tauri 2, React and TypeScript**. It currently supports arranging tracks and regions, inspecting MIDI notes and managing `.elyvon` projects through a graphite studio interface.
 
-**Status: v0.1.0 · Phase 02 technical audit (partial).** Project management and editing controls are implemented. The audio engine is still pending: this version does not play or record sound yet.
+**Status: v0.1.0 · Phase 03 native audio engine (partial).** Project management and editing controls are implemented. The native audio engine opens your output device, runs the transport and plays an opt-in test tone with real meters. Tracks and regions are not rendered yet and recording is not available. Audio on physical hardware has not been validated yet; see the [audio engine notes](docs/AUDIO_ENGINE.md).
 
 ![Elyvon Studio main interface: a six-track demo session, arrangement and mixer](docs/screenshots/01-arrangement-mixer.png)
 
@@ -25,7 +25,8 @@ A desktop digital audio workstation in development, built with **Rust, Tauri 2, 
 | **Tracks** | Create audio, instrument and MIDI tracks; rename, duplicate, delete, reorder, recolour and select multiple tracks. |
 | **Arrangement** | Navigate by bar, move the cursor, adjust zoom and use the grid and snapping. Move regions in time or between compatible tracks, and create empty MIDI regions. |
 | **Musical settings** | Change tempo, time signature and key; define and edit the project's cycle range. |
-| **Mixer** | Adjust volume, pan, mute and solo per track. These settings are saved in the project; they do not process audio yet. |
+| **Audio engine** | Choose the audio system, output, sample rate and buffer size in **Settings › Audio** (remembered per device); play a test tone; see real output/input levels, latency and stream health (xruns, dropouts, clipping). Play/stop with the control bar or Space: the transport and playhead run on the engine's sample clock. Missing or unplugged devices fall back safely without touching the project. |
+| **Mixer** | Adjust volume, pan, mute and solo per track. These settings are saved in the project; tracks are not rendered yet. The output strip shows real device output levels. |
 | **Piano roll** | Inspect a MIDI region's notes and their timing. This is a read-only preview. |
 | **File library** | Browse folders and open `.elyvon` projects from the left sidebar. |
 | **Workspace** | Show, hide and resize the library, inspector and editors; switch between mixer and piano roll. |
@@ -34,13 +35,14 @@ A desktop digital audio workstation in development, built with **Rust, Tauri 2, 
 
 ### Still to come
 
-- Audio playback, recording and device selection.
+- Rendering tracks and regions through the audio engine; recording.
+- Hardware validation of audio devices on each platform; JACK/native PipeWire and ASIO.
 - Audio file import and editing; export and bounce.
 - MIDI input/output and piano-roll note editing.
 - Built-in instruments, sampler, effects, buses and plug-in hosting.
 - Loop library with audio previews.
 
-Playback and recording controls remain disabled when the engine is unavailable. Effect slots are visual placeholders without processing. Meters animate only when you explicitly enable **Simulate meters**.
+Playback controls are enabled only while an audio stream is running; recording stays disabled. Effect slots are visual placeholders without processing. Track meters animate only when you explicitly enable **Simulate meters**; the output meter is real.
 
 The repository includes update infrastructure with version, platform and signature validation. The current unsigned preview **does not enable automatic updates**. See [releases and signing](docs/RELEASES.md) for configuration details.
 
@@ -51,6 +53,14 @@ The repository includes update infrastructure with version, platform and signatu
 The library sits on the left, with the selected track's properties and project controls beside the arrangement.
 
 ![File library and inspector open beside the selected Keys track and arrangement](docs/screenshots/02-library-inspector.png)
+
+### Audio engine
+
+The real desktop binary playing on the headless clock (used by CI, no sound output) with the test tone; the output strip reads −18.0 dBFS and the playhead follows the engine. Captured by the native end-to-end tests.
+
+![Demo session playing on the native engine with the output meter at -18 dBFS](docs/screenshots/04-engine-headless-playing.png)
+
+![Settings › Audio with the open stream, format, buffer and device selection](docs/screenshots/05-settings-audio.png)
 
 ### Piano-roll preview
 
@@ -101,6 +111,7 @@ Windows installer builds do not establish installation or audio-device support o
 3. Select and arrange regions. Double-click an empty area on an instrument or MIDI track to create a MIDI region.
 4. Adjust volume, pan, mute and solo in the mixer. Select a MIDI region and open **Piano Roll** to inspect its notes.
 5. Save your project as an `.elyvon` file.
+6. Open **Settings › Audio** (or click the engine indicator at the top right) to pick your output and try **Play test tone** — turn your speakers down first. Press Space to play/stop.
 
 ### Main Windows shortcuts
 
@@ -113,6 +124,7 @@ Windows installer builds do not establish installation or audio-device support o
 | Delete selection | `Delete` |
 | Inspector / library / editors | `I` / `B` / `E` |
 | Mixer | `X` |
+| Play / stop | `Space` |
 | Toggle the cycle range | `L` |
 | Move the cursor to the start | `Home` |
 
@@ -123,7 +135,7 @@ The full list is available in **Settings → Shortcuts**.
 ### Requirements
 
 - **Node.js 22.12 or newer** and npm.
-- **Stable Rust 1.88 or newer**.
+- **Stable Rust 1.90 or newer**.
 - On Windows: Microsoft C++ build tools and WebView2, following [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/).
 - Native dependencies for other development environments are described in [CONTRIBUTING](CONTRIBUTING.md).
 

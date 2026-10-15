@@ -1,6 +1,6 @@
 [package]
 name = "elyvon-audio"
-description = "Contracts and real-time-safe primitives for the future Elyvon Studio audio engine (no engine yet)."
+description = "Driver-free, real-time-safe Elyvon Studio audio engine core, contracts and headless renderer."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 serde.workspace = true
 ts-rs.workspace = true
+rtrb.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

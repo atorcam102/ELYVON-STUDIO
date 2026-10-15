@@ -29,12 +29,15 @@
 │ state.rs   AppState { session, settings, updater, paths }                    │
 └──────▲─────────────────────▲────────────────────────▲────────────────────────┘
        │                     │                        │
-┌──────┴───────┐   ┌─────────┴──────────┐   ┌─────────┴──────────┐   ┌──────────────┐
-│ elyvon-core  │◄──│  elyvon-project    │   │  elyvon-update     │   │ elyvon-audio │
-│ tiempo, color│   │ modelo, formato,   │   │ SemVer, plataformas│   │ contratos RT │
-│ E/S atómica  │   │ ediciones, undo,   │   │ manifiesto, CLI    │   │ (sin motor)  │
-└──────────────┘   │ recuperación, demo │   └────────────────────┘   └──────────────┘
-                   └────────────────────┘
+┌──────┴───────┐   ┌─────────┴──────────┐   ┌─────────┴──────────┐   ┌─────────────────────┐
+│ elyvon-core  │◄──│  elyvon-project    │   │  elyvon-update     │   │ elyvon-audio-device │
+│ tiempo, color│   │ modelo, formato,   │   │ SemVer, plataformas│   │ CPAL, headless,     │
+│ E/S atómica  │   │ ediciones, undo,   │   │ manifiesto, CLI    │   │ gestor de streams   │
+└──────────────┘   │ recuperación, demo │   └────────────────────┘   └──────────┬──────────┘
+                   └────────────────────┘                            ┌──────────┴──────────┐
+                                                                     │ elyvon-audio        │
+                                                                     │ núcleo RT sin driver│
+                                                                     └─────────────────────┘
 ```
 
 ### Crates
@@ -43,7 +46,8 @@
 | --- | --- | --- |
 | `elyvon-core` | Tiempo musical exacto en ticks (PPQ 960), tempo/compás/tonalidad validados, colores `#RRGGBB`, escritura atómica y lectura con límite de tamaño | Sí (color, E/S) |
 | `elyvon-project` | `Project`/`Track`/`Region`, validación semántica, formato `.elyvon` con migraciones, `EditCommand` atómicos, historial por instantáneas, `ProjectSession` (dirty/undo/redo/guardado en dos fases), recuperación, sesión demo | No (específico de Studio) |
-| `elyvon-audio` | `EngineStatus`, `AudioConfig`, trait `AudioProcessor` (prepare/process/reset), `AtomicF32`, leyes de ganancia y panorama | Parcial |
+| `elyvon-audio` | Núcleo del motor sin driver (Fase 03): `EngineCore` (transporte, reloj de muestras, tono de prueba, medidores, conversión de formato), cola SPSC sin espera, telemetría atómica, renderizador offline determinista, `EngineStatus`; contratos de grafo/MIDI, `AudioProcessor`, `AtomicF32`, leyes de ganancia y panorama | Sí |
+| `elyvon-audio-device` | Backend CPAL (WASAPI/CoreAudio/ALSA), reloj headless explícito, `AudioManager` (apertura, fallback, hot-unplug, reconexión, estadísticas), preferencias por dispositivo; ejemplo `audio-probe` | Sí |
 | `elyvon-update` | Decisión SemVer, matriz OS/arquitectura/instalador, nombres de artefactos, validación estricta de `latest.json`, verificación minisign, CLI `elyvon-release` | Sí (cada app se actualiza por separado) |
 | `src-tauri` | Proceso de escritorio: comandos, menús, ventana, logs, ajustes, cierre seguro, actualizador | No |
 
@@ -79,11 +83,13 @@ se confirman una sola vez al soltar: un paso de deshacer por gesto.
   fases (`begin_save` bajo el mutex → escritura sin el mutex → `complete_save`),
   así una escritura lenta no bloquea otras órdenes. Las ediciones hechas durante
   el guardado mantienen el proyecto como modificado.
-- **Futuro hilo de audio:** tendrá prioridad de tiempo real, recibirá
-  parámetros mediante atómicos (`AtomicF32`) y colas lock-free preasignadas, y
-  nunca tomará el mutex de la sesión. El grafo se construirá en un hilo de
-  control y se publicará al hilo de audio con intercambio atómico. La carga de
-  archivos y el streaming de disco irán en hilos de trabajo separados.
+- **Hilo de audio (Fase 03):** el callback del backend (CPAL con prioridad
+  de tiempo real cuando el sistema la concede) ejecuta solo `EngineCore`:
+  sin asignaciones, bloqueos, E/S ni logs. Recibe órdenes por una cola SPSC
+  sin espera y publica telemetría con atómicos; nunca toma el mutex de la
+  sesión. Un hilo gestor propio abre/cierra streams, reacciona a fallos y
+  registra estadísticas. Detalle en [AUDIO_ENGINE.md](AUDIO_ENGINE.md). El
+  grafo, la carga de archivos y el streaming de disco siguen pendientes.
 - **Timeline:** un único contenedor de scroll nativo; regla y cabeceras
   `position: sticky`; cuadrícula dibujada con fondos CSS teselados (sin DOM por
   línea); solo se renderizan las regiones visibles; las notas MIDI de cada

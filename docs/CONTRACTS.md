@@ -1,8 +1,10 @@
 # Technical contracts — version 1
 
-These boundaries describe current model behaviour and explicitly future interfaces. They do not
-provide audio/MIDI/job capabilities. `app_contracts` (read-only Tauri IPC) returns
-`{ ipc: 1, project: 1, audio: 1, jobs: 1 }`; the typed client is `ipc.app.contracts()`.
+These boundaries describe current model behaviour and explicitly future interfaces. MIDI, graph
+and job contracts still have no runtime. `app_contracts` (read-only Tauri IPC) returns
+`{ ipc: 2, project: 1, audio: 1, jobs: 1 }`; the typed client is `ipc.app.contracts()`.
+IPC became **2** in Phase 03 because `audio_status` now returns the new `EngineStatus` shape;
+the graph/MIDI `audio` contract is unchanged at 1.
 Breaking a wire contract requires a version bump, fixtures and migration/negotiation decisions.
 Application SemVer, project schema and control-contract versions are independent.
 
@@ -15,6 +17,7 @@ Application SemVer, project schema and control-contract versions are independent
 | Graph | AudioGraphPlan, GraphNode, GraphConnection | u32 node ids, u16 zero-based channels; explicit contractVersion | Not part of project schema; graph-v1.json; no executor |
 | Background work | core/jobs.rs: JobSnapshot, JobState | Process-scoped opaque id; completed/total u32 work units, None = unknown | Not persisted; jobs-v1.json. DownloadEvent remains the implemented updater progress contract |
 | UI presentation | src/state/uiContract.ts: UiPresentationV1, Selection | UI_CONTRACT_VERSION=1; cursorTicks is an editing cursor, not playback | Only Layout persisted via Settings.schemaVersion=1; selection/zoom/dialogs ephemeral |
+| Audio engine (Phase 03) | audio/status.rs EngineStatus, StreamInfo; telemetry.rs TelemetrySnapshot; command.rs TestTone; device types.rs DeviceList, AudioSetup, AudioPreferences | Frames at the stream rate; `positionTicks` converted in Rust from the project tempo; `revision` increases per status change | Status pushed as `audio://status`; preferences in settings.json `audio` (additive, schema 1 kept); never in project files |
 | Errors | src-tauri/error.rs: IpcError/ErrorCode | Stable codes, human-readable message | Existing real native commands; contract validators return static Rust errors, not pretend worker events |
 
 ## Validation and RT boundary
@@ -38,6 +41,22 @@ queues, atomics, and off-thread reclamation; AtomicF32 alone does not implement 
 Jobs do not claim success from `completed == total`; only Completed signals completion.
 Cancelled is a worker acknowledgement, not proof that a cancellation request was received.
 `Unavailable` must be shown as such. No scheduler, IPC job submission API or worker exists.
+
+## Audio engine IPC (version 2)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `audio_status` | `EngineStatus` | `state`: disabled, starting, running, noDevice, deviceLost, error; `message` is actionable whenever not running |
+| `audio_devices` | `DeviceList` | Scanned on the manager thread; host errors are listed, never fatal |
+| `audio_configure({ setup })` | `EngineStatus` | Persists `settings.audio` (per-device profile) then reopens streams |
+| `audio_reconnect` | `EngineStatus` | Reopens the saved configuration ("Use preferred device", "Retry") |
+| `audio_telemetry` | `TelemetrySnapshot` | Clears held peaks; dBFS with −96 = silence |
+| `audio_play({ fromTicks })`, `audio_stop`, `audio_locate({ ticks })` | `null` | `audioUnavailable` with the engine's message when not running |
+| `audio_test_tone({ tone })` | `TestTone` | Returns the sanitised tone (≤ −6 dBFS, below Nyquist) |
+
+Engine commands reach the audio thread through a wait-free queue; nothing in this contract
+reads or writes project data. `settings_set` keeps the stored `audio` value regardless of the
+payload, so a stale UI copy cannot overwrite the device choice.
 
 ## Compatibility and fixtures
 

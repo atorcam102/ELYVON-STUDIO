@@ -1,33 +1,9 @@
-//! Engine-facing contracts.
+//! Processor contracts for the future audio graph.
+//!
+//! The running engine core lives in [`crate::render`]; its status in [`crate::status`].
 
 use serde::Serialize;
 use ts_rs::TS;
-
-/// What the audio engine can currently do, as reported to the UI.
-///
-/// Phase 1 always reports [`EngineStatus::Unavailable`]; the UI uses this to
-/// disable transport and recording controls instead of pretending they work.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(
-    tag = "state",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-#[ts(export)]
-pub enum EngineStatus {
-    Unavailable { reason: String },
-    Running { config: AudioConfig },
-}
-
-impl EngineStatus {
-    pub fn current() -> Self {
-        Self::Unavailable {
-            reason: "The audio engine is not part of this build yet (not implemented). \
-                     Playback, recording and metering are disabled."
-                .into(),
-        }
-    }
-}
 
 /// Stream configuration negotiated with an audio device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]

@@ -20,6 +20,7 @@ tauri-build = { version = "2.7", features = [] }
 elyvon-core.workspace = true
 elyvon-project.workspace = true
 elyvon-audio.workspace = true
+elyvon-audio-device.workspace = true
 elyvon-update.workspace = true
 
 tauri = { version = "2.12", features = [] }

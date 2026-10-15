@@ -7,6 +7,12 @@ Screenshots of the main frontend at commit [`fbc4566`](https://github.com/atorca
 | `01-arrangement-mixer.png` | Demo-session arrangement and mixer. |
 | `02-library-inspector.png` | Library and inspector with Keys selected. |
 | `03-piano-roll.png` | Read-only preview of the notes in Chords. |
+| `04-engine-headless-playing.png` | Phase 03: real desktop binary playing the demo on the headless clock with the test tone; output strip reads −18.0 dBFS. |
+| `05-settings-audio.png` | Phase 03: Settings › Audio showing the open stream and device selection. |
+
+Images 04–05 are WebDriver screenshots of the real native binary (WebKitWebDriver, Xvfb
+1280 × 800) taken by `e2e/app.e2e.mjs`, not mock captures. The headless clock produces no sound;
+they do not demonstrate audible output on hardware.
 
 ## Capture method
 

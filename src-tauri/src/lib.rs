@@ -17,6 +17,9 @@ use std::sync::atomic::Ordering;
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
+use elyvon_audio_device::SystemBackend;
+use elyvon_audio_device::manager::{AudioManager, ManagerOptions};
+
 use crate::settings::Settings;
 use crate::state::{AppPaths, AppState};
 
@@ -92,7 +95,20 @@ pub fn run() {
                 std::env::consts::ARCH
             );
             let settings = Settings::load(&paths.config_dir);
-            app.manage(AppState::new(paths, settings));
+            // The device manager opens the audio device on its own thread, so
+            // a slow or missing device never delays the window.
+            let handle = app.handle().clone();
+            let audio = AudioManager::start(
+                Box::new(SystemBackend::default()),
+                settings.audio.clone(),
+                ManagerOptions::default(),
+                Some(Box::new(move |status| {
+                    if let Err(e) = handle.emit(commands::audio::AUDIO_STATUS_EVENT, status) {
+                        log::warn!("could not forward audio status: {e}");
+                    }
+                })),
+            );
+            app.manage(AppState::new(paths, settings, Some(audio)));
             app.set_menu(menu::build(app.handle())?)?;
             Ok(())
         })
@@ -135,7 +151,15 @@ pub fn run() {
             commands::browser::browser_places,
             commands::system::app_info,
             commands::system::app_contracts,
-            commands::system::audio_status,
+            commands::audio::audio_status,
+            commands::audio::audio_devices,
+            commands::audio::audio_configure,
+            commands::audio::audio_reconnect,
+            commands::audio::audio_telemetry,
+            commands::audio::audio_play,
+            commands::audio::audio_stop,
+            commands::audio::audio_locate,
+            commands::audio::audio_test_tone,
             commands::system::settings_get,
             commands::system::settings_set,
             commands::system::app_quit,
@@ -156,14 +180,13 @@ pub fn run() {
         }
     };
 
-    app.run(|app, event| {
+    app.run(|app, event| match event {
         // Dock "Quit", logout, Cmd+Q from the system: same unsaved-changes guard.
-        if let RunEvent::ExitRequested {
+        RunEvent::ExitRequested {
             code: None, api, ..
-        } = event
-            && request_close(app)
-        {
-            api.prevent_exit();
-        }
+        } if request_close(app) => api.prevent_exit(),
+        // Close the audio streams cleanly before the process ends.
+        RunEvent::Exit => app.state::<AppState>().shutdown_audio(),
+        _ => {}
     });
 }

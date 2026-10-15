@@ -1,0 +1,164 @@
+{
+  "arch": "x86_64",
+  "os": "linux",
+  "samples": [
+    {
+      "clockFrames": 49152,
+      "inputPeakDb": [],
+      "outputPeakDb": [
+        -18.0,
+        -18.0
+      ],
+      "playing": true,
+      "positionTicks": null,
+      "sampleRate": 48000,
+      "stats": {
+        "backendXruns": 0,
+        "callbacks": 192,
+        "clippedSamples": 0,
+        "inputCallbacks": 0,
+        "lastBlockFrames": 256,
+        "lateCallbacks": 0,
+        "maxBlockFrames": 256,
+        "maxCallbackLoad": 0.24699999392032623,
+        "measuredOutputLatencyMs": null,
+        "realtimeDenied": false,
+        "streamErrors": 0,
+        "timingGaps": 0
+      },
+      "toneActive": true,
+      "transportFrames": 48128
+    },
+    {
+      "clockFrames": 97024,
+      "inputPeakDb": [],
+      "outputPeakDb": [
+        -18.0,
+        -18.0
+      ],
+      "playing": true,
+      "positionTicks": null,
+      "sampleRate": 48000,
+      "stats": {
+        "backendXruns": 0,
+        "callbacks": 379,
+        "clippedSamples": 0,
+        "inputCallbacks": 0,
+        "lastBlockFrames": 256,
+        "lateCallbacks": 0,
+        "maxBlockFrames": 256,
+        "maxCallbackLoad": 0.24699999392032623,
+        "measuredOutputLatencyMs": null,
+        "realtimeDenied": false,
+        "streamErrors": 0,
+        "timingGaps": 0
+      },
+      "toneActive": true,
+      "transportFrames": 96000
+    },
+    {
+      "clockFrames": 145152,
+      "inputPeakDb": [],
+      "outputPeakDb": [
+        -18.0,
+        -18.0
+      ],
+      "playing": true,
+      "positionTicks": null,
+      "sampleRate": 48000,
+      "stats": {
+        "backendXruns": 0,
+        "callbacks": 567,
+        "clippedSamples": 0,
+        "inputCallbacks": 0,
+        "lastBlockFrames": 256,
+        "lateCallbacks": 0,
+        "maxBlockFrames": 256,
+        "maxCallbackLoad": 0.24699999392032623,
+        "measuredOutputLatencyMs": null,
+        "realtimeDenied": false,
+        "streamErrors": 0,
+        "timingGaps": 0
+      },
+      "toneActive": true,
+      "transportFrames": 144128
+    },
+    {
+      "clockFrames": 193024,
+      "inputPeakDb": [],
+      "outputPeakDb": [
+        -18.0,
+        -18.0
+      ],
+      "playing": true,
+      "positionTicks": null,
+      "sampleRate": 48000,
+      "stats": {
+        "backendXruns": 0,
+        "callbacks": 754,
+        "clippedSamples": 0,
+        "inputCallbacks": 0,
+        "lastBlockFrames": 256,
+        "lateCallbacks": 0,
+        "maxBlockFrames": 256,
+        "maxCallbackLoad": 0.24699999392032623,
+        "measuredOutputLatencyMs": null,
+        "realtimeDenied": false,
+        "streamErrors": 0,
+        "timingGaps": 0
+      },
+      "toneActive": true,
+      "transportFrames": 192000
+    },
+    {
+      "clockFrames": 239872,
+      "inputPeakDb": [],
+      "outputPeakDb": [
+        -18.0,
+        -18.0
+      ],
+      "playing": true,
+      "positionTicks": null,
+      "sampleRate": 48000,
+      "stats": {
+        "backendXruns": 0,
+        "callbacks": 937,
+        "clippedSamples": 0,
+        "inputCallbacks": 0,
+        "lastBlockFrames": 256,
+        "lateCallbacks": 0,
+        "maxBlockFrames": 256,
+        "maxCallbackLoad": 0.24699999392032623,
+        "measuredOutputLatencyMs": null,
+        "realtimeDenied": false,
+        "streamErrors": 0,
+        "timingGaps": 1
+      },
+      "toneActive": true,
+      "transportFrames": 238848
+    }
+  ],
+  "status": {
+    "errorCode": null,
+    "input": null,
+    "message": null,
+    "notices": [],
+    "output": {
+      "bitsPerSample": 32,
+      "bufferLayout": "interleaved",
+      "channels": 2,
+      "deviceId": "headless:clock",
+      "deviceName": "Headless clock (no audio output)",
+      "headless": true,
+      "host": "Headless",
+      "layout": "stereo",
+      "nominalLatencyMs": 5.333333492279053,
+      "reportedBufferFrames": 256,
+      "requestedBufferFrames": 256,
+      "sampleFormat": "f32",
+      "sampleRate": 48000
+    },
+    "revision": 1,
+    "state": "running"
+  }
+}

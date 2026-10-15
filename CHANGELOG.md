@@ -7,6 +7,19 @@ section of each version into the GitHub release and into the update dialog.
 
 ## [Unreleased]
 
+### Added
+
+- Native audio engine (Phase 03): real-time-safe engine core with transport, monotonic sample clock, silence rendering, opt-in test tone and real peak meters.
+- Audio devices through WASAPI (Windows), CoreAudio (macOS) and ALSA (Linux, reaching PipeWire/PulseAudio): device list with channels, sample rates, buffer sizes, formats and bit depth; per-device sample rate and buffer preferences.
+- Settings › Audio with stream details, test tone, input/output level meters and stream health (xruns, probable dropouts, late callbacks, clipping, load).
+- Play/stop from the control bar and the Space key; the playhead follows the engine. Tracks are not rendered yet.
+- Safe fallback when the preferred device is missing, automatic recovery after unplugging, and an explicit headless clock for machines without audio hardware.
+- Real output meters in the mixer.
+
+### Fixed
+
+- The declared minimum Rust version was 1.88, but the locked Tauri 2.12 crates need 1.90; it is now 1.90 and checked in CI.
+
 ## [0.1.0] - 2026-10-15
 
 First foundation release of Elyvon Studio. There is no audio engine yet:

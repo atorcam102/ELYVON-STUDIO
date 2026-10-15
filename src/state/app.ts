@@ -1,18 +1,17 @@
-// Application-level data loaded from the native side: preferences, build
-// information and audio engine status.
+// Application-level data loaded from the native side: preferences and build
+// information. Audio engine state lives in ./audio.ts.
 
 import { create } from "zustand";
 import type { AppInfo } from "../bindings/AppInfo";
-import type { EngineStatus } from "../bindings/EngineStatus";
 import type { Settings } from "../bindings/Settings";
 import { ipc } from "../lib/ipc";
+import { useAudio } from "./audio";
 import { notifyError } from "./notifications";
 import { useUi } from "./ui";
 
 interface AppState {
   settings: Settings | null;
   info: AppInfo | null;
-  engine: EngineStatus | null;
   load: () => Promise<void>;
   /** Updates preferences locally and persists them (debounced). */
   updateSettings: (patch: (s: Settings) => Settings) => void;
@@ -30,10 +29,9 @@ function persist(settings: Settings) {
 export const useApp = create<AppState>((set, get) => ({
   settings: null,
   info: null,
-  engine: null,
   load: async () => {
-    const [settings, info, engine] = await Promise.all([ipc.settings.get(), ipc.app.info(), ipc.app.audioStatus()]);
-    set({ settings, info, engine });
+    const [settings, info] = await Promise.all([ipc.settings.get(), ipc.app.info(), useAudio.getState().load()]);
+    set({ settings, info });
     useUi.getState().replaceLayout(settings.layout);
   },
   updateSettings: (patch) => {
@@ -52,7 +50,3 @@ useUi.subscribe((state, prev) => {
     useApp.getState().updateSettings((s) => ({ ...s, layout: state.layout }));
   }
 });
-
-export function engineAvailable(engine: EngineStatus | null): boolean {
-  return engine?.state === "running";
-}

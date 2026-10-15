@@ -3,6 +3,10 @@
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { ApplyResult } from "../bindings/ApplyResult";
+import type { AudioSetup } from "../bindings/AudioSetup";
+import type { DeviceList } from "../bindings/DeviceList";
+import type { TelemetrySnapshot } from "../bindings/TelemetrySnapshot";
+import type { TestTone } from "../bindings/TestTone";
 import type { ContractVersions } from "../bindings/ContractVersions";
 import type { AppInfo } from "../bindings/AppInfo";
 import type { DirListing } from "../bindings/DirListing";
@@ -65,9 +69,19 @@ export const ipc = {
   app: {
     info: () => call<AppInfo>("app_info"),
     contracts: () => call<ContractVersions>("app_contracts"),
-    audioStatus: () => call<EngineStatus>("audio_status"),
     quit: (discardChanges = false) => call<void>("app_quit", { discardChanges }),
     restart: () => call<void>("app_restart"),
+  },
+  audio: {
+    status: () => call<EngineStatus>("audio_status"),
+    devices: () => call<DeviceList>("audio_devices"),
+    configure: (setup: AudioSetup) => call<EngineStatus>("audio_configure", { setup }),
+    reconnect: () => call<EngineStatus>("audio_reconnect"),
+    telemetry: () => call<TelemetrySnapshot>("audio_telemetry"),
+    play: (fromTicks?: number) => call<void>("audio_play", { fromTicks: fromTicks ?? null }),
+    stop: () => call<void>("audio_stop"),
+    locate: (ticks: number) => call<void>("audio_locate", { ticks }),
+    testTone: (tone: TestTone) => call<TestTone>("audio_test_tone", { tone }),
   },
   settings: {
     get: () => call<Settings>("settings_get"),

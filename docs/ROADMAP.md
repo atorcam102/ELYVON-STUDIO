@@ -17,11 +17,18 @@ boundaries, compatibility fixtures, shared quality commands, dependency/licence 
 measurement runner. No audio engine or new production UI functionality is claimed. Hardware,
 production-key upgrade, complete packaged notices and release-mode performance work remain pending.
 
-## Next functional phase — Native audio backend and transport
+## Phase 03 — Native audio engine and devices (partial)
 
-Device negotiation, sample-clock transport, preallocated RT graph/queues and real meters; then
-media decoding/import, streaming and recording with latency compensation. Require device tests,
-callback allocation/locking checks and measured deadlines before enabling playback/recording UI.
+Driver-free RT engine core, CPAL device layer (WASAPI/CoreAudio/ALSA), headless clock, device
+manager with fallback/hot-unplug/reconnection, per-device preferences, transport + sample clock,
+opt-in test tone, real output/input meters and xrun statistics. See [AUDIO_ENGINE](AUDIO_ENGINE.md).
+Pending: physical-device validation on every target, Ubuntu ARM64 build, JACK/native PipeWire,
+ASIO (licence), WASAPI exclusive mode.
+
+## Next functional phase — Audio graph, media and recording
+
+Preallocated RT graph with atomic swap rendering tracks/regions, media decoding/import,
+streaming and recording with latency compensation. Keep the Phase 03 allocation/deadline checks.
 
 ## Later — MIDI, instruments and editing
 

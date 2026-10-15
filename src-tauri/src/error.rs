@@ -27,6 +27,8 @@ pub enum ErrorCode {
     UpdateRejected,
     Cancelled,
     Busy,
+    /// The audio engine is not running or did not respond (message explains why).
+    AudioUnavailable,
     Internal,
 }
 
@@ -89,6 +91,12 @@ impl From<ProjectError> for IpcError {
 impl From<EditError> for IpcError {
     fn from(e: EditError) -> Self {
         Self::new(ErrorCode::InvalidEdit, e.to_string())
+    }
+}
+
+impl From<elyvon_audio_device::manager::ControlError> for IpcError {
+    fn from(e: elyvon_audio_device::manager::ControlError) -> Self {
+        Self::new(ErrorCode::AudioUnavailable, e.to_string())
     }
 }
 

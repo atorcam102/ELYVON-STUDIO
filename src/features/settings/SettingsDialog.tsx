@@ -7,6 +7,7 @@ import { useApp } from "../../state/app";
 import { useUi, type SettingsSection } from "../../state/ui";
 import { useUpdates } from "../../state/updates";
 import { openProject } from "../project/projectActions";
+import { AudioSettings } from "./AudioSettings";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "general", label: "General" },
@@ -111,22 +112,6 @@ function Updates() {
   );
 }
 
-function Audio() {
-  const engine = useApp((s) => s.engine);
-  return (
-    <div className="settings-page">
-      <div className="callout callout--info">
-        <Icon name="info" size={16} />
-        <p>{engine?.state === "unavailable" ? engine.reason : "Audio engine running."}</p>
-      </div>
-      <p className="muted">
-        Device selection, sample rate and buffer size will appear here with the audio engine. The engine will run on a dedicated real-time thread in
-        the native core, separate from the interface and from disk access.
-      </p>
-    </div>
-  );
-}
-
 const SHORTCUTS: [string, string][] = [
   ["New project", "Mod+N"],
   ["Open project", "Mod+O"],
@@ -141,6 +126,7 @@ const SHORTCUTS: [string, string][] = [
   ["Duplicate tracks", "Mod+D"],
   ["Delete selection", "Delete"],
   ["Zoom in / out", "Mod+= / Mod+-"],
+  ["Play / stop", "Space"],
   ["Toggle loop", "L"],
   ["Cursor to start", "Home"],
   ["Toggle inspector / browser / editors", "I / B / E"],
@@ -185,7 +171,7 @@ export function SettingsDialog() {
         <div className="settings__content">
           {section === "general" && <General />}
           {section === "updates" && <Updates />}
-          {section === "audio" && <Audio />}
+          {section === "audio" && <AudioSettings />}
           {section === "shortcuts" && <Shortcuts />}
         </div>
       </div>

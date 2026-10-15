@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
+use elyvon_audio_device::types::AudioPreferences;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -23,6 +24,10 @@ pub struct Settings {
     pub recent_projects: Vec<String>,
     pub layout: Layout,
     pub browser_dir: Option<String>,
+    /// Audio device preferences. Added in Phase 03 with defaults, so schema-1
+    /// settings files from earlier builds load unchanged. Changed only through
+    /// the `audio_configure` command (see `settings_set`).
+    pub audio: AudioPreferences,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -57,6 +62,7 @@ impl Default for Settings {
             recent_projects: Vec::new(),
             layout: Layout::default(),
             browser_dir: None,
+            audio: AudioPreferences::default(),
         }
     }
 }
@@ -111,6 +117,7 @@ impl Settings {
         self.recent_projects.retain(|p| !p.is_empty());
         self.recent_projects.dedup();
         self.recent_projects.truncate(MAX_RECENT);
+        self.audio = self.audio.sanitized();
         self
     }
 
@@ -194,6 +201,22 @@ mod tests {
         let s = Settings::load(dir.path());
         assert!(!s.updates.check_on_startup);
         assert_eq!(s.layout, Layout::default());
+    }
+
+    #[test]
+    fn phase_1_settings_without_audio_keep_their_values_and_get_audio_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(SETTINGS_FILE),
+            r#"{"schemaVersion":1,"updates":{"checkOnStartup":false},"recentProjects":["/a.elyvon"],"layout":{"bottomTab":"pianoRoll"},"browserDir":"/music"}"#,
+        )
+        .unwrap();
+        let s = Settings::load(dir.path());
+        assert!(!s.updates.check_on_startup);
+        assert_eq!(s.recent_projects, ["/a.elyvon"]);
+        assert_eq!(s.layout.bottom_tab, "pianoRoll");
+        assert_eq!(s.browser_dir.as_deref(), Some("/music"));
+        assert_eq!(s.audio, AudioPreferences::default());
     }
 
     #[test]

@@ -43,6 +43,14 @@ impl Tempo {
     pub fn ticks_to_seconds(self, ticks: Ticks) -> f64 {
         ticks as f64 / f64::from(PPQ) * 60.0 / self.0
     }
+
+    /// Inverse of [`Self::ticks_to_seconds`], rounded down and clamped at 0.
+    pub fn seconds_to_ticks(self, seconds: f64) -> Ticks {
+        if !seconds.is_finite() || seconds <= 0.0 {
+            return 0;
+        }
+        (seconds * self.0 / 60.0 * f64::from(PPQ)).floor() as Ticks
+    }
 }
 
 /// A time signature such as 4/4, 6/8 or 7/16.
@@ -210,6 +218,10 @@ mod tests {
     fn tempo_converts_ticks_to_seconds() {
         let t = Tempo::new(120.0).unwrap();
         assert!((t.ticks_to_seconds(Ticks::from(PPQ)) - 0.5).abs() < 1e-12);
+        assert_eq!(t.seconds_to_ticks(0.5), Ticks::from(PPQ));
+        assert_eq!(t.seconds_to_ticks(t.ticks_to_seconds(12_345)), 12_345);
+        assert_eq!(t.seconds_to_ticks(-1.0), 0);
+        assert_eq!(t.seconds_to_ticks(f64::NAN), 0);
     }
 
     #[test]

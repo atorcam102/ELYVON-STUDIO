@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Merged into the app bundle by Tauri. macOS terminates an app that opens
+       an audio input without this explanation. Untested on macOS hardware. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Elyvon Studio shows input levels from the audio input you select in Settings › Audio.</string>
+</dict>
+</plist>

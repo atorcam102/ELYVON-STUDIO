@@ -4,9 +4,9 @@
 
 | Herramienta | Versión |
 | --- | --- |
-| Rust | estable ≥ 1.88 (`rustup`) |
+| Rust | estable ≥ 1.90 (`rustup`) |
 | Node.js | ≥ 22.12 |
-| Linux | `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev patchelf` |
+| Linux | `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev libasound2-dev patchelf` |
 | macOS | Xcode Command Line Tools |
 | Windows | Visual Studio Build Tools (C++), WebView2 (incluido en Windows 10/11) |
 

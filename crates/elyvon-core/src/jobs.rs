@@ -74,4 +74,5 @@ pub struct ContractVersions {
     pub jobs: u32,
 }
 
-pub const IPC_CONTRACT_VERSION: u32 = 1;
+/// 2: `audio_status` returns the Phase 03 `EngineStatus`; audio commands added.
+pub const IPC_CONTRACT_VERSION: u32 = 2;
