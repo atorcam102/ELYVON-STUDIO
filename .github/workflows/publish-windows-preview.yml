@@ -110,20 +110,34 @@ jobs:
 
           NOTES
           if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
-            echo 'The existing preview release is preserved; verify its assets below.'
+            echo 'The existing release entry is preserved.'
           else
-            gh release create "$RELEASE_TAG" --target "$SOURCE_COMMIT" --prerelease \
+            gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease \
               --title "Elyvon Studio 0.1.0 — Windows x64 / x86 preview 2" \
-              --notes-file release-notes.md release/*
+              --notes-file release-notes.md
           fi
-      - name: Verify published files match the source installers
+      - name: Attach missing installers and checksums
+        run: |
+          gh release view "$RELEASE_TAG" --json assets > attached-assets.json
+          python3 - <<'PYUPLOAD'
+          import json
+          from pathlib import Path
+          existing = {asset['name'] for asset in json.load(open('attached-assets.json'))['assets']}
+          files = sorted(p for p in Path('release').iterdir() if p.is_file())
+          assert existing <= {p.name for p in files}, 'Unexpected existing release asset'
+          Path('missing-assets.txt').write_text(''.join(f'{p}\n' for p in files if p.name not in existing))
+          PYUPLOAD
+          while IFS= read -r file; do
+            gh release upload "$RELEASE_TAG" "$file"
+          done < missing-assets.txt
+      - name: Verify attached files match the source installers
         run: |
           gh release view "$RELEASE_TAG" --json url,isDraft,isPrerelease,assets > published-release.json
           python3 - <<'PY'
           import json
           from pathlib import Path
           release = json.load(open('published-release.json'))
-          assert not release['isDraft'] and release['isPrerelease']
+          assert release['isPrerelease']
           expected = {p.name: p.stat().st_size for p in Path('release').iterdir() if p.is_file()}
           actual = {asset['name']: asset['size'] for asset in release['assets']}
           assert actual == expected, f'Published assets differ: {actual}'
@@ -133,4 +147,15 @@ jobs:
           cmp release/SHA256SUMS.txt verify-download/SHA256SUMS.txt
           cd verify-download
           sha256sum --check SHA256SUMS.txt
-          echo "Published $RELEASE_TAG from $SOURCE_COMMIT" >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the verified GitHub release
+        run: |
+          gh release edit "$RELEASE_TAG" --draft=false
+          gh release view "$RELEASE_TAG" --json url,isDraft,assets > final-release.json
+          python3 - <<'PYPUBLISH'
+          import json
+          release = json.load(open('final-release.json'))
+          assert not release['isDraft'], 'Release was not published'
+          assert len(release['assets']) == 5, 'Missing release attachments'
+          print(release['url'])
+          PYPUBLISH
+          echo "Published $RELEASE_TAG from $SOURCE_COMMIT with four Windows installers and SHA256SUMS.txt" >> "$GITHUB_STEP_SUMMARY"
