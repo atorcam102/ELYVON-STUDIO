@@ -14,7 +14,7 @@ A desktop digital audio workstation in development, built with **Rust, Tauri 2, 
 
 *Current interface on `main`: LCD transport, colour-coded tracks, MIDI regions and mixer. Demo waveforms are illustrations.*
 
-[Download for Windows](#download-for-windows) · [Current features](#current-features) · [More screenshots](#interface-screenshots) · [Development](#development)
+[Download for Windows](#download-for-windows) · [Current features](#current-features) · [More screenshots](#interface-screenshots) · [Builds from main](#builds-from-main) · [Development](#development)
 
 ## Current features
 
@@ -75,6 +75,21 @@ Current distribution focuses on **Windows x64 and x86**.
 
 The [current CI workflow](.github/workflows/ci.yml) produces EXE and MSI installers for Windows x64/x86. Configuration for other platforms remains in the repository; their distribution is outside the current scope.
 
+### Builds from main
+
+For installers containing the newer Phase 02 contracts and audit changes, open the latest successful [CI run on `main`](https://github.com/atorcam102/ELYVON-STUDIO/actions/workflows/ci.yml?query=branch%3Amain) and download the appropriate **Artifacts** archive:
+
+| Architecture | CI artifact | Contents |
+| --- | --- | --- |
+| Windows x64 · 64-bit | `ci-windows-x64` | Separate EXE and MSI installers for `x86_64-pc-windows-msvc` |
+| Windows x86 · 32-bit | `ci-windows-x86` | Separate EXE and MSI installers for `i686-pc-windows-msvc` |
+
+These verification builds are unsigned. CI artifacts expire after **3 days** and downloading them requires a GitHub login. The published preview linked above remains available in Releases and was built before Phase 02.
+
+Each CI run also checks the frontend, Rust workspace, generated TypeScript bindings, dependency licences/advisories and workflow syntax. The Linux test runner builds and exercises the real desktop binary, including saving a project, restarting the process and reopening it. `native-evidence` contains GUI screenshots and startup, idle-memory and timeline measurements; `audit-evidence` contains dependency reports. Both evidence archives are retained for 30 days.
+
+Windows installer builds do not establish installation or audio-device support on physical hardware. See the [support matrix](docs/STATUS.md#runners-and-platform-evidence).
+
 ## Getting started
 
 1. Open Elyvon Studio and create a project, or choose **Or explore the demo session** in the empty arrangement. You can also open the demo from the native **File** menu.
@@ -127,6 +142,17 @@ npm run tauri -- build --no-bundle # native application without installers
 
 Installer generation and publication are documented in [RELEASES](docs/RELEASES.md).
 
+### Phase 02 technical baseline
+
+- **Versioned contracts:** native `app_contracts` reports IPC, project, audio and job contract versions. Rust generates the shared TypeScript types; UI presentation state remains separate from the project model.
+- **Compatibility fixtures:** schema-1 `.elyvon` projects retain their tracks, regions, notes and media references across save, reopen and recovery. Frozen MIDI, graph and job fixtures check wire compatibility and reject invalid data.
+- **Future-engine boundaries:** MIDI events use callback-relative frame offsets; graph plans validate routing, channels and cycles; job snapshots describe progress and errors. These types have no MIDI backend, graph executor or job scheduler yet.
+- **Reproducible checks:** shared local/CI commands, `cargo-deny`, npm audit, licence/source inventories and `actionlint`. The GTK3 dependency's maintenance-only exception is documented as **B-01** in [STATUS](docs/STATUS.md).
+
+The [validated baseline CI](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38765992553) passed all six jobs, including both Windows installer builds and native GUI tests. The [validation report](docs/audit/VALIDATION.md) records commands, raw measurements, screenshots and their limitations. Measurements use a debug Linux build under Xvfb; they are not Windows or physical-hardware performance guarantees.
+
+Phase 02 remains **partial** while hardware validation, a production-key signed upgrade, complete packaged licence notices and an independent beta update channel are outstanding. The [feature matrix](docs/FEATURE_MATRIX.md) distinguishes implemented, partial, simulated and absent capabilities.
+
 ### Visual reference
 
 The `/reference.html` page, available through `npm run dev`, preserves Live Loops, step-sequencer and chord mockups for design comparisons. **These are reference views with static data**, not production features of the main application.
@@ -155,7 +181,6 @@ docs/screenshots/       Current frontend screenshots
 - [Architecture decisions](docs/ADR/README.md)
 - [Audit validation and measurements](docs/audit/VALIDATION.md)
 - [Third-party notices and outstanding licence work](THIRD_PARTY_NOTICES.md)
-
 - [Architecture](docs/ARCHITECTURE.md)
 - [`.elyvon` project format](docs/PROJECT_FORMAT.md)
 - [Releases, signing and updates](docs/RELEASES.md)
