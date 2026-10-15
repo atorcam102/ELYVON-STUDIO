@@ -177,7 +177,7 @@ impl EngineCore {
         self.apply_commands();
         let channels = self.channels;
         // 1. Silence: the engine always produces a defined signal.
-        for channel in self.scratch.chunks_exact_mut(MAX_BLOCK_FRAMES) {
+        for channel in self.scratch.as_chunks_mut::<MAX_BLOCK_FRAMES>().0 {
             channel[..frames].fill(0.0);
         }
         // 2. Opt-in test tone.
@@ -204,7 +204,13 @@ impl EngineCore {
             }
         }
         // 3. Meters (pre-clamp so overs are visible).
-        for (channel, samples) in self.scratch.chunks_exact(MAX_BLOCK_FRAMES).enumerate() {
+        for (channel, samples) in self
+            .scratch
+            .as_chunks::<MAX_BLOCK_FRAMES>()
+            .0
+            .iter()
+            .enumerate()
+        {
             let peak = samples[..frames].iter().fold(0.0f32, |peak, v| {
                 if v.is_nan() { 1.0 } else { peak.max(v.abs()) }
             });
@@ -244,7 +250,7 @@ impl EngineCore {
             let mut planar: [&[f32]; MAX_ENGINE_CHANNELS] = [&[]; MAX_ENGINE_CHANNELS];
             for (slot, channel) in planar
                 .iter_mut()
-                .zip(self.scratch.chunks_exact(MAX_BLOCK_FRAMES))
+                .zip(self.scratch.as_chunks::<MAX_BLOCK_FRAMES>().0)
             {
                 *slot = &channel[..frames];
             }
