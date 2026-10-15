@@ -1,0 +1,230 @@
+{
+  "schemaVersion": 1,
+  "timestamp": "2026-10-15T16:08:08.955Z",
+  "commit": "de4992ba8618a1a12d09e4f5e0540cf853c47d69",
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD EPYC 7763 64-Core Processor",
+    "logicalCpus": 4,
+    "totalMemoryBytes": 16770744320,
+    "binary": "/home/runner/work/ELYVON-STUDIO/ELYVON-STUDIO/target/debug/elyvon-studio",
+    "build": "debug",
+    "display": "Xvfb (virtual display)"
+  },
+  "limitations": [
+    "Startup includes tauri-driver startup, WebDriver session creation and IPC readiness; not executable-only launch time.",
+    "RSS sums native app and observed WebKit descendants; shared pages can be counted multiple times. One-second idle, meters off.",
+    "Frame intervals under Xvfb are diagnostic, not hardware FPS, audio latency or a release-build performance guarantee.",
+    "Three sequential warm-cache launches; no cold-cache claim."
+  ],
+  "launches": [
+    {
+      "launchToReadyMs": 683.284357,
+      "idleMemory": {
+        "processes": [
+          {
+            "pid": 5320,
+            "name": "elyvon-studio",
+            "rssKiB": 206076
+          },
+          {
+            "pid": 5367,
+            "name": "WebKitNetworkPr",
+            "rssKiB": 61036
+          },
+          {
+            "pid": 5395,
+            "name": "WebKitWebProces",
+            "rssKiB": 391372
+          }
+        ],
+        "aggregateRssKiB": 658484
+      }
+    },
+    {
+      "launchToReadyMs": 723.8001839999997,
+      "idleMemory": {
+        "processes": [
+          {
+            "pid": 5447,
+            "name": "elyvon-studio",
+            "rssKiB": 201208
+          },
+          {
+            "pid": 5459,
+            "name": "WebKitNetworkPr",
+            "rssKiB": 60660
+          },
+          {
+            "pid": 5490,
+            "name": "WebKitWebProces",
+            "rssKiB": 381312
+          }
+        ],
+        "aggregateRssKiB": 643180
+      }
+    },
+    {
+      "launchToReadyMs": 618.876366,
+      "idleMemory": {
+        "processes": [
+          {
+            "pid": 5546,
+            "name": "elyvon-studio",
+            "rssKiB": 201724
+          },
+          {
+            "pid": 5558,
+            "name": "WebKitNetworkPr",
+            "rssKiB": 61028
+          },
+          {
+            "pid": 5589,
+            "name": "WebKitWebProces",
+            "rssKiB": 378480
+          }
+        ],
+        "aggregateRssKiB": 641232
+      }
+    }
+  ],
+  "timeline": {
+    "maxScrollLeft": 3226,
+    "p95Ms": 28,
+    "frameIntervalsMs": [
+      216,
+      13,
+      18,
+      17,
+      15,
+      17,
+      18,
+      16,
+      16,
+      18,
+      16,
+      16,
+      18,
+      17,
+      16,
+      15,
+      17,
+      19,
+      15,
+      18,
+      214,
+      17,
+      16,
+      28,
+      10,
+      15,
+      17,
+      16,
+      17,
+      16,
+      17,
+      16,
+      16,
+      18,
+      18,
+      15,
+      16,
+      17,
+      18,
+      16,
+      35,
+      11,
+      21,
+      17,
+      16,
+      17,
+      18,
+      15,
+      16,
+      18,
+      35,
+      13,
+      18,
+      17,
+      16,
+      18,
+      16,
+      16,
+      17,
+      18,
+      16,
+      16,
+      16,
+      20,
+      14,
+      17,
+      18,
+      15,
+      16,
+      19,
+      16,
+      17,
+      15,
+      16,
+      18,
+      18,
+      16,
+      15,
+      17,
+      16,
+      19,
+      15,
+      17,
+      17,
+      34,
+      16,
+      17,
+      16,
+      18,
+      15,
+      16,
+      17,
+      18,
+      16,
+      15,
+      18,
+      17,
+      17,
+      16,
+      17,
+      31,
+      12,
+      10,
+      12,
+      19,
+      16,
+      15,
+      17,
+      17,
+      18,
+      16,
+      15,
+      17,
+      17,
+      17,
+      16,
+      19,
+      18,
+      13,
+      17
+    ],
+    "medianMs": 17,
+    "viewport": {
+      "height": 775,
+      "width": 1280
+    },
+    "dataset": {
+      "name": "Rust demo_project",
+      "tracks": 6,
+      "regions": 9,
+      "lengthBars": 32
+    }
+  },
+  "status": "measured"
+}

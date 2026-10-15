@@ -8,7 +8,7 @@
 
 A desktop digital audio workstation in development, built with **Rust, Tauri 2, React and TypeScript**. It currently supports arranging tracks and regions, inspecting MIDI notes and managing `.elyvon` projects through a graphite studio interface.
 
-**Status: v0.1.0 · technical audit in progress (Phase 02 remains partial).** Project management and editing controls are implemented. The audio engine is still pending: this version does not play or record sound yet.
+**Status: v0.1.0 · Phase 02 technical audit (partial).** Project management and editing controls are implemented. The audio engine is still pending: this version does not play or record sound yet.
 
 ![Elyvon Studio main interface: a six-track demo session, arrangement and mixer](docs/screenshots/01-arrangement-mixer.png)
 

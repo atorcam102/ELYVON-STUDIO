@@ -18,6 +18,10 @@ This is a technical audit, not a claim that a playable DAW or every platform is 
 - Historical [Release run 38760423899](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38760423899)
   failed before building: `v0.1.0-windows-preview.2` differs from application version `0.1.0`.
   Preview tag pushes are now excluded from that rebuild workflow; explicit dispatch still validates versions.
+- Current phase: [PR #2](https://github.com/atorcam102/ELYVON-STUDIO/pull/2),
+  [CI 38765992553](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38765992553),
+  [native raw measurements](audit/native-metrics-38765992553.json). Frontend, dependencies, native workspace/E2E/measurements and Windows x64/x86
+  installer checks passed; exact context and observed 216 ms maximum frame interval are in the validation report.
 - This phase adds frozen wire/signal fixtures, a native process restart regression, a native measurement
   runner, dependency policy and CI artifacts. See [validation](audit/VALIDATION.md).
 
@@ -133,7 +137,7 @@ references. Recovery and atomic saves already existed; this phase does not repla
 | B-03 | Desktop dependencies unavailable in cloud container; apt installation denied. Core Rust and frontend are runnable; native GUI evidence comes from CI. | See native CI evidence; hardware Windows x86/x64 install/open/save/restart remains required. |
 | B-04 | Production key/signing installation test and separate beta channel unverified/unimplemented. | Configure through maintainer secret settings and verify signed upgrades on device before stable. |
 | B-05 | Legacy release workflow still contains seven builds while regular distribution is Windows only. Preview tag collision is fixed; no broader release was dispatched. | Scope/gate that workflow for a future explicitly authorised release; verify each target independently. |
-| B-06 | Timeline benchmark uses the small Rust demo, debug mode and a virtual display. | Release-mode large-session benchmark and real hardware budgets remain unset/unmeasured. |
+| B-06 | Timeline benchmark uses the small Rust demo, debug mode and a virtual display; two of 120 frame intervals exceeded 50 ms (maximum 216 ms). | Release-mode large-session benchmark and real hardware budgets remain unset/unmeasured. |
 
 **Next phase:** implement the first native audio backend and sample-clock transport behind these
 contracts, with real device and RT-safety tests, in a separately authorised functional phase.

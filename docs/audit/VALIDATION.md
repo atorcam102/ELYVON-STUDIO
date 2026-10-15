@@ -62,5 +62,57 @@ The first phase CI attempt (run 38765613839) failed in the generic audit-tool in
 uses the same official, checksum-verified archives tested locally. This is a tooling failure,
 not a passing dependency audit.
 
-Raw current-phase results and CI links are added after the run completes. Until then,
-current native measurements and Windows builds are **pending**, not passed.
+## Measured native results — current phase
+
+[CI run 38765992553](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38765992553)
+completed successfully with all six jobs green on PR #2 head
+f949aba679dc731fa02e69ace39b6dcc2e4c93ff, using GitHub's test merge
+de4992ba8618a1a12d09e4f5e0540cf853c47d69. Workspace fmt/clippy/tests/bindings and native E2E + measurement steps passed.
+Both Windows x64/x86 installer build, collection and upload steps passed:
+[x64 artifact](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38765992553/artifacts/11990431405)
+and [x86 artifact](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38765992553/artifacts/11990307033).
+These are verification artifacts (EXE/MSI per target), not hardware installation evidence or a new Release.
+
+[Raw measurements](native-metrics-38765992553.json) were retrieved from the native job's
+`Native metrics` check annotation (check-run 116529915591), containing the same report as
+[native-evidence](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38765992553/artifacts/11989571280).
+The durable raw JSON SHA-256 is `1f9ef4a281041de84048a4120ef1d1f5a121db6321caac9d30cc67545d7f66cc`. Runner: Ubuntu 24.04 x64,
+AMD EPYC 7763, 4 logical CPUs, ~16 GB RAM; native **debug** build and Xvfb. No hardware claim.
+
+| Sequential warm launch | WebDriver-to-ready wall time | Aggregate idle RSS (app + WebKit) |
+| --- | --- | --- |
+| 1 | 683.3 ms | 643.1 MiB |
+| 2 | 723.8 ms | 628.1 MiB |
+| 3 | 618.9 ms | 626.2 MiB |
+
+The demo dataset has **6 tracks / 9 regions / 32 bars**. The viewport was 1280 × 775,
+scroll range 3226 px. Of 120 sampled frame intervals: median **17 ms**, p95 **28 ms**,
+maximum **216 ms**; **2 intervals exceeded 50 ms** (216 and 214 ms). These stalls are retained
+in the raw data, not discarded as outliers. This small debug-session run is a baseline,
+not an optimisation pass or a real-time performance acceptance result. The aggregate memory
+includes shared pages and is not unique application RAM. Large sessions, release builds,
+Windows startup/RSS and physical displays remain unmeasured.
+
+[Dependency evidence](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38765992553/artifacts/11990260597)
+contains exact package/licence/source inventory and audit output. The dependency/licence/workflow
+job passed under the policy recorded in deny.toml (including the explicit B-01 maintenance exception).
+Artifact retention is finite; raw measurement JSON is also committed here for reproducibility.
+
+## Changed files and implementation
+
+Implementation: [PR #2](https://github.com/atorcam102/ELYVON-STUDIO/pull/2),
+[contract commit 70ca2bb](https://github.com/atorcam102/ELYVON-STUDIO/commit/70ca2bb0d6e7c97660311f3f0dfb1d61376e3216),
+[tooling correction f949aba](https://github.com/atorcam102/ELYVON-STUDIO/commit/f949aba679dc731fa02e69ace39b6dcc2e4c93ff).
+The [PR file list](https://github.com/atorcam102/ELYVON-STUDIO/pull/2/files) is the complete diff.
+
+- Native contracts: audio/contracts.rs, core/jobs.rs; module exports; generated src/bindings types;
+  src-tauri commands/system.rs and lib.rs; typed src/lib/ipc.ts.
+- Presentation contract: src/state/uiContract.ts and ui.ts (no visual redesign).
+- Fixtures/tests: audio/tests, core/tests, project/tests/persistence.rs, native E2E and WebDriver lifecycle.
+- Verification: scripts/check.mjs, dependency-inventory.mjs, install-audit-tools.sh, deny.toml,
+  ci.yml, preview-tag exclusion in release.yml, package scripts and one dev dependency lock entry.
+- Documentation: README, CONTRIBUTING, THIRD_PARTY_NOTICES, STATUS, FEATURE_MATRIX, CONTRACTS,
+  ARCHITECTURE, ROADMAP, RELEASES, numbered ADRs and this evidence report/raw JSON.
+
+Reusable cloud install/start instructions were tested and saved to the environment draft.
+That save does not publish or apply the draft, nor supply the missing native GUI libraries.
