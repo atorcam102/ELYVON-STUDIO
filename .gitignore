@@ -1,0 +1,19 @@
+# Dependencies & build output
+node_modules/
+dist/
+target/
+
+# Tauri generated
+src-tauri/gen/schemas
+
+# Release keys must never be committed
+*.key
+*.key.pub.tmp
+.tauri/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log

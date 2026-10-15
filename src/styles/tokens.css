@@ -1,0 +1,83 @@
+/*
+ * Elyvon design tokens.
+ *
+ * Shared vocabulary for every Elyvon application: neutral graphite surfaces,
+ * one cool accent family, compact type. Products differ by content, not by
+ * re-skinning. Keep component styles on these variables so a future light
+ * theme (or a shared @elyvon/ui package) only has to redefine this file.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces, darkest to lightest */
+  --bg-0: #0b0c0f;
+  --bg-1: #101116;
+  --bg-2: #15171d;
+  --bg-3: #1b1e25;
+  --bg-4: #232731;
+  --bg-5: #2c313d;
+
+  /* Lines */
+  --line-1: rgb(255 255 255 / 0.055);
+  --line-2: rgb(255 255 255 / 0.09);
+  --line-3: rgb(255 255 255 / 0.14);
+
+  /* Text */
+  --text-0: #e9ebf1;
+  --text-1: #b4b9c6;
+  --text-2: #7c8291;
+  --text-3: #555b69;
+
+  /* Brand & semantic colours */
+  --accent: #5b8def;
+  --accent-strong: #7aa3f5;
+  --accent-soft: rgb(91 141 239 / 0.16);
+  --mint: #7fe3d0;
+  --violet: #9b7be8;
+  --ok: #46c37b;
+  --warn: #e0a13b;
+  --warn-soft: rgb(224 161 59 / 0.14);
+  --danger: #e5534b;
+  --danger-soft: rgb(229 83 75 / 0.14);
+  --record: #e5484d;
+  --mute: #4bb4d6;
+  --solo: #e7c14a;
+
+  /* Timeline */
+  --grid-bar: rgb(255 255 255 / 0.085);
+  --grid-beat: rgb(255 255 255 / 0.04);
+  --grid-sub: rgb(255 255 255 / 0.018);
+  --grid-row: rgb(0 0 0 / 0.35);
+  --ruler-bar: rgb(255 255 255 / 0.35);
+  --ruler-beat: rgb(255 255 255 / 0.16);
+  --cursor: #f2f4f8;
+
+  /* Type */
+  --font-ui: "Inter", "SF Pro Text", system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Roboto, Ubuntu, Cantarell,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, "Cascadia Mono", Menlo, Consolas, "Ubuntu Mono", monospace;
+  --fs-xs: 10.5px;
+  --fs-sm: 11.5px;
+  --fs-md: 12.5px;
+  --fs-lg: 14px;
+  --fs-xl: 17px;
+
+  /* Shape & motion */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --shadow-pop: 0 12px 32px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur-fast: 90ms;
+  --dur: 140ms;
+
+  --topbar-h: 52px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+  }
+}
