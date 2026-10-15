@@ -162,3 +162,12 @@ versionados no coinciden.
   parámetro (`ArtifactNaming`).
 - Cada aplicación tendrá su propio identificador, clave de firma, endpoint de
   actualizaciones y releases. No hay launcher ni cuentas.
+
+## Auditoría y contratos de Fase 02
+
+El estado verificable y las brechas se mantienen en [STATUS](STATUS.md),
+[FEATURE_MATRIX](FEATURE_MATRIX.md) y [CONTRACTS](CONTRACTS.md). Los contratos nuevos de
+grafo/MIDI/jobs no implementan un motor ni se guardan en el esquema 1. Las decisiones están
+en [ADR](ADR/README.md). La distribución actual sigue limitada a Windows x86/x64; los otros
+targets configurados no equivalen a soporte probado. La Fase 02 queda parcial mientras haya
+criterios sin evidencia de hardware, firma de producción o atribuciones de distribución.

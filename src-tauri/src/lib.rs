@@ -134,6 +134,7 @@ pub fn run() {
             commands::browser::browser_list,
             commands::browser::browser_places,
             commands::system::app_info,
+            commands::system::app_contracts,
             commands::system::audio_status,
             commands::system::settings_get,
             commands::system::settings_set,

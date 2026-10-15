@@ -36,6 +36,9 @@ env:
 
 jobs:
   preflight:
+    # Windows preview tags name existing CI binaries; their app version stays
+    # 0.1.0. They are published by publish-windows-preview, not this rebuild.
+    if: github.event_name == 'workflow_dispatch' || !contains(github.ref_name, '-windows-preview.')
     name: Preflight (version, signing key)
     runs-on: ubuntu-24.04
     outputs:

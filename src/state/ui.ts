@@ -2,33 +2,18 @@
 // None of this is part of the project model.
 
 import { create } from "zustand";
+import type { Selection, SettingsSection, UiPresentationV1 } from "./uiContract";
 import type { Layout } from "../bindings/Layout";
 import type { Project } from "../bindings/Project";
 import { clampZoom, DEFAULT_PX_PER_QUARTER } from "../lib/geometry";
 
 export type BottomTab = "mixer" | "pianoRoll" | "audioEditor";
 export type BrowserTab = "files" | "loops" | "instruments" | "plugins";
-export type SettingsSection = "general" | "updates" | "audio" | "shortcuts";
+export type { SettingsSection } from "./uiContract";
 
-export interface Selection {
-  trackIds: string[];
-  regionIds: string[];
-  /** Anchor for shift-click range selection of tracks. */
-  anchorTrackId: string | null;
-}
+export type { Selection } from "./uiContract";
 
-interface UiState {
-  layout: Layout;
-  pxPerQuarter: number;
-  /** Edit cursor position in ticks (there is no playback yet). */
-  cursorTicks: number;
-  selection: Selection;
-  settingsOpen: SettingsSection | null;
-  aboutOpen: boolean;
-  updateOpen: boolean;
-  /** Simulated meter animation in the mixer (off by default). */
-  demoMeters: boolean;
-
+interface UiState extends UiPresentationV1 {
   setLayout: (patch: Partial<Layout>) => void;
   replaceLayout: (layout: Layout) => void;
   setZoom: (pxPerQuarter: number) => void;

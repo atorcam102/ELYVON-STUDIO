@@ -222,3 +222,35 @@ fn modifications_persist_across_save_and_open() {
     let leftovers: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
     assert_eq!(leftovers.len(), 1, "no temporary files left behind");
 }
+
+/// Restart-equivalent: drop every session, reload schema-1, preserve all fields
+/// and media references, then recover an unsaved edit without touching the save.
+#[test]
+fn phase1_file_survives_save_restart_recovery_and_failed_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = format::load(&fixture("v1-basic.elyvon")).unwrap();
+    let path = dir.path().join("legacy.elyvon");
+    format::save(&path, &original, "0.1.0").unwrap();
+    let mut session = ProjectSession::open(&path).unwrap();
+    session
+        .apply(&EditCommand::RenameProject {
+            name: "Unsaved recovery".into(),
+        })
+        .unwrap();
+    elyvon_project::recovery::write(dir.path(), session.project(), Some(&path), "0.1.0").unwrap();
+    let unsaved = session.project().clone();
+    drop(session);
+    assert_eq!(ProjectSession::open(&path).unwrap().project(), &original);
+    let (info, recovered) = elyvon_project::recovery::read(dir.path()).unwrap().unwrap();
+    assert_eq!(info.original_path, Some(path.display().to_string()));
+    assert_eq!(recovered, unsaved);
+    let mut restored = ProjectSession::recovered(recovered, Some(path.clone()));
+    assert!(restored.is_dirty());
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(ProjectSession::open(&dir.path().join("missing.elyvon")).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(restored.project(), &unsaved);
+    restored.save(None, "0.1.0").unwrap();
+    drop(restored);
+    assert_eq!(ProjectSession::open(&path).unwrap().project(), &unsaved);
+}

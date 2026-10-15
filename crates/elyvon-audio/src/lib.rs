@@ -17,6 +17,7 @@
 //! ([`rt::AtomicF32`]) or pre-allocated lock-free queues; anything that might
 //! block happens on a separate worker thread. See `docs/ARCHITECTURE.md`.
 
+pub mod contracts;
 pub mod engine;
 pub mod gain;
 pub mod rt;

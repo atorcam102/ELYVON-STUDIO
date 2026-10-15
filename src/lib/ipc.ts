@@ -3,6 +3,7 @@
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { ApplyResult } from "../bindings/ApplyResult";
+import type { ContractVersions } from "../bindings/ContractVersions";
 import type { AppInfo } from "../bindings/AppInfo";
 import type { DirListing } from "../bindings/DirListing";
 import type { DownloadEvent } from "../bindings/DownloadEvent";
@@ -63,6 +64,7 @@ export const ipc = {
   },
   app: {
     info: () => call<AppInfo>("app_info"),
+    contracts: () => call<ContractVersions>("app_contracts"),
     audioStatus: () => call<EngineStatus>("audio_status"),
     quit: (discardChanges = false) => call<void>("app_quit", { discardChanges }),
     restart: () => call<void>("app_restart"),

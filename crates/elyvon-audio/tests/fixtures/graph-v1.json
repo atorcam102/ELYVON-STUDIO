@@ -1,0 +1,29 @@
+{
+  "contractVersion": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "inputChannels": 1,
+      "outputChannels": 2
+    },
+    {
+      "id": 2,
+      "inputChannels": 2,
+      "outputChannels": 2
+    }
+  ],
+  "connections": [
+    {
+      "fromNode": 1,
+      "fromChannel": 0,
+      "toNode": 2,
+      "toChannel": 0
+    },
+    {
+      "fromNode": 1,
+      "fromChannel": 1,
+      "toNode": 2,
+      "toChannel": 1
+    }
+  ]
+}

@@ -46,6 +46,8 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.equal(await d.attr(play, "disabled"), "true", "play must be disabled without an engine");
     const view = await d.invoke("project_get");
     assert.equal(view.ok.dirty, false);
+    const contracts = await d.invoke("app_contracts");
+    assert.deepEqual(contracts.ok, { ipc: 1, project: 1, audio: 1, jobs: 1 });
     await shot("01-empty");
   });
 
@@ -104,9 +106,15 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.equal(fresh.ok.project.tracks.length, 0, "clean project can be replaced");
     const reopened = await d.invoke("project_open", { path: saved.ok.path, discardChanges: false });
     assert.deepEqual(reopened.ok.project, saved.ok.project);
+    // End the native process, not just the webview, before reading the save.
+    await d.stop();
+    d = await Driver.start({ application: app });
+    await d.find(".controlbar", { timeout: 20_000 });
+    const restarted = await d.invoke("project_open", { path: saved.ok.path, discardChanges: false });
+    assert.deepEqual(restarted.ok.project, saved.ok.project);
     await d.exec("location.reload()");
     await d.find(".controlbar", { timeout: 10_000 });
-    assert.equal(await trackCount(), 2);
+    await d.waitFor(async () => (await trackCount()) === 2, { message: "tracks after native restart" });
   });
 
   it("reports unreadable and incompatible project files clearly", async () => {

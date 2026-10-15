@@ -1,0 +1,29 @@
+[
+  {
+    "frameOffset": 0,
+    "message": {
+      "type": "noteOn",
+      "channel": 0,
+      "pitch": 60,
+      "velocity": 100
+    }
+  },
+  {
+    "frameOffset": 127,
+    "message": {
+      "type": "noteOff",
+      "channel": 0,
+      "pitch": 60,
+      "velocity": 64
+    }
+  },
+  {
+    "frameOffset": 127,
+    "message": {
+      "type": "controlChange",
+      "channel": 15,
+      "controller": 123,
+      "value": 0
+    }
+  }
+]

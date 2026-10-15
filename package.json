@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Elyvon Studio — digital audio workstation (UI layer)",
+  "description": "Elyvon Studio \u2014 digital audio workstation (UI layer)",
   "engines": {
     "node": ">=22.12"
   },
@@ -16,7 +16,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "tauri": "tauri",
-    "check:versions": "node scripts/check-versions.mjs"
+    "check:versions": "node scripts/check-versions.mjs",
+    "check": "node scripts/check.mjs",
+    "check:rust": "node scripts/check.mjs rust"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

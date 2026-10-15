@@ -1,0 +1,33 @@
+# Audit the full locked graph, including target-specific crates for all 7 targets.
+[graph]
+all-features = false
+
+[advisories]
+git-fetch-with-cli = true
+# B-01 in docs/STATUS.md: GTK3's transitive build macro has no safe upgrade.
+# This maintenance-only exception is explicit; no vulnerability is waived.
+ignore = [
+  { id = "RUSTSEC-2024-0370", reason = "GTK3/glib-macros -> proc-macro-error 1.0.4; no safe upstream upgrade. Track B-01 in docs/STATUS.md; reassess before stable distribution." },
+]
+
+[licenses]
+allow = [
+  "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause",
+  "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "MPL-2.0", "CC0-1.0",
+  "0BSD", "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+# Elyvon's 5 unpublished workspace crates have no distribution licence yet.
+# This excludes only first-party private crates, never third-party dependencies.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true # only unpublished, first-party workspace path dependencies
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

@@ -3,6 +3,7 @@
 use std::sync::atomic::Ordering;
 
 use elyvon_audio::engine::EngineStatus;
+use elyvon_core::jobs::{ContractVersions, IPC_CONTRACT_VERSION, JOB_CONTRACT_VERSION};
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
@@ -41,6 +42,17 @@ pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> IpcResult<A
         log_dir: state.paths.log_dir.display().to_string(),
         config_dir: state.paths.config_dir.display().to_string(),
         updater: env,
+    })
+}
+
+/// Read-only version negotiation. Does not imply a graph executor or job worker.
+#[tauri::command]
+pub async fn app_contracts() -> IpcResult<ContractVersions> {
+    Ok(ContractVersions {
+        ipc: IPC_CONTRACT_VERSION,
+        project: elyvon_project::format::CURRENT_SCHEMA_VERSION,
+        audio: elyvon_audio::contracts::AUDIO_CONTRACT_VERSION,
+        jobs: JOB_CONTRACT_VERSION,
     })
 }
 

@@ -10,6 +10,7 @@
 
 pub mod color;
 pub mod fs;
+pub mod jobs;
 pub mod music;
 
 pub use color::{Color, ColorParseError};

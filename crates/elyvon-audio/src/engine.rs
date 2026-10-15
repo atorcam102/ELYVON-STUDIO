@@ -22,7 +22,7 @@ pub enum EngineStatus {
 impl EngineStatus {
     pub fn current() -> Self {
         Self::Unavailable {
-            reason: "The audio engine is not part of this build yet (planned for Phase 2). \
+            reason: "The audio engine is not part of this build yet (not implemented). \
                      Playback, recording and metering are disabled."
                 .into(),
         }
