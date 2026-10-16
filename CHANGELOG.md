@@ -7,6 +7,32 @@ section of each version into the GitHub release and into the update dialog.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-16
+
+### Added
+
+- Piano roll editing: draw, select (click, Shift/Ctrl, rubber band), drag in time and pitch, Alt-drag copy, resize either edge, erase, duplicate, nudge/transpose from the keyboard, mute notes; metre-aware snap with triplets and swing; reversible quantise with strength, unquantise, humanise, transpose, legato, velocity/channel/length edits and chord-voice split; velocity and controller lanes (modulation, volume, expression, sustain, pitch bend, channel pressure, program); scale highlighting; note audition; multi-region editing as one undo step.
+- Built-in "Elyvon Test Tone" instrument on instrument tracks, played by the timeline, the virtual keyboard, MIDI input monitoring and piano-roll previews.
+- Mixer graph in the engine: auxiliary buses, pre/post-fader sends, output routing, master strip, native inserts (trim, utility, high/low-pass filter, look-ahead limiter), plug-in delay compensation on parallel paths, mono/stereo/auto channel formats, three pan laws, solo-safe, linked groups and mixer folders.
+- Real peak, RMS, peak-hold and sticky clip meters for every track, aux and the master.
+- Stem export: master plus post-fader stems per track and aux as 32-bit float WAV with a JSON report.
+
+### Changed
+
+- Project schema 4. Recorded and imported note on/off events become editable notes (first-in-first-out pairing); schema 1–3 files migrate on open without being rewritten. Note-off velocity is not stored.
+- Editing during playback no longer sends a MIDI panic: held notes that still exist keep sounding, removed ones are released; fader, pan, send and insert changes ramp instead of clicking.
+
+### Fixed
+
+- Windows: the grid golden-vector test compared CRLF-checked-out fixtures byte for byte.
+
+## [0.2.1] - 2026-10-16
+
+### Fixed
+
+- MP3 import and playback with large ID3 metadata or embedded artwork: enable the ID3 readers so the importer reaches the audio instead of exhausting the format probe limit.
+- Imported and relinked audio now publishes its ready status immediately, allowing waveforms and the inspector to update without reloading the interface.
+
 ## [0.2.0] - 2026-10-16
 
 ### Added

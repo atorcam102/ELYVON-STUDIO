@@ -1,5 +1,7 @@
 # Phases 06–07 — audio capture and native MIDI
 
+**Windows x64 re-verification and fixes (0.3.0): see [PHASE-08-09.md](PHASE-08-09.md#phases-0607-re-verified-on-windows).**
+
 Date: 2026-10-16. Branch: `claude/gallant-fermat-h1epb3`, based on
 `d3ae87a6928533d185b40e148249bf50a6a73c7f`. **Overall: PARTIAL.** Native functionality
 and deterministic software checks exist; physical-device and cross-platform acceptance remain

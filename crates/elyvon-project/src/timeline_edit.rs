@@ -762,12 +762,11 @@ mod tests {
         .unwrap()
         .created_regions[0];
         if let RegionContent::Midi { notes } = &mut p.tracks[0].regions[0].content {
-            for (start, length) in [(0, 960), (900, 200), (2000, 100)] {
+            for (i, (start, length)) in [(0, 960), (900, 200), (2000, 100)].into_iter().enumerate()
+            {
                 notes.push(MidiNote {
-                    pitch: 60,
-                    velocity: 90,
-                    start,
-                    length,
+                    id: i as u32 + 1,
+                    ..MidiNote::new(60, 90, start, length)
                 });
             }
         }

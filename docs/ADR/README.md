@@ -7,6 +7,7 @@
 5. [Lock-free plan engine, tempo map in Rust and in-memory media](0005-lock-free-plan-engine-and-in-memory-media.md)
 
 6. [Converge the Phase 03 and arrangement engines](0006-converge-phase03-and-arrangement-engines.md)
+7. [Notes as the editable MIDI source and a graph-plan mixer](0007-notes-as-source-and-a-graph-plan-mixer.md)
 
 Implementation/evidence: [STATUS](../STATUS.md), [CONTRACTS](../CONTRACTS.md),
 [FEATURE_MATRIX](../FEATURE_MATRIX.md), [validation](../audit/VALIDATION.md).

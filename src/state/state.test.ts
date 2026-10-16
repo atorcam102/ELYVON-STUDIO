@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project } from "../bindings/Project";
+import { defaultStrip, emptyMixer } from "../lib/mixerDefaults";
 import type { SessionView } from "../bindings/SessionView";
 
 // The native core is replaced by an in-memory fake for store tests.
@@ -36,11 +37,14 @@ function project(trackIds: string[], regionIds: string[] = []): Project {
     sampleRate: 48000,
     media: [],
     markers: [],
+    mixer: emptyMixer(),
     tracks: trackIds.map((id, i) => ({
       id,
       name: id,
       kind: "midi",
       io: {armed:false,inputChannel:0,inputChannels:1,monitor:false,midiInput:null,midiOutput:null,midiChannel:null,outputChannel:null,midiMonitor:true},
+      strip: defaultStrip(),
+      folder: null,
       color: "#5B8DEF",
       muted: false,
       soloed: false,

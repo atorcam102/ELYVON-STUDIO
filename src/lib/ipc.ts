@@ -29,6 +29,8 @@ import type { LatencyMeasurement } from "../bindings/LatencyMeasurement";
 import type { CaptureStatus } from "../bindings/CaptureStatus";
 import type { CaptureResult } from "../bindings/CaptureResult";
 import type { RecordedTake } from "../bindings/RecordedTake";
+import type { MixerStatus } from "../bindings/MixerStatus";
+import type { StemsReport } from "../bindings/StemsReport";
 export type { IpcError };
 
 export function isIpcError(e: unknown): e is IpcError {
@@ -56,6 +58,7 @@ export const ipc = {
   midi: {
     status:()=>call<MidiStatus>("midi_status"),refresh:()=>call<void>("midi_refresh"),panic:()=>call<void>("midi_panic"),
     send:(trackId:string,bytes:number[])=>call<void>("midi_send",{trackId,bytes}),
+    preview:(trackId:string,channel:number,pitch:number,velocity:number,durationMs:number)=>call<void>("midi_preview",{trackId,channel,pitch,velocity,durationMs}),
     recordStart:(fromTick:number)=>call<MidiStatus>("midi_record_start",{fromTick}),recordStop:(cancel=false)=>call<SessionView>("midi_record_stop",{cancel}),
     import:(path:string,startTick:number,useFileTempo:boolean)=>call<SessionView>("midi_import",{path,startTick,useFileTempo}),
     export:(path:string)=>call<string>("midi_export",{path}),
@@ -117,6 +120,11 @@ export const ipc = {
       call<ArrayBuffer>("media_region_peaks", { regionId, fromTick, toTick, columns }),
     render: (path: string, metronome: boolean, startTick?: number, endTick?: number) =>
       call<RenderReport>("project_render", { path, startTick: startTick ?? null, endTick: endTick ?? null, metronome }),
+    exportStems: (directory: string) => call<StemsReport>("project_export_stems", { directory }),
+  },
+  mixer: {
+    status: () => call<MixerStatus>("mixer_status"),
+    resetClips: () => call<void>("mixer_reset_clips"),
   },
   settings: {
     get: () => call<Settings>("settings_get"),

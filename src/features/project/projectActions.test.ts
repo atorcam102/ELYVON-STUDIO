@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { emptyMixer } from "../../lib/mixerDefaults";
 import type { SessionView } from "../../bindings/SessionView";
 
 const invoke = vi.fn();
@@ -32,6 +33,7 @@ function view(extra: Partial<SessionView> = {}): SessionView {
       media: [],
       markers: [],
       tracks: [],
+      mixer: emptyMixer(),
     },
     path: "/music/my-song.elyvon",
     origin: "file",

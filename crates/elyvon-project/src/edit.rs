@@ -10,9 +10,16 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::error::EditError;
+use crate::midi_edit::{
+    self as me, ControllerLane, LanePoint, NoteEdge, NoteSpec, NoteTarget, NoteTransform,
+};
+use crate::mixer::{
+    AuxId, ChannelRef, FolderId, GroupId, InsertId, MixGroup, PanLaw, Processor, Send, TrackFolder,
+};
+use crate::mixer_edit::{self as mx, Linked, StripPatch};
 use crate::model::{
-    MarkerId, MediaAsset, MediaId, MediaInfo, MetronomeSettings, Project, Region, RegionContent,
-    RegionId, Track, TrackId, TrackKind,
+    MarkerId, MediaAsset, MediaId, MediaInfo, MetronomeSettings, MidiNote, Project, Region,
+    RegionContent, RegionId, Track, TrackId, TrackKind,
 };
 use crate::timeline_edit as tl;
 use crate::validate::{limits, validate, validate_name};
@@ -227,6 +234,137 @@ pub enum EditCommand {
         fade_out: u64,
         looped: bool,
     },
+    // ---- Piano roll (Phase 08) ----
+    AddNotes {
+        region_id: RegionId,
+        notes: Vec<NoteSpec>,
+    },
+    RemoveNotes {
+        region_id: RegionId,
+        ids: Vec<u32>,
+    },
+    /// Replaces the listed notes (matched by id) field by field.
+    UpdateNotes {
+        region_id: RegionId,
+        notes: Vec<MidiNote>,
+    },
+    /// Moves notes in time and pitch as a group; `copy` leaves the originals.
+    MoveNotes {
+        region_id: RegionId,
+        ids: Vec<u32>,
+        #[ts(type = "number")]
+        delta_ticks: i64,
+        delta_pitch: i32,
+        copy: bool,
+    },
+    ResizeNotes {
+        region_id: RegionId,
+        ids: Vec<u32>,
+        edge: NoteEdge,
+        #[ts(type = "number")]
+        delta: i64,
+    },
+    TransformNotes {
+        targets: Vec<NoteTarget>,
+        transform: NoteTransform,
+    },
+    SplitChordVoices {
+        region_id: RegionId,
+        #[ts(optional)]
+        ids: Option<Vec<u32>>,
+    },
+    /// Replaces a controller lane's events in `[from, to)` with `points`.
+    EditControllerLane {
+        region_id: RegionId,
+        lane: ControllerLane,
+        #[ts(type = "number")]
+        from: Ticks,
+        #[ts(type = "number")]
+        to: Ticks,
+        points: Vec<LanePoint>,
+    },
+    /// Several edits as one undo step (multi-region gestures). Not nestable.
+    Batch {
+        commands: Vec<EditCommand>,
+    },
+    // ---- Mixer (Phase 09) ----
+    SetStrip {
+        channel: ChannelRef,
+        patch: StripPatch,
+    },
+    /// Adds or changes (`send`) or removes (no `send`) a send.
+    SetSend {
+        channel: ChannelRef,
+        target: AuxId,
+        #[ts(optional)]
+        send: Option<Send>,
+    },
+    AddInsert {
+        channel: ChannelRef,
+        processor: Processor,
+        #[ts(optional, type = "number")]
+        index: Option<usize>,
+    },
+    RemoveInsert {
+        channel: ChannelRef,
+        id: InsertId,
+    },
+    MoveInsert {
+        channel: ChannelRef,
+        id: InsertId,
+        #[ts(type = "number")]
+        to_index: usize,
+    },
+    SetInsert {
+        channel: ChannelRef,
+        id: InsertId,
+        bypass: bool,
+        processor: Processor,
+    },
+    AddAux {
+        #[ts(optional)]
+        name: Option<String>,
+        /// Channels that get a post-fader send to the new aux.
+        sources: Vec<ChannelRef>,
+    },
+    RemoveAuxes {
+        ids: Vec<AuxId>,
+    },
+    AddGroup {
+        #[ts(optional)]
+        name: Option<String>,
+        members: Vec<ChannelRef>,
+    },
+    UpdateGroup {
+        group: MixGroup,
+    },
+    RemoveGroup {
+        id: GroupId,
+    },
+    SetGroupMembership {
+        channels: Vec<ChannelRef>,
+        #[ts(optional)]
+        group: Option<GroupId>,
+    },
+    AddFolder {
+        #[ts(optional)]
+        name: Option<String>,
+        tracks: Vec<TrackId>,
+    },
+    UpdateFolder {
+        folder: TrackFolder,
+    },
+    RemoveFolder {
+        id: FolderId,
+    },
+    SetTrackFolder {
+        ids: Vec<TrackId>,
+        #[ts(optional)]
+        folder: Option<FolderId>,
+    },
+    SetPanLaw {
+        law: PanLaw,
+    },
 }
 
 /// Where an imported file goes.
@@ -311,6 +449,47 @@ impl EditCommand {
             Self::PasteRegions { .. } => "Paste Regions",
             Self::SetRegionsMuted { .. } => "Mute Regions",
             Self::SetAudioRegion { .. } => "Change Region Gain/Fades",
+            Self::AddNotes { .. } => "Add Notes",
+            Self::RemoveNotes { .. } => "Delete Notes",
+            Self::UpdateNotes { .. } => "Edit Notes",
+            Self::MoveNotes { copy: true, .. } => "Copy Notes",
+            Self::MoveNotes { .. } => "Move Notes",
+            Self::ResizeNotes { .. } => "Resize Notes",
+            Self::TransformNotes { transform, .. } => match transform {
+                NoteTransform::Quantize { .. } => "Quantize",
+                NoteTransform::Unquantize => "Unquantize",
+                NoteTransform::Humanize { .. } => "Humanize",
+                NoteTransform::Transpose { .. } => "Transpose",
+                NoteTransform::Legato { .. } => "Legato",
+                NoteTransform::Velocity { .. } => "Change Velocity",
+                NoteTransform::Mute { .. } => "Mute Notes",
+                NoteTransform::Channel { .. } => "Change MIDI Channel",
+                NoteTransform::FixedLength { .. } => "Set Note Length",
+            },
+            Self::SplitChordVoices { .. } => "Split Chord Voices",
+            Self::EditControllerLane { .. } => "Edit Controller Lane",
+            Self::Batch { commands } => match commands.first().map(EditCommand::label) {
+                Some(first) if commands.iter().all(|c| c.label() == first) => first,
+                _ => "Multiple Edits",
+            },
+            Self::SetStrip { .. } => "Change Channel Strip",
+            Self::SetSend { send: None, .. } => "Remove Send",
+            Self::SetSend { .. } => "Change Send",
+            Self::AddInsert { .. } => "Add Insert",
+            Self::RemoveInsert { .. } => "Remove Insert",
+            Self::MoveInsert { .. } => "Reorder Inserts",
+            Self::SetInsert { .. } => "Change Insert",
+            Self::AddAux { .. } => "New Auxiliary Channel",
+            Self::RemoveAuxes { .. } => "Delete Auxiliary Channels",
+            Self::AddGroup { .. } => "New Group",
+            Self::UpdateGroup { .. } => "Change Group",
+            Self::RemoveGroup { .. } => "Delete Group",
+            Self::SetGroupMembership { .. } => "Assign Group",
+            Self::AddFolder { .. } => "New Folder",
+            Self::UpdateFolder { .. } => "Change Folder",
+            Self::RemoveFolder { .. } => "Delete Folder",
+            Self::SetTrackFolder { .. } => "Move to Folder",
+            Self::SetPanLaw { .. } => "Change Pan Law",
         }
     }
 }
@@ -323,6 +502,25 @@ pub struct EditOutcome {
     pub created_tracks: Vec<TrackId>,
     pub created_regions: Vec<RegionId>,
     pub created_markers: Vec<MarkerId>,
+    /// Note ids, within the edited region.
+    pub created_notes: Vec<u32>,
+    pub created_auxes: Vec<AuxId>,
+    pub created_inserts: Vec<InsertId>,
+    pub created_groups: Vec<GroupId>,
+    pub created_folders: Vec<FolderId>,
+}
+
+impl EditOutcome {
+    fn merge(&mut self, other: EditOutcome) {
+        self.created_tracks.extend(other.created_tracks);
+        self.created_regions.extend(other.created_regions);
+        self.created_markers.extend(other.created_markers);
+        self.created_notes.extend(other.created_notes);
+        self.created_auxes.extend(other.created_auxes);
+        self.created_inserts.extend(other.created_inserts);
+        self.created_groups.extend(other.created_groups);
+        self.created_folders.extend(other.created_folders);
+    }
 }
 
 /// Applies `cmd` to `project`. On error `project` is left untouched.
@@ -461,29 +659,30 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
             track_mut(project, *id)?.io = io.clone();
         }
         EditCommand::SetTrackColor { id, color } => track_mut(project, *id)?.color = *color,
+        // Mute, solo, volume and pan follow linked mixer groups.
         EditCommand::SetTracksMuted { ids, muted } => {
             check_tracks_exist(project, ids)?;
-            for t in project.tracks.iter_mut().filter(|t| ids.contains(&t.id)) {
-                t.muted = *muted;
-            }
+            let channels: Vec<_> = ids.iter().map(|&id| ChannelRef::Track { id }).collect();
+            mx::set_flag(project, &channels, Linked::Mute, *muted)?;
         }
         EditCommand::SetTracksSoloed { ids, soloed } => {
             check_tracks_exist(project, ids)?;
-            for t in project.tracks.iter_mut().filter(|t| ids.contains(&t.id)) {
-                t.soloed = *soloed;
-            }
+            let channels: Vec<_> = ids.iter().map(|&id| ChannelRef::Track { id }).collect();
+            mx::set_flag(project, &channels, Linked::Solo, *soloed)?;
         }
         EditCommand::SetTrackVolume { id, volume_db } => {
             if !(Track::MIN_VOLUME_DB..=Track::MAX_VOLUME_DB).contains(volume_db) {
                 return Err(invalid("volume out of range"));
             }
-            track_mut(project, *id)?.volume_db = *volume_db;
+            track_mut(project, *id)?;
+            mx::set_volume(project, ChannelRef::Track { id: *id }, *volume_db)?;
         }
         EditCommand::SetTrackPan { id, pan } => {
             if !(-1.0..=1.0).contains(pan) {
                 return Err(invalid("pan out of range"));
             }
-            track_mut(project, *id)?.pan = *pan;
+            track_mut(project, *id)?;
+            mx::set_pan(project, ChannelRef::Track { id: *id }, *pan)?;
         }
         EditCommand::MoveTrack { id, to_index } => {
             let from = project
@@ -643,17 +842,24 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
                 if track.kind == TrackKind::Audio {
                     return Err(invalid("MIDI requires a MIDI or instrument track"));
                 }
+                let length = source.length.max(1);
+                // Note on/off pairs become editable notes; controllers,
+                // pressure, bend, program and SysEx stay as events.
+                let (notes, events) = if source.events.iter().any(|e| me::is_note_message(&e.bytes))
+                {
+                    me::split_note_events(&source.events, length)
+                } else {
+                    (me::with_ids(source.notes.clone()), source.events.clone())
+                };
                 let region = Region {
                     capture: None,
-                    midi_events: source.events.clone(),
+                    midi_events: events,
                     id: RegionId::new(),
                     name: source.name.clone(),
                     start: source.start,
-                    length: source.length.max(1),
+                    length,
                     muted: false,
-                    content: RegionContent::Midi {
-                        notes: source.notes.clone(),
-                    },
+                    content: RegionContent::Midi { notes },
                 };
                 outcome.created_regions.push(region.id);
                 track.regions.push(region);
@@ -759,6 +965,124 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
         } => {
             tl::set_audio_region(project, *id, *gain_db, *fade_in, *fade_out, *looped)?;
         }
+        EditCommand::AddNotes { region_id, notes } => {
+            me::add_notes(project, *region_id, notes, &mut outcome)?;
+            extend_length_to_content(project);
+        }
+        EditCommand::RemoveNotes { region_id, ids } => me::remove_notes(project, *region_id, ids)?,
+        EditCommand::UpdateNotes { region_id, notes } => {
+            me::update_notes(project, *region_id, notes)?;
+            extend_length_to_content(project);
+        }
+        EditCommand::MoveNotes {
+            region_id,
+            ids,
+            delta_ticks,
+            delta_pitch,
+            copy,
+        } => {
+            me::move_notes(
+                project,
+                *region_id,
+                ids,
+                *delta_ticks,
+                *delta_pitch,
+                *copy,
+                &mut outcome,
+            )?;
+            extend_length_to_content(project);
+        }
+        EditCommand::ResizeNotes {
+            region_id,
+            ids,
+            edge,
+            delta,
+        } => {
+            me::resize_notes(project, *region_id, ids, *edge, *delta)?;
+            extend_length_to_content(project);
+        }
+        EditCommand::TransformNotes { targets, transform } => {
+            me::transform_notes(project, targets, transform)?;
+            extend_length_to_content(project);
+        }
+        EditCommand::SplitChordVoices { region_id, ids } => {
+            me::split_chord_voices(project, *region_id, ids.as_deref(), &mut outcome)?;
+        }
+        EditCommand::EditControllerLane {
+            region_id,
+            lane,
+            from,
+            to,
+            points,
+        } => me::edit_lane(project, *region_id, *lane, *from, *to, points)?,
+        EditCommand::Batch { commands } => {
+            if commands.is_empty() || commands.len() > 256 {
+                return Err(invalid("a batch holds 1–256 edits"));
+            }
+            for c in commands {
+                if matches!(c, EditCommand::Batch { .. }) {
+                    return Err(invalid("batches cannot be nested"));
+                }
+                outcome.merge(apply_inner(project, c)?);
+                // Later edits rely on the invariants of the earlier ones.
+                validate(project)?;
+            }
+        }
+        EditCommand::SetStrip { channel, patch } => mx::set_strip(project, *channel, patch)?,
+        EditCommand::SetSend {
+            channel,
+            target,
+            send,
+        } => mx::set_send(project, *channel, *target, *send)?,
+        EditCommand::AddInsert {
+            channel,
+            processor,
+            index,
+        } => mx::add_insert(project, *channel, *processor, *index, &mut outcome)?,
+        EditCommand::RemoveInsert { channel, id } => mx::remove_insert(project, *channel, *id)?,
+        EditCommand::MoveInsert {
+            channel,
+            id,
+            to_index,
+        } => mx::move_insert(project, *channel, *id, *to_index)?,
+        EditCommand::SetInsert {
+            channel,
+            id,
+            bypass,
+            processor,
+        } => mx::set_insert(project, *channel, *id, *bypass, *processor)?,
+        EditCommand::AddAux { name, sources } => {
+            let aux = mx::add_aux(project, name.as_deref(), &mut outcome)?;
+            for &source in sources {
+                mx::set_send(
+                    project,
+                    source,
+                    aux,
+                    Some(Send {
+                        target: aux,
+                        level_db: 0.0,
+                        pre_fader: false,
+                        muted: false,
+                    }),
+                )?;
+            }
+        }
+        EditCommand::RemoveAuxes { ids } => mx::remove_auxes(project, ids)?,
+        EditCommand::AddGroup { name, members } => {
+            mx::add_group(project, name.as_deref(), members, &mut outcome)?
+        }
+        EditCommand::UpdateGroup { group } => mx::update_group(project, group)?,
+        EditCommand::RemoveGroup { id } => mx::remove_group(project, *id)?,
+        EditCommand::SetGroupMembership { channels, group } => {
+            mx::set_group(project, channels, *group)?
+        }
+        EditCommand::AddFolder { name, tracks } => {
+            mx::add_folder(project, name.as_deref(), tracks, &mut outcome)?
+        }
+        EditCommand::UpdateFolder { folder } => mx::update_folder(project, folder)?,
+        EditCommand::RemoveFolder { id } => mx::remove_folder(project, *id)?,
+        EditCommand::SetTrackFolder { ids, folder } => mx::set_track_folder(project, ids, *folder)?,
+        EditCommand::SetPanLaw { law } => project.mixer.pan_law = *law,
     }
     Ok(outcome)
 }
@@ -1157,10 +1481,8 @@ mod tests {
         let r = midi_region(&mut p, k, 0);
         if let RegionContent::Midi { notes } = &mut p.tracks[0].regions[0].content {
             notes.push(MidiNote {
-                pitch: 60,
-                velocity: 100,
-                start: 0,
-                length: 480,
+                id: 1,
+                ..MidiNote::new(60, 100, 0, 480)
             });
         }
         apply(

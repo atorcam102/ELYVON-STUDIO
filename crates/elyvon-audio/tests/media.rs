@@ -7,6 +7,7 @@ mod common;
 
 use common::*;
 use elyvon_audio::media::{MediaError, MediaStore, decode_file, fingerprint};
+use elyvon_audio::render::{RenderRequest, render};
 
 const RATE: u32 = 44_100;
 
@@ -88,6 +89,50 @@ fn lossy_mp3_and_vorbis_keep_level_and_length() {
             let db = 20.0 * (rms(mid(ch)) / (amp / 2f64.sqrt())).log10();
             assert!(db.abs() < 0.5, "{name} ch{ch}: {db:.3} dB");
         }
+    }
+}
+
+#[test]
+fn mp3_with_large_id3_tags_imports_and_plays_without_changing_the_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = std::fs::read(fixture("tone.mp3")).unwrap();
+    let reference = decode_file(&fixture("tone.mp3"), u64::MAX).unwrap();
+    // Larger than Symphonia's 1 MiB format probe limit. ID3 must be parsed,
+    // not scanned as audio. Exercise both common ID3v2 header versions.
+    let tag_size = 2 * 1024 * 1024;
+    for version in [3, 4] {
+        let mut tagged = vec![0; 10 + tag_size];
+        tagged[..6].copy_from_slice(&[b'I', b'D', b'3', version, 0, 0]);
+        for i in 0..4 {
+            tagged[6 + i] = ((tag_size >> (7 * (3 - i))) & 0x7f) as u8;
+        }
+        // Valid text frame followed by legal zero padding. The small frame's
+        // size has the same representation in v2.3 and v2.4.
+        tagged[10..26].copy_from_slice(b"TIT2\0\0\0\x06\0\0\0Title");
+        tagged.extend_from_slice(&source);
+        let path = dir.path().join(format!("tagged-v{version}.mp3"));
+        std::fs::write(&path, &tagged).unwrap();
+
+        let decoded = decode_file(&path, u64::MAX).unwrap();
+        assert_eq!(decoded.info.frames, reference.info.frames);
+        assert_eq!(decoded.planes, reference.planes);
+
+        // Follow the import path through resampling and the actual playback
+        // engine, so successful probing alone cannot hide silent playback.
+        let buffer = MediaStore::load_file(&path, 48_000, 1 << 30).unwrap();
+        let mut session = Session::new(120.0);
+        let track = session.audio_track();
+        session.place(track, 0, &buffer, "Tagged MP3");
+        let rendered = render(
+            &session.project,
+            &session.lookup(),
+            RenderRequest::whole_song(48_000),
+            None,
+        );
+        assert_eq!(rendered.report.clips, 1);
+        assert_eq!(rendered.report.missing_media, 0);
+        assert!(rendered.report.rms.iter().all(|&level| level > 0.05));
+        assert_eq!(std::fs::read(&path).unwrap(), tagged);
     }
 }
 

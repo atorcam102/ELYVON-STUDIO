@@ -52,6 +52,9 @@ enum Request {
     Configure(Vec<Route>),
     Refresh,
     Send(TrackId, Packet, SyncSender<Result<(), String>>),
+    /// Piano-roll audition: note on now, note off after the duration. Not
+    /// recorded.
+    Preview(TrackId, u8, u8, u8, Duration),
     Panic(SyncSender<()>),
     Start(
         Project,
@@ -133,6 +136,29 @@ impl MidiService {
             .map_err(|_| midi_error("MIDI send timed out"))?
             .map_err(midi_error)
     }
+    /// Auditions a note on the track's instrument or MIDI output; the note
+    /// is released by the worker after `duration` (at most 4 s), so a lost
+    /// pointer-up can never leave it hanging.
+    pub fn preview(
+        &self,
+        track: TrackId,
+        channel: u8,
+        pitch: u8,
+        velocity: u8,
+        duration: Duration,
+    ) -> IpcResult<()> {
+        if channel > 15 || pitch > 127 || !(1..=127).contains(&velocity) {
+            return Err(midi_error("invalid preview note"));
+        }
+        self.send_request(Request::Preview(
+            track,
+            channel,
+            pitch,
+            velocity,
+            duration.min(Duration::from_secs(4)),
+        ))
+        .map_err(midi_error)
+    }
     pub fn start_record(&self, state: &AppState, tick: u64) -> IpcResult<()> {
         let project = {
             let session = state.session();
@@ -195,6 +221,13 @@ impl MidiService {
             .spawn(move || {
                 let mut ports = Ports::new();
                 let mut recording: Option<MidiRecording> = None;
+                let mut previews: Vec<(Instant, TrackId, Packet)> = Vec::new();
+                // Live messages also play the track's built-in instrument.
+                let live = |track: TrackId, packet: &Packet| {
+                    app.state::<AppState>()
+                        .audio
+                        .send_live(track, packet.bytes());
+                };
                 let mut published = Instant::now() - Duration::from_secs(1);
                 loop {
                     let context = app.state::<AppState>().audio.poll_midi();
@@ -207,11 +240,15 @@ impl MidiService {
                             Request::Configure(routes) => ports.configure(routes, false),
                             Request::Refresh => ports.configure(ports.routes.clone(), true),
                             Request::Panic(reply) => {
+                                for (_, track, off) in previews.drain(..) {
+                                    live(track, &off);
+                                }
                                 ports.panic();
                                 let _ = reply.send(());
                             }
                             Request::Send(track, packet, reply) => {
                                 let now = Instant::now();
+                                live(track, &packet);
                                 let result = ports.send(track, packet, "virtual keyboard", now);
                                 if let Some(record) = &mut recording
                                     && let Some(shared) = &shared
@@ -219,6 +256,22 @@ impl MidiService {
                                     record.push(track, packet, now, shared);
                                 }
                                 let _ = reply.send(result);
+                            }
+                            Request::Preview(track, channel, pitch, velocity, duration) => {
+                                let now = Instant::now();
+                                let (Some(on), Some(off)) = (
+                                    Packet::parse(&[0x90 | channel, pitch, velocity]),
+                                    Packet::parse(&[0x80 | channel, pitch, 0]),
+                                ) else {
+                                    continue;
+                                };
+                                live(track, &on);
+                                if let Err(e) = ports.send(track, on, "preview", now) {
+                                    ports.error(e);
+                                }
+                                if previews.len() < 256 {
+                                    previews.push((now + duration, track, off));
+                                }
                             }
                             Request::Start(project, tick, cancelled, reply) => {
                                 let result = (|| -> Result<(), String> {
@@ -312,17 +365,30 @@ impl MidiService {
                                 incoming.packet,
                                 incoming.when,
                             );
-                            if route.io.midi_monitor
-                                && let Err(e) =
+                            if route.io.midi_monitor {
+                                live(route.track, &incoming.packet);
+                                if let Err(e) =
                                     ports.send(route.track, incoming.packet, "input", incoming.when)
-                            {
-                                ports.error(e);
+                                {
+                                    ports.error(e);
+                                }
                             }
                             if let (Some(record), Some(shared)) = (&mut recording, &shared) {
                                 record.push(route.track, incoming.packet, incoming.when, shared);
                             }
                         }
                     }
+                    let now = Instant::now();
+                    previews.retain(|&(due, track, off)| {
+                        if due > now {
+                            return true;
+                        }
+                        live(track, &off);
+                        if let Err(e) = ports.send(track, off, "preview", now) {
+                            ports.error(e);
+                        }
+                        false
+                    });
                     ports.tick();
                     if published.elapsed() >= Duration::from_millis(50) {
                         *lock(&status) = MidiStatus {

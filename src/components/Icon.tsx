@@ -53,6 +53,11 @@ import {
   Warning,
   Waveform,
   X,
+  Cursor,
+  Eraser,
+  MagnetStraight,
+  ArrowsOutLineHorizontal,
+  SpeakerHigh,
 } from "@phosphor-icons/react";
 
 const glyphs = {
@@ -112,6 +117,12 @@ const glyphs = {
   marker: Flag,
   tap: HandTap,
   follow: CrosshairSimple,
+  pointer: Cursor,
+  pencil: PencilSimple,
+  eraser: Eraser,
+  snap: MagnetStraight,
+  legato: ArrowsOutLineHorizontal,
+  audition: SpeakerHigh,
 } as const;
 export type IconName = keyof typeof glyphs;
 interface IconProps {

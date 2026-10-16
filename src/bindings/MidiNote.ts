@@ -2,5 +2,27 @@
 
 /**
  * A MIDI note with timing relative to the start of its region.
+ *
+ * Notes are the authoritative note data of a region (schema 4): the piano
+ * roll edits them and playback and SMF export read them. Controller,
+ * pitch-bend, pressure, program and SysEx events live in
+ * [`Region::midi_events`].
  */
-export type MidiNote = { pitch: number, velocity: number, start: number, length: number, };
+export type MidiNote = { 
+/**
+ * Unique within its region; stable across edits.
+ */
+id: number, pitch: number, velocity: number, 
+/**
+ * MIDI channel 0–15.
+ */
+channel: number, 
+/**
+ * A muted note is kept but not played or exported.
+ */
+muted: boolean, start: number, length: number, 
+/**
+ * `start` minus the position before quantisation (0 when unquantised),
+ * so quantise can be undone or re-applied from the played position.
+ */
+quantizeOffset: number, };

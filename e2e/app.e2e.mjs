@@ -84,7 +84,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     const view = await d.invoke("project_get");
     assert.equal(view.ok.dirty, false);
     const contracts = await d.invoke("app_contracts");
-    assert.deepEqual(contracts.ok, { ipc: 2, project: 3, audio: 1, jobs: 1 });
+    assert.deepEqual(contracts.ok, { ipc: 2, project: 4, audio: 1, jobs: 1 });
     await shot("01-empty");
   });
 
@@ -136,7 +136,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.ok(saved.ok.path.endsWith("session.elyvon"));
     const file = JSON.parse(readFileSync(saved.ok.path, "utf8"));
     assert.equal(file.format, "elyvon-studio-project");
-    assert.equal(file.schemaVersion, 3);
+    assert.equal(file.schemaVersion, 4);
     assert.equal(file.project.tracks[0].name, "Keys");
 
     const fresh = await d.invoke("project_new", { discardChanges: false });
@@ -215,7 +215,9 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     const midi = await d.find(".region--midi");
     await d.click(midi);
     await d.clickCss(".bottom-panel .tabs__tab:nth-child(2)"); // Piano Roll
-    await d.find(".pr-note");
+    await d.find('[data-testid="piano-roll"] .pr__canvas');
+    const count = await d.exec("return document.querySelector('.pr__sel')?.textContent ?? ''");
+    assert.match(count, /^0\/[1-9]\d* notes$/, "the demo region's notes are loaded into the editor");
     await shot("04-piano-roll");
     await d.clickCss(".bottom-panel .tabs__tab:nth-child(1)");
     await d.find(".file-list");
@@ -228,12 +230,33 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     const wav = join(work, "tone.wav");
     writeFileSync(wav, sineWav(44_100, 2, 440));
     const before = readFileSync(wav);
+    // Observe the event before import; reloading below must not mask missing
+    // ready notifications from files that bypass the background media loader.
+    const handler = await d.exec(`
+      window.__testMediaStatuses = [];
+      return window.__TAURI_INTERNALS__.transformCallback(event => {
+        window.__testMediaStatuses.push(...event.payload);
+      });
+    `);
+    const listener = await d.invoke("plugin:event|listen", { event: "media://status", target: { kind: "Any" }, handler });
+    assert.ok(listener.ok !== undefined, JSON.stringify(listener.err));
     const imported = await d.invoke("media_import", { paths: [wav], trackId: null, start: 0, layout: "newTracks" });
     assert.ok(imported.ok, JSON.stringify(imported.err));
     assert.equal(imported.ok.failures.length, 0);
     const project = imported.ok.view.project;
     assert.equal(project.media[0].info.sampleRate, 44_100);
     assert.equal(project.media[0].info.frames, 88_200);
+    const readyEvent = () => d.waitFor(
+      () => d.exec("return window.__testMediaStatuses.some(s => s.id === arguments[0] && s.state.state === 'ready')", [project.media[0].id]),
+      { message: "ready media event without reloading", timeout: 5000 },
+    );
+    await readyEvent();
+    await d.exec("window.__testMediaStatuses = []");
+    const relinked = await d.invoke("media_relink", { id: project.media[0].id, path: wav });
+    assert.ok(relinked.ok, JSON.stringify(relinked.err));
+    await readyEvent();
+    await d.invoke("plugin:event|unlisten", { event: "media://status", eventId: listener.ok });
+    await d.exec("window.__TAURI_INTERNALS__.unregisterCallback(arguments[0])", [handler]);
     await d.exec("location.reload()");
     await d.find(".region--audio", { timeout: 10_000 });
     await d.find('[data-testid="waveform"][data-state="ready"]', { timeout: 15_000 });
@@ -301,7 +324,9 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     const stopped=await d.invoke("midi_record_stop",{cancel:false});assert.ok(stopped.ok,JSON.stringify(stopped.err));
     await d.cmd("DELETE","/actions");
     const recorded=stopped.ok.project.tracks[0].regions[0];assert.equal(recorded.content.type,"midi");assert.ok(recorded.content.notes[0].length>=200,"stopping a held note preserves its duration");
-    assert.ok(recorded.midiEvents.some(e=>e.bytes[0]===0x80&&e.bytes[1]===60),"stop closes held MIDI keys");
+    // Schema 4: the held key becomes an editable note closed at stop.
+    assert.ok(recorded.content.notes.some(n=>n.pitch===60&&n.velocity===100),"stop closes held MIDI keys into a note");
+    assert.ok(recorded.midiEvents.every(e=>(e.bytes[0]&0xf0)!==0x80&&(e.bytes[0]&0xf0)!==0x90),"note messages are not duplicated as raw events");
     const file=join(work,"captured-midi.elyvon");assert.ok((await d.invoke("project_save",{path:file})).ok);
     const midiFile=join(work,"captured.mid");assert.equal((await d.invoke("midi_export",{path:midiFile})).ok,midiFile);assert.equal(readFileSync(midiFile).subarray(0,4).toString(),"MThd");
     assert.deepEqual(await d.stop(),[],"recording process exits without a forced kill");
@@ -312,7 +337,78 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     await d.invoke("project_new",{discardChanges:true});
     const imported=await d.invoke("midi_import",{path:midiFile,startTick:0,useFileTempo:true});assert.ok(imported.ok,JSON.stringify(imported.err));
     assert.deepEqual(imported.ok.project.tracks[0].regions[0].midiEvents,recorded.midiEvents,"SMF import/export preserves the recorded sequence");
+    const shape=(r)=>r.content.notes.map(n=>[n.pitch,n.velocity,n.channel,n.start,n.length]);
+    assert.deepEqual(shape(imported.ok.project.tracks[0].regions[0]),shape(recorded),"SMF round trip keeps the notes");
     await d.exec("location.reload()");await d.find(".controlbar",{timeout:10000});
+  });
+
+  it("draws notes with the piano-roll pencil and undoes them as one step each", async () => {
+    assert.ok((await d.invoke("project_new", { discardChanges: true })).ok);
+    const added = await d.invoke("project_apply", { command: { type: "addTrack", kind: "instrument" } });
+    const track = added.ok.outcome.createdTracks[0];
+    const region = await d.invoke("project_apply", { command: { type: "createMidiRegion", trackId: track, start: 0, length: 15360 } });
+    assert.ok(region.ok, JSON.stringify(region.err));
+    await d.exec("location.reload()");
+    await d.click(await d.find(".region--midi", { timeout: 10_000 }));
+    await d.clickCss(".bottom-panel .tabs__tab:nth-child(2)");
+    const canvas = await d.find(".pr__canvas");
+    const rect = await d.rect(canvas);
+    await d.clickCss('[title^="Pencil"]');
+    const click = (dx, dy) =>
+      d.cmd("POST", "/actions", {
+        actions: [{ type: "pointer", id: "pencil", parameters: { pointerType: "mouse" }, actions: [
+          { type: "pointerMove", duration: 0, origin: "viewport", x: Math.round(rect.x + dx), y: Math.round(rect.y + dy) },
+          { type: "pointerDown", button: 0 },
+          { type: "pointerUp", button: 0 },
+        ] }],
+      });
+    await click(140, Math.round(22 + (rect.height - 22) * 0.3));
+    await click(260, Math.round(22 + (rect.height - 22) * 0.8));
+    const notes = async () => (await d.invoke("project_get")).ok.project.tracks[0].regions[0].content.notes;
+    await d.waitFor(async () => (await notes()).length === 2, { message: "two notes drawn through the real canvas" });
+    const drawn = await notes();
+    assert.ok(drawn.every((n) => n.length > 0 && n.velocity === 100 && n.start % 240 === 0), "snapped to the 1/16 grid");
+    assert.ok(drawn[0].pitch > drawn[1].pitch, "lower on screen is lower in pitch");
+    await shot("10-piano-roll-drawn");
+    assert.ok((await d.invoke("project_undo")).ok);
+    assert.equal((await notes()).length, 1, "each drawn note is one undo step");
+    assert.ok((await d.invoke("project_redo")).ok);
+    assert.equal((await notes()).length, 2);
+    const smf = join(work, "drawn.mid");
+    assert.equal((await d.invoke("midi_export", { path: smf })).ok, smf);
+    assert.equal(readFileSync(smf).subarray(0, 4).toString(), "MThd");
+  });
+
+  it("routes a track through an aux bus and meters the real signal", async () => {
+    assert.ok((await d.invoke("project_new", { discardChanges: true })).ok);
+    const wav = join(work, "bus-tone.wav");
+    writeFileSync(wav, sineWav(48_000, 3, 440));
+    const imported = await d.invoke("media_import", { paths: [wav], trackId: null, start: 0, layout: "newTracks" });
+    assert.ok(imported.ok, JSON.stringify(imported.err));
+    const track = imported.ok.view.project.tracks[0].id;
+    const aux = await d.invoke("project_apply", { command: { type: "addAux", name: "Bus", sources: [] } });
+    const auxId = aux.ok.outcome.createdAuxes[0];
+    const routed = await d.invoke("project_apply", { command: { type: "setStrip", channel: { type: "track", id: track }, patch: { output: { type: "aux", id: auxId } } } });
+    assert.ok(routed.ok, JSON.stringify(routed.err));
+    // A cycle is refused before it applies.
+    const cycle = await d.invoke("project_apply", { command: { type: "setSend", channel: { type: "aux", id: auxId }, target: auxId, send: { target: auxId, levelDb: 0, preFader: false, muted: false } } });
+    assert.equal(cycle.err.code, "invalidEdit");
+    await d.exec("location.reload()");
+    await d.find(".controlbar", { timeout: 10_000 });
+    await d.clickCss(".bottom-panel .tabs__tab:nth-child(1)");
+    await d.find(`[data-channel="aux:${auxId}"]`);
+    await d.invoke("transport_command", { command: { type: "play", fromTick: 0, countIn: false, preRoll: false } });
+    const peak = (key) => d.exec(`return document.querySelector('[data-channel="${key}"] .strip__db-box--peak')?.textContent ?? ''`);
+    await d.waitFor(async () => (await peak(`aux:${auxId}`)) !== "−∞" && (await peak("master")) !== "−∞", { message: "bus and master meters show the engine signal", timeout: 10_000 });
+    const busDb = Number((await peak(`aux:${auxId}`)).replace("−", "-"));
+    // Mono file on an auto (mono) strip: 0.5 × −3 dB centre pan law ≈ −9 dBFS.
+    assert.ok(busDb > -10.5 && busDb < -7.5, `0.5-amplitude mono sine through the bus reads about −9 dBFS, got ${busDb}`);
+    await shot("11-mixer-bus-meters");
+    await d.invoke("transport_command", { command: { type: "stop" } });
+    const file = join(work, "routing.elyvon");
+    assert.ok((await d.invoke("project_save", { path: file })).ok);
+    const reopened = await d.invoke("project_open", { path: file, discardChanges: false });
+    assert.deepEqual(reopened.ok.project.tracks[0].strip.output, { type: "aux", id: auxId }, "routing is preserved on reopen");
   });
 
   it("explains why updates are unavailable instead of pretending", async () => {

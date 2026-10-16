@@ -17,7 +17,7 @@ use elyvon_project::{
 };
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Response;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use ts_rs::TS;
 
 use crate::error::{ErrorCode, IpcError, IpcResult};
@@ -257,6 +257,9 @@ pub async fn media_import(
         state.audio.insert_loaded(asset.id, &path, buffer);
     }
     state.audio.sync(&app);
+    // Imported buffers bypass the background loader, which normally publishes
+    // this event. Without it the UI stays at "Loading audio" until reloaded.
+    let _ = app.emit(crate::audio::MEDIA_EVENT, state.audio.media_statuses(&app));
     Ok(ImportResult {
         view,
         outcome,
@@ -292,6 +295,7 @@ pub async fn media_relink(app: AppHandle, id: MediaId, path: String) -> IpcResul
     state.audio.forget(id);
     state.audio.insert_loaded(id, &p, buffer);
     state.audio.sync(&app);
+    let _ = app.emit(crate::audio::MEDIA_EVENT, state.audio.media_statuses(&app));
     Ok(view)
 }
 

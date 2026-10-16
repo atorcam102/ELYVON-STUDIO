@@ -21,7 +21,11 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::contracts::{MidiEvent, MidiMessage};
-use crate::plan::{ClickSounds, MAX_TRACKS, PlanTrack, PlaybackPlan};
+use crate::dsp::Smoothed;
+use crate::plan::{
+    ClickSounds, Dest, MASTER_SLOT, MAX_AUXES, MAX_CHANNELS, MAX_TRACKS, PlanTrack, PlaybackPlan,
+    Strip,
+};
 use crate::transport::{EngineShared, PlayState, TransportCommand};
 
 /// What the audio engine can currently do, as reported to the UI.
@@ -122,11 +126,6 @@ impl MidiSink for NoMidi {
     fn event(&mut self, _: usize, _: MidiEvent) {}
 }
 
-const COMMAND_CAPACITY: usize = 256;
-const PLAN_CAPACITY: usize = 4;
-const GARBAGE_CAPACITY: usize = 8;
-const MAX_EVENTS_PER_TRACK_SPAN: usize = 256;
-
 /// Input-side monitor writer. Returned to the control handle when the input
 /// stream is dropped, so repeated Record/Stop does not lose the monitor bus.
 #[derive(Debug)]
@@ -149,6 +148,42 @@ impl Drop for MonitorInput {
     }
 }
 
+const COMMAND_CAPACITY: usize = 256;
+const PLAN_CAPACITY: usize = 4;
+const GARBAGE_CAPACITY: usize = 8;
+const MAX_EVENTS_PER_TRACK_SPAN: usize = 256;
+const LIVE_CAPACITY: usize = 1024;
+/// Internal processing block. Larger callbacks are split, so bus buffers
+/// stay small whatever the device buffer size.
+const CHUNK: usize = 1024;
+
+/// A live MIDI channel message for one track's internal instrument
+/// (virtual keyboard, MIDI input monitor, piano-roll preview).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LiveMidi {
+    /// `TrackId` bits.
+    pub track: u128,
+    pub len: u8,
+    pub data: [u8; 3],
+}
+
+impl LiveMidi {
+    /// `None` for SysEx/system messages (the test instrument ignores them).
+    pub fn new(track: u128, bytes: &[u8]) -> Option<Self> {
+        let n = bytes.len();
+        if !(1..=3).contains(&n) || bytes[0] >= 0xf0 || bytes[0] < 0x80 {
+            return None;
+        }
+        let mut data = [0; 3];
+        data[..n].copy_from_slice(bytes);
+        Some(Self {
+            track,
+            len: n as u8,
+            data,
+        })
+    }
+}
+
 /// Control-thread side of an engine.
 #[derive(Debug)]
 pub struct EngineHandle {
@@ -163,6 +198,7 @@ pub struct EngineHandle {
     sample_rate: u32,
     midi_output: Consumer<crate::midi::ScheduledPacket>,
     midi_overflow: Arc<std::sync::atomic::AtomicBool>,
+    live: Producer<LiveMidi>,
 }
 
 impl EngineHandle {
@@ -175,6 +211,12 @@ impl EngineHandle {
             .midi_overflow
             .swap(false, std::sync::atomic::Ordering::AcqRel);
         (packets, overflow)
+    }
+
+    /// Queues a live message for a track's internal instrument. `false` if
+    /// the queue is full.
+    pub fn send_live(&mut self, message: LiveMidi) -> bool {
+        self.live.push(message).is_ok()
     }
 
     pub fn take_monitor_input(&mut self) -> Option<MonitorInput> {
@@ -247,8 +289,29 @@ pub struct TrackMeasure {
 struct PendingEvent {
     frame: u32,
     off: bool,
+    channel: u8,
     pitch: u8,
     velocity: u8,
+}
+
+/// A channel message for the internal instrument within one span.
+#[derive(Debug, Clone, Copy)]
+struct SynthEvent {
+    frame: u32,
+    /// 0 = controller/bend/pressure, 1 = note-off, 2 = note-on.
+    class: u8,
+    seq: u16,
+    len: u8,
+    data: [u8; 3],
+}
+
+type NoteCounts = [[u8; 128]; 16];
+
+/// Per-channel post-fader audio of the last processed block (offline stems).
+#[derive(Debug)]
+struct Stems {
+    frames: usize,
+    data: Vec<f32>,
 }
 
 /// The real-time side. Move it into the audio callback.
@@ -258,19 +321,32 @@ pub struct Engine {
     garbage: Producer<Box<PlaybackPlan>>,
     commands: Consumer<TransportCommand>,
     monitor: Consumer<[f32; 2]>,
+    live: Consumer<LiveMidi>,
     shared: Arc<EngineShared>,
     state: PlayState,
     position: u64,
     play_start: u64,
     count_in: Option<CountIn>,
     max_block: usize,
-    /// Stereo interleaved scratch for one track and for the master.
+    chunk: usize,
+    /// Interleaved stereo scratch buffers of `chunk` frames.
     track_buf: Vec<f32>,
+    scratch: Vec<f32>,
+    edge: Vec<f32>,
+    /// One `chunk` per auxiliary channel.
+    bus: Vec<f32>,
+    master_buf: Vec<f32>,
     mix: Vec<f32>,
-    /// Sounding-note counts per track and pitch (stuck-note protection).
-    active_notes: Vec<[u8; 128]>,
+    /// Sounding-note counts per track, channel and pitch (stuck-note protection).
+    active_notes: Vec<NoteCounts>,
+    active_scratch: Vec<NoteCounts>,
+    active_any: Vec<u32>,
+    any_scratch: Vec<u32>,
     events: Vec<PendingEvent>,
+    synth_events: Vec<SynthEvent>,
     measure: Option<Vec<TrackMeasure>>,
+    stems: Option<Stems>,
+    block_offset: usize,
     clip_output: bool,
     release_pending: bool,
     callback_frames: u32,
@@ -289,16 +365,18 @@ impl std::fmt::Debug for Engine {
     }
 }
 
-/// Creates a connected engine pair. `max_block` bounds the internal block;
-/// larger callbacks are processed in several internal blocks.
+/// Creates a connected engine pair. `max_block` bounds a callback for
+/// offline stems; larger device callbacks are processed in internal blocks.
 pub fn create(sample_rate: u32, max_block: usize, plan: PlaybackPlan) -> (EngineHandle, Engine) {
     assert_eq!(plan.sample_rate, sample_rate, "plan built for another rate");
     let max_block = max_block.clamp(16, 1 << 15);
+    let chunk = max_block.min(CHUNK);
     let (cmd_tx, cmd_rx) = RingBuffer::new(COMMAND_CAPACITY);
     let (monitor_tx, monitor_rx) = RingBuffer::new(2048);
     let (monitor_sender, monitor_returns) = std::sync::mpsc::channel();
     let (plan_tx, plan_rx) = RingBuffer::new(PLAN_CAPACITY);
     let (garbage_tx, garbage_rx) = RingBuffer::new(GARBAGE_CAPACITY);
+    let (live_tx, live_rx) = RingBuffer::new(LIVE_CAPACITY);
     let shared = Arc::new(EngineShared::new(sample_rate));
     let (midi_tx, midi_rx) = RingBuffer::new(4096);
     let midi_overflow = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -314,6 +392,7 @@ pub fn create(sample_rate: u32, max_block: usize, plan: PlaybackPlan) -> (Engine
         sample_rate,
         midi_output: midi_rx,
         midi_overflow: Arc::clone(&midi_overflow),
+        live: live_tx,
     };
     let engine = Engine {
         plan: Box::new(plan),
@@ -321,17 +400,29 @@ pub fn create(sample_rate: u32, max_block: usize, plan: PlaybackPlan) -> (Engine
         garbage: garbage_tx,
         commands: cmd_rx,
         monitor: monitor_rx,
+        live: live_rx,
         shared,
         state: PlayState::Stopped,
         position: 0,
         play_start: 0,
         count_in: None,
         max_block,
-        track_buf: vec![0.0; max_block * 2],
-        mix: vec![0.0; max_block * 2],
-        active_notes: vec![[0u8; 128]; MAX_TRACKS],
+        chunk,
+        track_buf: vec![0.0; chunk * 2],
+        scratch: vec![0.0; chunk * 2],
+        edge: vec![0.0; chunk * 2],
+        bus: vec![0.0; MAX_AUXES * chunk * 2],
+        master_buf: vec![0.0; chunk * 2],
+        mix: vec![0.0; chunk * 2],
+        active_notes: vec![[[0u8; 128]; 16]; MAX_TRACKS],
+        active_scratch: vec![[[0u8; 128]; 16]; MAX_TRACKS],
+        active_any: vec![0; MAX_TRACKS],
+        any_scratch: vec![0; MAX_TRACKS],
         events: Vec::with_capacity(MAX_EVENTS_PER_TRACK_SPAN),
+        synth_events: Vec::with_capacity(MAX_EVENTS_PER_TRACK_SPAN * 2),
         measure: None,
+        stems: None,
+        block_offset: 0,
         clip_output: true,
         release_pending: false,
         callback_frames: 0,
@@ -340,6 +431,180 @@ pub fn create(sample_rate: u32, max_block: usize, plan: PlaybackPlan) -> (Engine
         midi_overflow,
     };
     (handle, engine)
+}
+
+/// Accumulated block meter for one strip.
+#[derive(Debug, Clone, Copy, Default)]
+struct BlockMeter {
+    peak: [f32; 2],
+    sum: [f64; 2],
+    clipped: bool,
+}
+
+impl BlockMeter {
+    #[inline]
+    fn scan(buf: &[f32]) -> Self {
+        let mut m = Self::default();
+        for f in buf.as_chunks::<2>().0.iter() {
+            for (ch, &v) in f.iter().enumerate() {
+                let a = v.abs();
+                if a > 1.0 || a.is_nan() {
+                    // Over full scale, or NaN/inf.
+                    m.clipped = true;
+                }
+                if a.is_finite() {
+                    m.peak[ch] = m.peak[ch].max(a);
+                    m.sum[ch] += f64::from(v) * f64::from(v);
+                }
+            }
+        }
+        m
+    }
+}
+
+/// Adds `src` × ramped `gain` into `dst`, through `delay` when it has length.
+#[inline]
+fn route(
+    src: &[f32],
+    dst: &mut [f32],
+    gain: &mut Smoothed,
+    delay: &mut crate::dsp::StereoDelay,
+    edge: &mut [f32],
+) {
+    let n = src.len() / 2;
+    if gain.is_silent() {
+        // Keep the delay line's timeline consistent with silence.
+        if delay.frames() > 0 {
+            edge[..src.len()].fill(0.0);
+            delay.process(&mut edge[..src.len()]);
+        }
+        return;
+    }
+    let input: &[f32] = if delay.frames() > 0 {
+        edge[..src.len()].copy_from_slice(src);
+        delay.process(&mut edge[..src.len()]);
+        &edge[..src.len()]
+    } else {
+        src
+    };
+    if gain.is_steady() {
+        let (gl, gr) = gain.target;
+        for (d, s) in dst
+            .as_chunks_mut::<2>()
+            .0
+            .iter_mut()
+            .zip(input.as_chunks::<2>().0.iter())
+        {
+            d[0] += s[0] * gl;
+            d[1] += s[1] * gr;
+        }
+    } else {
+        for (i, (d, s)) in dst
+            .as_chunks_mut::<2>()
+            .0
+            .iter_mut()
+            .zip(input.as_chunks::<2>().0.iter())
+            .enumerate()
+        {
+            let (gl, gr) = gain.at(i, n);
+            d[0] += s[0] * gl;
+            d[1] += s[1] * gr;
+        }
+        gain.settle();
+    }
+}
+
+/// Processes one strip on `buf` (its input, `len` frames) and routes the
+/// result into the aux buses or the master input. Real-time safe.
+#[allow(clippy::too_many_arguments)]
+fn process_strip(
+    strip: &mut Strip,
+    buf: &mut [f32],
+    edge: &mut [f32],
+    bus: &mut [f32],
+    master: &mut [f32],
+    chunk: usize,
+    shared: &EngineShared,
+    stems: Option<&mut Stems>,
+    stem_offset: usize,
+) -> BlockMeter {
+    let len = buf.len() / 2;
+    if strip.mono {
+        for f in buf.as_chunks_mut::<2>().0.iter_mut() {
+            let m = 0.5 * (f[0] + f[1]);
+            f[0] = m;
+            f[1] = m;
+        }
+    }
+    for insert in &mut strip.inserts {
+        insert.process(buf);
+    }
+    let bus_slice = |bus: &mut [f32], aux: usize| -> std::ops::Range<usize> {
+        let start = aux * chunk * 2;
+        let _ = bus;
+        start..start + len * 2
+    };
+    for send in strip.sends.iter_mut().filter(|s| s.pre_fader) {
+        let r = bus_slice(bus, send.aux);
+        route(buf, &mut bus[r], &mut send.gain, &mut send.delay, edge);
+    }
+    if strip.fader.is_steady() {
+        let (gl, gr) = strip.fader.target;
+        if (gl, gr) != (1.0, 1.0) {
+            for f in buf.as_chunks_mut::<2>().0.iter_mut() {
+                f[0] *= gl;
+                f[1] *= gr;
+            }
+        }
+    } else {
+        for (i, f) in buf.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+            let (gl, gr) = strip.fader.at(i, len);
+            f[0] *= gl;
+            f[1] *= gr;
+        }
+        strip.fader.settle();
+    }
+    for send in strip.sends.iter_mut().filter(|s| !s.pre_fader) {
+        let r = bus_slice(bus, send.aux);
+        route(buf, &mut bus[r], &mut send.gain, &mut send.delay, edge);
+    }
+    let meter = BlockMeter::scan(buf);
+    shared.meter(
+        strip.meter_slot,
+        meter.peak,
+        meter.sum,
+        len as u64,
+        meter.clipped,
+    );
+    if let Some(stems) = stems {
+        let gate = strip.out_gate.target.0;
+        let base = (strip.meter_slot * stems.frames + stem_offset) * 2;
+        if let Some(dst) = stems.data.get_mut(base..base + len * 2) {
+            for (d, s) in dst.iter_mut().zip(buf.iter()) {
+                *d = s * gate;
+            }
+        }
+    }
+    match strip.output {
+        Dest::Master => route(
+            buf,
+            &mut master[..len * 2],
+            &mut strip.out_gate,
+            &mut strip.out_delay,
+            edge,
+        ),
+        Dest::Aux(a) => {
+            let r = bus_slice(bus, a);
+            route(
+                buf,
+                &mut bus[r],
+                &mut strip.out_gate,
+                &mut strip.out_delay,
+                edge,
+            )
+        }
+    }
+    meter
 }
 
 impl Engine {
@@ -379,6 +644,28 @@ impl Engine {
         self.measure.as_deref()
     }
 
+    /// Captures every strip's post-fader output of each `process` call
+    /// (allocates; offline renders only). Read it with [`Self::stem`].
+    pub fn enable_stems(&mut self) {
+        self.stems = Some(Stems {
+            frames: self.max_block,
+            data: vec![0.0; MAX_CHANNELS * self.max_block * 2],
+        });
+    }
+
+    /// Interleaved stereo stem of meter slot `slot` for the last
+    /// `frames` processed frames.
+    pub fn stem(&self, slot: usize, frames: usize) -> Option<&[f32]> {
+        let s = self.stems.as_ref()?;
+        let base = slot * s.frames * 2;
+        s.data.get(base..base + frames.min(s.frames) * 2)
+    }
+
+    /// Insert latency of the current graph's longest path, in frames.
+    pub fn latency_frames(&self) -> usize {
+        self.plan.stats.latency_frames
+    }
+
     /// Renders `out.len() / channels` interleaved frames. Real-time safe.
     pub fn process(&mut self, out: &mut [f32], channels: usize, midi: &mut dyn MidiSink) {
         let Some(mut output) = self.midi_output.take() else {
@@ -399,6 +686,7 @@ impl Engine {
         self.process_audio(out, channels, &mut forward);
         self.midi_output = Some(output);
     }
+
     fn process_audio(&mut self, out: &mut [f32], channels: usize, midi: &mut dyn MidiSink) {
         let started = Instant::now();
         let channels = channels.max(1);
@@ -412,19 +700,35 @@ impl Engine {
         }
         self.swap_plan(midi);
         self.drain_commands(midi);
+        self.drain_live();
+        if let Some(s) = self.stems.as_mut() {
+            s.data.fill(0.0);
+        }
         let mut done = 0;
         while done < frames {
-            let n = (frames - done).min(self.max_block);
+            let n = (frames - done).min(self.chunk);
+            self.block_offset = done;
             self.mix[..n * 2].fill(0.0);
             self.render(n, done as u32, midi);
             let dst = &mut out[done * channels..(done + n) * channels];
             let (mut pl, mut pr) = (0.0f32, 0.0f32);
+            let (mut sl, mut sr) = (0.0f64, 0.0f64);
+            let mut clipped = false;
             for (i, frame) in dst.chunks_exact_mut(channels).enumerate() {
                 let input = self.monitor.pop().unwrap_or([0.0; 2]);
                 let mut l = self.mix[i * 2] + input[0];
                 let mut r = self.mix[i * 2 + 1] + input[1];
+                if !l.is_finite() || !r.is_finite() {
+                    // Never pass NaN/inf to a device.
+                    l = 0.0;
+                    r = 0.0;
+                    clipped = true;
+                }
                 pl = pl.max(l.abs());
                 pr = pr.max(r.abs());
+                sl += f64::from(l) * f64::from(l);
+                sr += f64::from(r) * f64::from(r);
+                clipped |= l.abs() > 1.0 || r.abs() > 1.0;
                 if self.clip_output {
                     l = l.clamp(-1.0, 1.0);
                     r = r.clamp(-1.0, 1.0);
@@ -439,8 +743,14 @@ impl Engine {
                     }
                 }
             }
-            self.shared.peak_master(0, pl);
-            self.shared.peak_master(1, pr);
+            self.shared
+                .meter(MASTER_SLOT, [pl, pr], [sl, sr], n as u64, clipped);
+            if let Some(stems) = self.stems.as_mut() {
+                let base = (MASTER_SLOT * stems.frames + done) * 2;
+                if let Some(d) = stems.data.get_mut(base..base + n * 2) {
+                    d.copy_from_slice(&self.mix[..n * 2]);
+                }
+            }
             done += n;
         }
         let ticks = self
@@ -460,9 +770,19 @@ impl Engine {
             .add_block(frames as u64, started.elapsed().as_nanos() as u64);
     }
 
+    fn drain_live(&mut self) {
+        while let Ok(m) = self.live.pop() {
+            if let Some(i) = self.plan.find_track(m.track)
+                && let Some(synth) = self.plan.tracks[i].synth.as_mut()
+            {
+                synth.message(&m.data[..usize::from(m.len)]);
+            }
+        }
+    }
+
     fn swap_plan(&mut self, midi: &mut dyn MidiSink) {
         while self.garbage.slots() > 0 {
-            let Ok(new) = self.plans.pop() else { break };
+            let Ok(mut new) = self.plans.pop() else { break };
             if new.map_key != self.plan.map_key {
                 // Keep the musical position when the tempo map changes.
                 let rate = self.plan.sample_rate;
@@ -475,11 +795,72 @@ impl Engine {
                 self.position = remap(self.position, &self.plan, &new);
                 self.play_start = remap(self.play_start, &self.plan, &new);
             }
-            self.all_notes_off(0, midi);
+            new.adopt(&mut self.plan);
+            self.carry_notes(&mut new, midi);
             let old = std::mem::replace(&mut self.plan, new);
             // A free slot was checked above; push cannot fail.
             let _ = self.garbage.push(old);
         }
+    }
+
+    /// Keeps notes that still sound in the new graph and releases the rest,
+    /// so editing during playback neither cuts held notes nor leaves any
+    /// hanging. Allocation-free.
+    fn carry_notes(&mut self, new: &mut PlaybackPlan, midi: &mut dyn MidiSink) {
+        let at = self.position;
+        let playing = self.state == PlayState::Playing;
+        for (i, any) in self.active_any.iter_mut().enumerate() {
+            if *any == 0 {
+                continue;
+            }
+            let target = self
+                .plan
+                .tracks
+                .get(i)
+                .and_then(|t| new.find_track(t.key))
+                .filter(|&j| new.tracks[j].audible);
+            for ch in 0..16u8 {
+                for pitch in 0..128u8 {
+                    let count = &mut self.active_notes[i][ch as usize][pitch as usize];
+                    if *count == 0 {
+                        continue;
+                    }
+                    let keep =
+                        playing && target.is_some_and(|j| new.tracks[j].covers(at, ch, pitch));
+                    let releases = if keep { *count - 1 } else { *count };
+                    for _ in 0..releases {
+                        midi.event(
+                            i,
+                            MidiEvent {
+                                frame_offset: 0,
+                                message: MidiMessage::NoteOff {
+                                    channel: ch,
+                                    pitch,
+                                    velocity: 0,
+                                },
+                            },
+                        );
+                        if let Some(synth) = target
+                            .or_else(|| self.plan.tracks.get(i).and_then(|t| new.find_track(t.key)))
+                            .and_then(|j| new.tracks[j].synth.as_mut())
+                        {
+                            synth.message(&[0x80 | ch, pitch, 0]);
+                        }
+                    }
+                    if let (true, Some(j)) = (keep, target) {
+                        let slot = &mut self.active_scratch[j][ch as usize][pitch as usize];
+                        if *slot == 0 {
+                            self.any_scratch[j] += 1;
+                        }
+                        *slot = 1;
+                    }
+                    *count = 0;
+                }
+            }
+            *any = 0;
+        }
+        std::mem::swap(&mut self.active_notes, &mut self.active_scratch);
+        std::mem::swap(&mut self.active_any, &mut self.any_scratch);
     }
 
     fn drain_commands(&mut self, midi: &mut dyn MidiSink) {
@@ -575,22 +956,20 @@ impl Engine {
 
     fn all_notes_off(&mut self, frame: u32, midi: &mut dyn MidiSink) {
         midi.reset(frame);
-        for (track, notes) in self.active_notes.iter_mut().enumerate() {
-            for (pitch, count) in notes.iter_mut().enumerate() {
-                while *count > 0 {
-                    *count -= 1;
-                    midi.event(
-                        track,
-                        MidiEvent {
-                            frame_offset: frame,
-                            message: MidiMessage::NoteOff {
-                                channel: 0,
-                                pitch: pitch as u8,
-                                velocity: 0,
-                            },
-                        },
-                    );
-                }
+        for (track, (notes, any)) in self
+            .active_notes
+            .iter_mut()
+            .zip(self.active_any.iter_mut())
+            .enumerate()
+        {
+            if *any == 0 {
+                continue;
+            }
+            release_track(notes, any, track, frame, midi);
+        }
+        for track in &mut self.plan.tracks {
+            if let Some(s) = track.synth.as_mut() {
+                s.all_notes_off();
             }
         }
     }
@@ -623,6 +1002,9 @@ impl Engine {
                 self.position,
                 self.state,
             );
+            // Live instruments (virtual keyboard, previews) and their effects
+            // keep sounding while the transport is stopped.
+            self.render_graph(self.position, n - off, off, base, midi, false);
             return;
         }
         while off < n {
@@ -634,7 +1016,14 @@ impl Engine {
             {
                 len = (ce - self.position) as usize;
             }
-            self.render_span(self.position, len, off, base, midi);
+            self.shared.record_clock(
+                self.callback_clock,
+                base + off as u32,
+                len,
+                self.position,
+                PlayState::Playing,
+            );
+            self.render_graph(self.position, len, off, base, midi, true);
             self.position += len as u64;
             off += len;
             if let Some((cs, ce)) = cycle
@@ -682,72 +1071,163 @@ impl Engine {
         }
     }
 
-    fn render_span(
+    /// Processes the mixer graph for `[pos, pos + len)`. With `timeline`
+    /// false only live sources (instruments) play and no events are read.
+    #[allow(clippy::too_many_arguments)]
+    fn render_graph(
         &mut self,
         pos: u64,
         len: usize,
         off: usize,
         base: u32,
         midi: &mut dyn MidiSink,
+        timeline: bool,
     ) {
-        self.shared.record_clock(
-            self.callback_clock,
-            base + off as u32,
-            len,
-            pos,
-            PlayState::Playing,
-        );
+        if len == 0 {
+            return;
+        }
         let q = pos + len as u64;
-        let plan = &*self.plan;
-        for (ti, track) in plan.tracks.iter().enumerate() {
+        let chunk = self.chunk;
+        let stem_offset = self.block_offset + off;
+        let plan = &mut *self.plan;
+        for a in 0..plan.auxes.len() {
+            self.bus[a * chunk * 2..a * chunk * 2 + len * 2].fill(0.0);
+        }
+        self.master_buf[..len * 2].fill(0.0);
+        let frame0 = base + off as u32;
+        for (ti, track) in plan.tracks.iter_mut().enumerate() {
+            self.synth_events.clear();
             if !track.audible {
-                release_track(&mut self.active_notes[ti], ti, base + off as u32, midi);
-                continue;
-            }
-            if !track.segments.is_empty() {
-                let buf = &mut self.track_buf[..len * 2];
-                buf.fill(0.0);
-                if mix_track(track, pos, q, buf, &self.shared) {
-                    let (mut peak, mut sum) = (0.0f32, 0.0f64);
-                    let dst = &mut self.mix[off * 2..(off + len) * 2];
-                    for (d, s) in dst.iter_mut().zip(buf.iter()) {
-                        *d += *s;
-                        peak = peak.max(s.abs());
-                        sum += f64::from(*s) * f64::from(*s);
+                release_track(
+                    &mut self.active_notes[ti],
+                    &mut self.active_any[ti],
+                    ti,
+                    frame0,
+                    midi,
+                );
+                if let Some(s) = track.synth.as_mut()
+                    && s.active_voices() > 0
+                {
+                    s.all_notes_off();
+                }
+            } else if timeline {
+                let first = track.events.partition_point(|e| e.on < pos);
+                for (seq, event) in track.events[first..]
+                    .iter()
+                    .take_while(|e| e.on < q)
+                    .enumerate()
+                {
+                    let frame = (event.on - pos) as u32;
+                    midi.packet(ti, frame0 + frame, event.packet);
+                    let bytes = event.packet.bytes();
+                    if track.synth.is_some()
+                        && (1..=3).contains(&bytes.len())
+                        && bytes[0] < 0xf0
+                        && self.synth_events.len() < self.synth_events.capacity()
+                    {
+                        let mut data = [0; 3];
+                        data[..bytes.len()].copy_from_slice(bytes);
+                        self.synth_events.push(SynthEvent {
+                            frame,
+                            class: 0,
+                            seq: seq.min(u16::MAX as usize) as u16,
+                            len: bytes.len() as u8,
+                            data,
+                        });
                     }
-                    self.shared.peak_track(ti, peak);
-                    if let Some(m) = self.measure.as_mut().and_then(|m| m.get_mut(ti)) {
-                        m.peak = m.peak.max(peak);
-                        m.sum_squares += sum;
-                    }
+                }
+                if !track.notes.is_empty() {
+                    schedule_notes(
+                        track,
+                        pos,
+                        q,
+                        frame0,
+                        &mut self.events,
+                        &mut self.active_notes[ti],
+                        &mut self.active_any[ti],
+                        ti,
+                        &self.shared,
+                        midi,
+                        &mut self.synth_events,
+                    );
                 }
             }
             if let Some(m) = self.measure.as_mut().and_then(|m| m.get_mut(ti)) {
                 m.frames += len as u64;
             }
-            let first = track.events.partition_point(|e| e.on < pos);
-            for event in track.events[first..].iter().take_while(|e| e.on < q) {
-                midi.packet(
-                    ti,
-                    base + off as u32 + (event.on - pos) as u32,
-                    event.packet,
-                );
+            let has_synth_sound = track.synth.as_ref().is_some_and(|s| s.active_voices() > 0)
+                || !self.synth_events.is_empty();
+            if !has_synth_sound && (!timeline || track.strip.is_idle()) {
+                continue;
             }
-            if !track.notes.is_empty() {
-                schedule_notes(
-                    track,
-                    pos,
-                    q,
-                    base + off as u32,
-                    &mut self.events,
-                    &mut self.active_notes[ti],
-                    ti,
-                    &self.shared,
-                    midi,
-                );
+            let buf = &mut self.track_buf[..len * 2];
+            buf.fill(0.0);
+            if timeline && !track.segments.is_empty() {
+                mix_track(track, pos, q, buf, &self.shared);
+            }
+            if let Some(synth) = track.synth.as_mut() {
+                self.synth_events
+                    .sort_unstable_by_key(|e| (e.frame, e.class, e.seq));
+                let mut cursor = 0usize;
+                for e in &self.synth_events {
+                    let f = (e.frame as usize).min(len);
+                    if f > cursor {
+                        synth.render(&mut buf[cursor * 2..f * 2]);
+                        cursor = f;
+                    }
+                    synth.message(&e.data[..usize::from(e.len)]);
+                }
+                synth.render(&mut buf[cursor * 2..len * 2]);
+            }
+            let meter = process_strip(
+                &mut track.strip,
+                buf,
+                &mut self.edge,
+                &mut self.bus,
+                &mut self.master_buf,
+                chunk,
+                &self.shared,
+                self.stems.as_mut(),
+                stem_offset,
+            );
+            if let Some(m) = self.measure.as_mut().and_then(|m| m.get_mut(ti)) {
+                m.peak = m.peak.max(meter.peak[0].max(meter.peak[1]));
+                m.sum_squares += meter.sum[0] + meter.sum[1];
             }
         }
-        if plan.metronome {
+        for &a in &plan.aux_order {
+            let strip = &mut plan.auxes[a].strip;
+            if strip.is_idle() {
+                continue;
+            }
+            let scratch = &mut self.scratch[..len * 2];
+            scratch.copy_from_slice(&self.bus[a * chunk * 2..a * chunk * 2 + len * 2]);
+            process_strip(
+                strip,
+                scratch,
+                &mut self.edge,
+                &mut self.bus,
+                &mut self.master_buf,
+                chunk,
+                &self.shared,
+                self.stems.as_mut(),
+                stem_offset,
+            );
+        }
+        let master = &mut plan.master;
+        let buf = &mut self.master_buf[..len * 2];
+        for insert in &mut master.inserts {
+            insert.process(buf);
+        }
+        let dst = &mut self.mix[off * 2..(off + len) * 2];
+        route(
+            buf,
+            dst,
+            &mut master.fader,
+            &mut master.out_delay,
+            &mut self.edge,
+        );
+        if timeline && plan.metronome {
             let clicks = &plan.clicks;
             let rate = plan.sample_rate;
             let lookback = pos.saturating_sub(clicks.len() as u64);
@@ -781,8 +1261,9 @@ fn mix_click(mix: &mut [f32], off: usize, from: u64, to: u64, at: u64, sound: &[
     }
 }
 
-/// Mixes a track's audio for `[p, q)` into `buf` (stereo). Returns whether
-/// anything was written.
+/// Mixes a track's audio for `[p, q)` into `buf` (stereo) at unity: the
+/// strip applies format, inserts, fader and pan. Returns whether anything
+/// was written.
 fn mix_track(track: &PlanTrack, p: u64, q: u64, buf: &mut [f32], shared: &EngineShared) -> bool {
     let mut any = false;
     for seg in &track.segments[track.segment_range(p, q)] {
@@ -794,12 +1275,6 @@ fn mix_track(track: &PlanTrack, p: u64, q: u64, buf: &mut [f32], shared: &Engine
         any = true;
         let media = &seg.media;
         let before = media.stream.as_ref().map_or(0, |s| s.underruns());
-        let stereo = media.channels() > 1;
-        let (gl, gr) = if stereo {
-            track.stereo_gain
-        } else {
-            track.mono_gain
-        };
         for t in a..b {
             let Some(src) = seg.source_frame(t) else {
                 break;
@@ -807,8 +1282,8 @@ fn mix_track(track: &PlanTrack, p: u64, q: u64, buf: &mut [f32], shared: &Engine
             let g = seg.envelope(t);
             let [left, right] = media.sample(src);
             let i = ((t - p) as usize) * 2;
-            buf[i] += left * g * gl;
-            buf[i + 1] += right * g * gr;
+            buf[i] += left * g;
+            buf[i + 1] += right * g;
         }
         let after = media.stream.as_ref().map_or(0, |s| s.underruns());
         shared.add_streaming_underruns(after.saturating_sub(before));
@@ -816,23 +1291,35 @@ fn mix_track(track: &PlanTrack, p: u64, q: u64, buf: &mut [f32], shared: &Engine
     any
 }
 
-fn release_track(notes: &mut [u8; 128], track: usize, frame: u32, midi: &mut dyn MidiSink) {
-    for (pitch, count) in notes.iter_mut().enumerate() {
-        while *count > 0 {
-            *count -= 1;
-            midi.event(
-                track,
-                MidiEvent {
-                    frame_offset: frame,
-                    message: MidiMessage::NoteOff {
-                        channel: 0,
-                        pitch: pitch as u8,
-                        velocity: 0,
+fn release_track(
+    notes: &mut NoteCounts,
+    any: &mut u32,
+    track: usize,
+    frame: u32,
+    midi: &mut dyn MidiSink,
+) {
+    if *any == 0 {
+        return;
+    }
+    for (channel, pitches) in notes.iter_mut().enumerate() {
+        for (pitch, count) in pitches.iter_mut().enumerate() {
+            while *count > 0 {
+                *count -= 1;
+                midi.event(
+                    track,
+                    MidiEvent {
+                        frame_offset: frame,
+                        message: MidiMessage::NoteOff {
+                            channel: channel as u8,
+                            pitch: pitch as u8,
+                            velocity: 0,
+                        },
                     },
-                },
-            );
+                );
+            }
         }
     }
+    *any = 0;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -842,10 +1329,12 @@ fn schedule_notes(
     q: u64,
     frame0: u32,
     events: &mut Vec<PendingEvent>,
-    active: &mut [u8; 128],
+    active: &mut NoteCounts,
+    any: &mut u32,
     ti: usize,
     shared: &EngineShared,
     midi: &mut dyn MidiSink,
+    synth_events: &mut Vec<SynthEvent>,
 ) {
     events.clear();
     let mut overflow = false;
@@ -868,6 +1357,7 @@ fn schedule_notes(
             push(PendingEvent {
                 frame: (note.on - p) as u32,
                 off: false,
+                channel: note.channel,
                 pitch: note.pitch,
                 velocity: note.velocity,
             });
@@ -876,39 +1366,59 @@ fn schedule_notes(
             push(PendingEvent {
                 frame: (note.off - p) as u32,
                 off: true,
+                channel: note.channel,
                 pitch: note.pitch,
                 velocity: 0,
             });
         }
     }
     if overflow {
-        release_track(active, ti, frame0, midi);
+        release_track(active, any, ti, frame0, midi);
         midi.reset(frame0);
         events.clear();
         return;
     }
     // Stable order: by frame, note-offs before note-ons (allocation-free sort).
-    events.sort_unstable_by_key(|e| (e.frame, !e.off, e.pitch));
-    for e in events.iter() {
-        let count = &mut active[e.pitch as usize];
+    events.sort_unstable_by_key(|e| (e.frame, !e.off, e.channel, e.pitch));
+    let instrument = track.synth.is_some();
+    for (seq, e) in events.iter().enumerate() {
+        let count = &mut active[e.channel as usize][e.pitch as usize];
         let message = if e.off {
             if *count == 0 {
                 continue;
             }
             *count -= 1;
+            *any = any.saturating_sub(u32::from(*count == 0));
             MidiMessage::NoteOff {
-                channel: 0,
+                channel: e.channel,
                 pitch: e.pitch,
                 velocity: 0,
             }
         } else {
+            if *count == 0 {
+                *any += 1;
+            }
             *count = count.saturating_add(1);
             MidiMessage::NoteOn {
-                channel: 0,
+                channel: e.channel,
                 pitch: e.pitch,
                 velocity: e.velocity,
             }
         };
+        if instrument && synth_events.len() < synth_events.capacity() {
+            let (status, v, class) = if e.off {
+                (0x80, 0, 1)
+            } else {
+                (0x90, e.velocity, 2)
+            };
+            synth_events.push(SynthEvent {
+                frame: e.frame,
+                class,
+                seq: seq.min(u16::MAX as usize) as u16,
+                len: 3,
+                data: [status | e.channel, e.pitch, v],
+            });
+        }
         midi.event(
             ti,
             MidiEvent {

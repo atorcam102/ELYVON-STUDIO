@@ -86,6 +86,8 @@ fn grid_and_tempo_map_golden_vectors() {
     }
     let stored =
         std::fs::read_to_string(&path).expect("run with UPDATE_GOLDEN=1 to create the fixture");
+    // Git may check text fixtures out with CRLF on Windows (core.autocrlf).
+    let stored = stored.replace("\r\n", "\n");
     assert_eq!(
         stored, text,
         "golden vectors changed; regenerate and update the UI mirror"

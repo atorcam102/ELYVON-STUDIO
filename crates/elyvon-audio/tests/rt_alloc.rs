@@ -115,10 +115,8 @@ fn process_never_allocates_or_frees() {
     if let RegionContent::Midi { notes } = &mut s.project.tracks[ti].regions[ri].content {
         for i in 0..64u64 {
             notes.push(MidiNote {
-                pitch: 40 + (i % 40) as u8,
-                velocity: 90,
-                start: i * 60,
-                length: 200,
+                id: i as u32 + 1,
+                ..MidiNote::new(40 + (i % 40) as u8, 90, i * 60, 200)
             });
         }
     }
@@ -272,6 +270,193 @@ fn process_never_allocates_or_frees() {
         out.iter().chain(&big).any(|v| *v != 0.0),
         "the engine produced audio"
     );
+    assert_eq!(
+        ALLOCS.load(Ordering::Relaxed),
+        0,
+        "allocations in the audio callback"
+    );
+    assert_eq!(
+        FREES.load(Ordering::Relaxed),
+        0,
+        "frees in the audio callback"
+    );
+    handle.poll();
+}
+
+#[test]
+fn mixer_graph_instruments_and_swaps_never_allocate() {
+    use elyvon_audio::engine::LiveMidi;
+    use elyvon_project::mixer::{ChannelRef, FilterMode, Processor, Send};
+    use elyvon_project::mixer_edit::StripPatch;
+    const RATE: u32 = 48_000;
+    let mut s = Session::new(120.0);
+    let t = s.audio_track();
+    let tone = buffer(vec![sine(440.0, 0.5, RATE, 96_000)], RATE, RATE);
+    s.place(t, 0, &tone, "tone");
+    let k = s
+        .apply(EditCommand::AddTrack {
+            kind: TrackKind::Instrument,
+            name: None,
+            index: None,
+        })
+        .created_tracks[0];
+    let r = s
+        .apply(EditCommand::CreateMidiRegion {
+            track_id: k,
+            start: 0,
+            length: 7680,
+        })
+        .created_regions[0];
+    s.apply(EditCommand::AddNotes {
+        region_id: r,
+        notes: (0..48)
+            .map(|i| elyvon_project::midi_edit::NoteSpec {
+                pitch: 48 + (i % 24) as u8,
+                velocity: 100,
+                channel: (i % 3) as u8,
+                start: i * 160,
+                length: 900,
+            })
+            .collect(),
+    });
+    let track = ChannelRef::Track { id: t };
+    let keys = ChannelRef::Track { id: k };
+    let aux = s
+        .apply(EditCommand::AddAux {
+            name: Some("Verb".into()),
+            sources: vec![track],
+        })
+        .created_auxes[0];
+    let bus = s
+        .apply(EditCommand::AddAux {
+            name: Some("Bus".into()),
+            sources: vec![],
+        })
+        .created_auxes[0];
+    s.apply(EditCommand::SetStrip {
+        channel: keys,
+        patch: StripPatch {
+            output: Some(elyvon_project::mixer::OutputTarget::Aux { id: bus }),
+            ..StripPatch::default()
+        },
+    });
+    s.apply(EditCommand::SetSend {
+        channel: keys,
+        target: aux,
+        send: Some(Send {
+            target: aux,
+            level_db: -6.0,
+            pre_fader: true,
+            muted: false,
+        }),
+    });
+    for (channel, p) in [
+        (
+            track,
+            Processor::Limiter {
+                ceiling_db: -3.0,
+                lookahead_ms: 5.0,
+                release_ms: 50.0,
+            },
+        ),
+        (track, Processor::Trim { gain_db: -2.0 }),
+        (
+            ChannelRef::Aux { id: aux },
+            Processor::Filter {
+                mode: FilterMode::LowPass,
+                cutoff_hz: 3000.0,
+                q: 0.7,
+            },
+        ),
+        (
+            ChannelRef::Aux { id: bus },
+            Processor::Utility {
+                invert_left: true,
+                invert_right: false,
+                swap: true,
+                mono: false,
+            },
+        ),
+        (
+            ChannelRef::Master,
+            Processor::Limiter {
+                ceiling_db: -1.0,
+                lookahead_ms: 2.0,
+                release_ms: 100.0,
+            },
+        ),
+    ] {
+        s.apply(EditCommand::AddInsert {
+            channel,
+            processor: p,
+            index: None,
+        });
+    }
+    s.apply(EditCommand::SetLoop {
+        enabled: true,
+        start: 0,
+        end: 7680,
+    });
+    let lookup = s.lookup();
+    let (mut handle, mut eng) = engine::create(RATE, 512, build_plan(&s.project, &lookup, RATE, 1));
+    let mut out = vec![0.0f32; 512 * 2];
+    let mut midi = elyvon_audio::engine::NoMidi;
+    let key = k.0.as_u128();
+    // Stopped: live notes still sound through the graph.
+    assert!(handle.send_live(LiveMidi::new(key, &[0x90, 60, 100]).unwrap()));
+    for _ in 0..20 {
+        guarded(|| eng.process(&mut out, 2, &mut midi));
+    }
+    assert!(
+        out.iter().any(|v| *v != 0.0),
+        "live note heard while stopped"
+    );
+    handle.send_live(LiveMidi::new(key, &[0x80, 60, 0]).unwrap());
+    handle.send(TransportCommand::Play {
+        from_tick: Some(0),
+        count_in: false,
+        pre_roll: false,
+    });
+    for round in 0..6u32 {
+        for _ in 0..60 {
+            guarded(|| eng.process(&mut out, 2, &mut midi));
+        }
+        // Graph swaps while playing: fader, solo, insert order and bypass.
+        let mut edited = s.project.clone();
+        let inserts = edited.tracks[0].strip.inserts.clone();
+        let mut apply = |c| elyvon_project::edit::apply(&mut edited, &c).unwrap();
+        apply(EditCommand::SetTrackVolume {
+            id: t,
+            volume_db: -f64::from(round),
+        });
+        apply(EditCommand::SetTracksSoloed {
+            ids: vec![k],
+            soloed: round % 2 == 1,
+        });
+        apply(EditCommand::MoveInsert {
+            channel: track,
+            id: inserts[0].id,
+            to_index: 1,
+        });
+        apply(EditCommand::SetInsert {
+            channel: track,
+            id: inserts[1].id,
+            bypass: round % 2 == 0,
+            processor: inserts[1].processor,
+        });
+        handle.publish(build_plan(&edited, &lookup, RATE, 2 + u64::from(round)));
+        handle.send_live(
+            LiveMidi::new(key, &[0xb0, 64, if round % 2 == 0 { 127 } else { 0 }]).unwrap(),
+        );
+        guarded(|| eng.process(&mut out, 2, &mut midi));
+        handle.poll();
+    }
+    handle.send(TransportCommand::Locate { tick: 960 });
+    let mut big = vec![0.0f32; 3000 * 2];
+    for _ in 0..30 {
+        guarded(|| eng.process(&mut big, 2, &mut midi));
+    }
+    assert!(big.iter().all(|v| v.is_finite()));
     assert_eq!(
         ALLOCS.load(Ordering::Relaxed),
         0,

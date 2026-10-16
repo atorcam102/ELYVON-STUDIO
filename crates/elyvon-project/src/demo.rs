@@ -43,17 +43,14 @@ fn notes(pattern: &[(u8, Ticks, Ticks)], bars: Ticks, velocity: u8) -> RegionCon
     while offset < bars * BAR {
         for &(pitch, start, length) in pattern {
             if offset + start < bars * BAR {
-                out.push(MidiNote {
-                    pitch,
-                    velocity,
-                    start: offset + start,
-                    length,
-                });
+                out.push(MidiNote::new(pitch, velocity, offset + start, length));
             }
         }
         offset += pattern_len;
     }
-    RegionContent::Midi { notes: out }
+    RegionContent::Midi {
+        notes: crate::midi_edit::with_ids(out),
+    }
 }
 
 fn chords() -> Vec<(u8, Ticks, Ticks)> {

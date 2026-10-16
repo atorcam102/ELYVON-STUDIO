@@ -47,6 +47,7 @@ struct Inner {
     /// Project rate the current output was opened for.
     requested_rate: u32,
     tap: TapTempo,
+    meter_reader: elyvon_audio::transport::MeterReader,
     epoch: Instant,
 }
 
@@ -88,6 +89,7 @@ impl AudioService {
                 },
                 requested_rate: Project::DEFAULT_SAMPLE_RATE,
                 tap: TapTempo::default(),
+                meter_reader: elyvon_audio::transport::MeterReader::default(),
                 epoch: Instant::now(),
             }),
             store: Mutex::new(MediaStore::new(
@@ -144,6 +146,7 @@ impl AudioService {
         inner.output = None;
         inner.handle = None;
         inner.plan = None;
+        inner.meter_reader = elyvon_audio::transport::MeterReader::default();
         inner.requested_rate = project_rate;
         let mut device_error = None;
         let mut started = None;
@@ -384,6 +387,33 @@ impl AudioService {
         Some(handle.shared().snapshot())
     }
 
+    /// Plays a live MIDI channel message on a track's built-in instrument
+    /// (keyboard, input monitor, piano-roll preview). `false` when the track
+    /// has no running engine or the queue is full.
+    pub fn send_live(&self, track: elyvon_project::TrackId, bytes: &[u8]) -> bool {
+        let Some(message) = elyvon_audio::engine::LiveMidi::new(track.0.as_u128(), bytes) else {
+            return false;
+        };
+        lock(&self.inner)
+            .handle
+            .as_mut()
+            .is_some_and(|h| h.send_live(message))
+    }
+
+    pub fn reset_clips(&self) {
+        if let Some(h) = lock(&self.inner).handle.as_ref() {
+            h.shared().reset_clips();
+        }
+    }
+
+    /// Insert latency compensated on the current graph's longest path.
+    pub fn latency_frames(&self) -> usize {
+        lock(&self.inner)
+            .plan
+            .as_ref()
+            .map_or(0, |p| p.stats.latency_frames)
+    }
+
     pub fn snapshot(&self) -> Option<TransportSnapshot> {
         lock(&self.inner)
             .handle
@@ -399,11 +429,22 @@ impl AudioService {
     }
 
     /// Called ~30 times per second by the publisher thread.
-    fn tick(&self, app: &AppHandle, last: &mut Option<TransportSnapshot>) {
+    fn tick(
+        &self,
+        app: &AppHandle,
+        last: &mut Option<TransportSnapshot>,
+        last_meters_active: &mut bool,
+    ) {
         // Never hold the engine lock while taking the session lock.
-        let tracks = app.state::<AppState>().session().project().tracks.len();
+        let (tracks, auxes) = {
+            let state = app.state::<AppState>();
+            let session = state.session();
+            let p = session.project();
+            (p.tracks.len(), p.mixer.auxes.len())
+        };
         let (snapshot, meters, failed, stats) = {
-            let mut inner = lock(&self.inner);
+            let mut guard = lock(&self.inner);
+            let inner = &mut *guard;
             let failed = inner.output.as_ref().is_some_and(RunningOutput::has_failed);
             let Some(handle) = inner.handle.as_mut() else {
                 return;
@@ -411,7 +452,8 @@ impl AudioService {
             handle.poll();
             let shared = handle.shared();
             let snapshot = shared.snapshot();
-            (snapshot, shared.take_peaks(tracks), failed, shared.stats())
+            let meters = shared.read_meters(&mut inner.meter_reader, tracks, auxes);
+            (snapshot, meters, failed, shared.stats())
         };
         if failed {
             log::error!("the audio device stopped; switching to the internal clock");
@@ -429,9 +471,18 @@ impl AudioService {
             let _ = app.emit(POSITION_EVENT, snapshot);
             *last = Some(snapshot);
         }
-        if playing || meters.master.iter().any(|v| *v > 0.0) {
+        // Keep publishing while anything (live instruments, tails, decaying
+        // RMS) still shows, then go quiet: no idle event traffic.
+        let visible = |m: &elyvon_audio::transport::ChannelMeter| {
+            m.peak.iter().chain(&m.rms).any(|v| *v > 1e-5)
+        };
+        let active = playing
+            || visible(&meters.master)
+            || meters.tracks.iter().chain(&meters.auxes).any(visible);
+        if active || *last_meters_active {
             let _ = app.emit(METERS_EVENT, (meters, stats));
         }
+        *last_meters_active = active;
     }
 }
 
@@ -441,9 +492,12 @@ pub fn spawn_publisher(app: AppHandle) {
         .name("elyvon-transport-events".into())
         .spawn(move || {
             let mut last = None;
+            let mut meters_active = false;
             loop {
                 std::thread::sleep(Duration::from_millis(33));
-                app.state::<AppState>().audio.tick(&app, &mut last);
+                app.state::<AppState>()
+                    .audio
+                    .tick(&app, &mut last, &mut meters_active);
             }
         });
     if let Err(e) = spawned {

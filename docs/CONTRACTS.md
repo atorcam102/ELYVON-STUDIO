@@ -65,3 +65,15 @@ The additive `app_contracts` command does not alter existing IPC results.
 Schema 1 is intentionally unchanged: graph/jobs/device state must not be appended to project
 files without a separate schema design and migration fixtures. Existing asset paths are preserved;
 this phase does not import, resolve, rewrite or delete media.
+
+## Schema 4 and mixer/piano-roll IPC (0.3.0)
+
+| Area | Type / command | Rules | Evidence |
+| --- | --- | --- | --- |
+| Notes | `MidiNote { id, pitch, velocity, channel, muted, start, length, quantizeOffset }` | `id` unique per region; notes are the playback/export source; `midiEvents` excludes note on/off | `v3-midi.elyvon` migration fixture, `midi_edit.rs` tests |
+| Piano-roll edits | `addNotes`, `removeNotes`, `updateNotes`, `moveNotes`, `resizeNotes`, `transformNotes`, `splitChordVoices`, `editControllerLane`, `batch` | Note ids, region-relative ticks; `batch` (≤ 256, not nested) is one undo step; `EditOutcome.createdNotes` lists new ids in command order | `crates/elyvon-project/tests/piano_roll.rs` |
+| Mixer edits | `setStrip`, `setSend`, `add/remove/move/setInsert`, `addAux`, `removeAuxes`, groups, folders, `setPanLaw` | `ChannelRef = track \| aux \| master`; routing must stay acyclic (validated before apply) | `crates/elyvon-audio/tests/mixer.rs` |
+| Meters event | `audio://meters` → `[Meters { master, tracks[], auxes[] }, EngineStats]` | `ChannelMeter { peak[2], rms[2], clip }` linear, post fader; tracks in project order, auxes in mixer order | `mixer.rs` meters test, native E2E |
+| Native commands | `midi_preview`, `mixer_status`, `mixer_reset_clips`, `project_export_stems` | Preview notes are released by the native worker (≤ 4 s) and never recorded | src-tauri/src/commands/mixer.rs |
+
+`app_contracts` reports `project: 4`.

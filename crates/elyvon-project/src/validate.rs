@@ -151,6 +151,7 @@ pub fn validate(project: &Project) -> Result<(), ValidationError> {
             ));
         }
         validate_track(&tp, track, &media)?;
+        crate::mixer::validate_strip(&format!("{tp}.strip"), &track.strip)?;
         for (ri, region) in track.regions.iter().enumerate() {
             if !region_ids.insert(region.id) {
                 return Err(ValidationError::new(
@@ -160,7 +161,7 @@ pub fn validate(project: &Project) -> Result<(), ValidationError> {
             }
         }
     }
-    Ok(())
+    crate::mixer::validate_mixer(project)
 }
 
 /// Validates the media pool and returns its ids.
@@ -246,10 +247,11 @@ fn validate_track(
     for (ri, region) in track.regions.iter().enumerate() {
         let rp = format!("{tp}.regions[{ri}]");
         if region.midi_events.len() > MAX_NOTES_PER_REGION
-            || region
-                .midi_events
-                .iter()
-                .any(|e| e.tick > region.length || !crate::io::validate_midi_bytes(&e.bytes))
+            || region.midi_events.iter().any(|e| {
+                e.tick > region.length
+                    || !crate::io::validate_midi_bytes(&e.bytes)
+                    || crate::midi_edit::is_note_message(&e.bytes)
+            })
             || region.midi_events.windows(2).any(|w| w[0].tick > w[1].tick)
         {
             return Err(ValidationError::new(
@@ -323,8 +325,27 @@ fn validate_track(
                         format!("more than {MAX_NOTES_PER_REGION} notes"),
                     ));
                 }
+                let mut ids = HashSet::with_capacity(notes.len());
                 for (ni, n) in notes.iter().enumerate() {
                     let np = format!("{rp}.content.notes[{ni}]");
+                    if n.id == 0 || !ids.insert(n.id) {
+                        return Err(ValidationError::new(
+                            format!("{np}.id"),
+                            "note ids must be unique and non-zero",
+                        ));
+                    }
+                    if n.channel > 15 {
+                        return Err(ValidationError::new(
+                            format!("{np}.channel"),
+                            "must be 0–15",
+                        ));
+                    }
+                    if i64::from(n.quantize_offset) > n.start as i64 {
+                        return Err(ValidationError::new(
+                            format!("{np}.quantizeOffset"),
+                            "the unquantised position would be before the region",
+                        ));
+                    }
                     if n.pitch > 127 {
                         return Err(ValidationError::new(format!("{np}.pitch"), "must be 0–127"));
                     }
@@ -425,10 +446,8 @@ mod tests {
             muted: false,
             content: RegionContent::Midi {
                 notes: vec![MidiNote {
-                    pitch: 200,
-                    velocity: 100,
-                    start: 0,
-                    length: 10,
+                    id: 1,
+                    ..MidiNote::new(200, 100, 0, 10)
                 }],
             },
         });

@@ -22,6 +22,7 @@
 
 pub mod contracts;
 pub mod device;
+pub mod dsp;
 pub mod engine;
 pub mod gain;
 #[cfg(feature = "device")]
@@ -33,5 +34,6 @@ pub mod plan;
 pub mod recording;
 pub mod render;
 pub mod rt;
+pub mod synth;
 pub mod transport;
 pub mod waveform;

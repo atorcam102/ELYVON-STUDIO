@@ -18,7 +18,9 @@ midir = { version="0.11.1", optional=true }
 rubato = "5.0.1"
 serde.workspace = true
 serde_json.workspace = true
-symphonia = { version = "0.6.1", default-features = false, features = ["wav", "aiff", "pcm", "flac", "mp3", "ogg", "vorbis"] }
+# MP3 tags (including embedded artwork) precede the audio frames. Without
+# ID3 readers, probing scans the tags as audio and fails once they exceed 1 MiB.
+symphonia = { version = "0.6.1", default-features = false, features = ["wav", "aiff", "pcm", "flac", "mp3", "ogg", "vorbis", "id3v1", "id3v2"] }
 ts-rs.workspace = true
 tempfile.workspace = true
 

@@ -1,6 +1,6 @@
 use elyvon_project::{
     AudioPlacement, EditCommand, MediaAsset, MediaId, MediaInfo, PlacementTrack, ProjectSession,
-    TrackIo, TrackKind, format,
+    RegionContent, TrackIo, TrackKind, format,
     io::{MidiImportRegion, StoredMidiEvent},
 };
 #[test]
@@ -90,7 +90,7 @@ fn recorded_take_folders_and_routing_roundtrip_with_undo_and_safe_migrations() {
     }
 }
 #[test]
-fn midi_raw_events_survive_split_trim_save_and_routing_fallback() {
+fn midi_notes_and_controllers_survive_split_trim_save_and_routing_fallback() {
     let events = vec![
         StoredMidiEvent {
             tick: 0,
@@ -147,10 +147,29 @@ fn midi_raw_events_survive_split_trim_save_and_routing_fallback() {
         })
         .unwrap();
     let right = out.created_regions[0];
-    let raw = &session.project().tracks[0].regions[1].midi_events;
+    // Schema 4: the note pair became an editable note (channel kept) and
+    // the crossing note continues in the right half; controller state is
+    // chased to the split point.
+    let right_region = &session.project().tracks[0].regions[1];
+    let RegionContent::Midi { notes } = &right_region.content else {
+        panic!("MIDI region expected");
+    };
     assert!(
-        raw.iter()
-            .any(|e| e.tick == 0 && e.bytes == [0x92, 60, 100])
+        notes
+            .iter()
+            .any(|n| (n.start, n.length, n.pitch, n.velocity, n.channel) == (0, 480, 60, 100, 2))
+    );
+    assert!(
+        right_region
+            .midi_events
+            .iter()
+            .any(|e| e.tick == 0 && e.bytes == [0xb2, 64, 127])
+    );
+    assert!(
+        right_region
+            .midi_events
+            .iter()
+            .all(|e| e.bytes[0] & 0xf0 != 0x90 && e.bytes[0] & 0xf0 != 0x80)
     );
     session
         .apply(&EditCommand::TrimRegion {

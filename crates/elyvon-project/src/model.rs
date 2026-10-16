@@ -66,6 +66,9 @@ pub struct Project {
     pub media: Vec<MediaAsset>,
     /// Named positions on the timeline, sorted by tick.
     pub markers: Vec<Marker>,
+    /// Auxiliary channels, groups, folders and the master strip (schema 4).
+    #[serde(default)]
+    pub mixer: crate::mixer::Mixer,
 }
 
 /// Global musical settings of the project.
@@ -261,6 +264,12 @@ impl TrackKind {
 pub struct Track {
     #[serde(default)]
     pub io: crate::io::TrackIo,
+    /// Output, sends, inserts, group and channel format (schema 4).
+    #[serde(default)]
+    pub strip: crate::mixer::StripRouting,
+    /// Mixer folder the track is shown in.
+    #[serde(default)]
+    pub folder: Option<crate::mixer::FolderId>,
     pub id: TrackId,
     pub name: String,
     pub kind: TrackKind,
@@ -281,6 +290,8 @@ impl Track {
     pub fn new(kind: TrackKind, name: impl Into<String>, color: Color) -> Self {
         Self {
             io: crate::io::TrackIo::default(),
+            strip: crate::mixer::StripRouting::default(),
+            folder: None,
             id: TrackId::new(),
             name: name.into(),
             kind,
@@ -377,16 +388,60 @@ impl RegionContent {
 }
 
 /// A MIDI note with timing relative to the start of its region.
+///
+/// Notes are the authoritative note data of a region (schema 4): the piano
+/// roll edits them and playback and SMF export read them. Controller,
+/// pitch-bend, pressure, program and SysEx events live in
+/// [`Region::midi_events`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct MidiNote {
+    /// Unique within its region; stable across edits.
+    #[serde(default)]
+    pub id: u32,
     pub pitch: u8,
     pub velocity: u8,
+    /// MIDI channel 0–15.
+    #[serde(default)]
+    pub channel: u8,
+    /// A muted note is kept but not played or exported.
+    #[serde(default)]
+    pub muted: bool,
     #[ts(type = "number")]
     pub start: Ticks,
     #[ts(type = "number")]
     pub length: Ticks,
+    /// `start` minus the position before quantisation (0 when unquantised),
+    /// so quantise can be undone or re-applied from the played position.
+    #[serde(default)]
+    pub quantize_offset: i32,
+}
+
+impl MidiNote {
+    /// A note on channel 1 with id 0 (ids are assigned when added to a region).
+    pub const fn new(pitch: u8, velocity: u8, start: Ticks, length: Ticks) -> Self {
+        Self {
+            id: 0,
+            pitch,
+            velocity,
+            channel: 0,
+            muted: false,
+            start,
+            length,
+            quantize_offset: 0,
+        }
+    }
+
+    pub fn end(&self) -> Ticks {
+        self.start.saturating_add(self.length)
+    }
+
+    /// Position before quantisation.
+    pub fn unquantized_start(&self) -> Ticks {
+        self.start
+            .saturating_add_signed(-i64::from(self.quantize_offset))
+    }
 }
 
 /// Colours assigned round-robin to new tracks (saturated region colours that
@@ -422,6 +477,7 @@ impl Project {
             tracks: Vec::new(),
             media: Vec::new(),
             markers: Vec::new(),
+            mixer: crate::mixer::Mixer::default(),
         }
     }
 

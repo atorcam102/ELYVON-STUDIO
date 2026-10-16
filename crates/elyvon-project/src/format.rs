@@ -29,7 +29,7 @@ use crate::model::Project;
 use crate::validate::validate;
 
 pub const FORMAT_ID: &str = "elyvon-studio-project";
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 pub const FILE_EXTENSION: &str = "elyvon";
 /// Projects reference media instead of embedding it, so 64 MiB is generous.
 pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -70,15 +70,21 @@ pub fn decode(bytes: &[u8]) -> Result<Project, ProjectError> {
         column: e.column(),
         message: e.to_string(),
     })?;
-    let value = upgrade_envelope(value)?;
-    let envelope: EnvelopeIn =
+    let (value, from) = upgrade_envelope(value)?;
+    let mut envelope: EnvelopeIn =
         serde_json::from_value(value).map_err(|e| ProjectError::Structure(e.to_string()))?;
+    if from < 4 {
+        // Schema 3 → 4 typed step: recorded/imported note events become
+        // editable notes with ids. Controller events are kept unchanged.
+        crate::midi_edit::upgrade_regions(&mut envelope.project);
+    }
     validate(&envelope.project)?;
     Ok(envelope.project)
 }
 
 /// Checks the envelope and migrates the document to [`CURRENT_SCHEMA_VERSION`].
-fn upgrade_envelope(value: Value) -> Result<Value, ProjectError> {
+/// Also returns the schema version the file was written with.
+fn upgrade_envelope(value: Value) -> Result<(Value, u32), ProjectError> {
     let obj = value.as_object().ok_or(ProjectError::NotAProject)?;
     if obj.get("format").and_then(Value::as_str) != Some(FORMAT_ID) {
         return Err(ProjectError::NotAProject);
@@ -97,7 +103,7 @@ fn upgrade_envelope(value: Value) -> Result<Value, ProjectError> {
             supported: CURRENT_SCHEMA_VERSION,
         });
     }
-    migrate(value, version)
+    migrate(value, version).map(|v| (v, version))
 }
 
 /// Applies schema migrations `from → from + 1 → … → CURRENT`.
@@ -114,6 +120,15 @@ pub fn migrate(value: Value, from: u32) -> Result<Value, ProjectError> {
             value["schemaVersion"] = serde_json::json!(3);
             // Track IO has explicit neutral serde defaults; schema 2 files and
             // their source bytes stay unchanged. Schema 3 preserves routing.
+            migrate(value, 3)
+        }
+        3 => {
+            // Schema 4 adds the mixer (auxes, sends, inserts, groups,
+            // folders), per-track strip routing and note ids/channels. Every
+            // new field has a neutral serde default; note events are moved
+            // into notes by the typed step in `decode`.
+            let mut value = value;
+            value["schemaVersion"] = serde_json::json!(4);
             Ok(value)
         }
         other => Err(ProjectError::UnsupportedSchema { found: other }),

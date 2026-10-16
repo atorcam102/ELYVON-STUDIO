@@ -1,5 +1,14 @@
 # Status
 
+**Phases 08–09 (2026-10-16, 0.3.0): PARTIAL.** Piano-roll editing (notes, lanes, reversible
+quantise, multi-region, grouped undo), a built-in test instrument and the engine mixer graph
+(aux buses, pre/post sends, native inserts with path latency compensation, solo/mute/groups,
+real peak/RMS/clip meters, stems) are implemented and verified by Rust, frontend and native E2E
+tests built and run on this Windows x64 laptop. Listening tests on real hardware, a MIDI keyboard,
+macOS/Linux/ARM/x86 builds and third-party plug-ins remain pending. Evidence:
+[audit/PHASE-08-09.md](audit/PHASE-08-09.md). Phases 06–07 were re-verified on Windows x64 in the
+same report.
+
 **Phases 04–07 (2026-10-16): PARTIAL.** Tempo/transport, region playback/editing and incremental
 disk streaming are implemented. Native audio capture, monitoring, recoverable takes and MIDI
 ports/routing/recording/SMF now exist. Physical-device and cross-platform tests, multi-device

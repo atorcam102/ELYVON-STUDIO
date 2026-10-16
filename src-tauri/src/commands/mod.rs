@@ -9,3 +9,5 @@ pub mod system;
 pub mod recording;
 
 pub mod midi;
+
+pub mod mixer;

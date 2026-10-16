@@ -5,7 +5,7 @@ import { AudioEditor, PianoRoll } from "./PianoRoll";
 
 const TABS: { id: BottomTab; label: string; note?: string }[] = [
   { id: "mixer", label: "Mixer" },
-  { id: "pianoRoll", label: "Piano Roll", note: "Preview" },
+  { id: "pianoRoll", label: "Piano Roll" },
   { id: "audioEditor", label: "Audio Editor", note: "Phase 2" },
 ];
 

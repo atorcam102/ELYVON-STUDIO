@@ -42,9 +42,17 @@ Remaining acceptance: physical voice/guitar/loopback and MIDI-keyboard tests on 
 platform; measured hardware latency/jitter, independent-device drift handling and live input SRC.
 Audio and MIDI recording currently use separate sessions. See [validation](audit/PHASE-06-07.md).
 
+## Phases 08–09 — Piano roll and mixer graph (partial, 0.3.0)
+
+Piano-roll editing with controller lanes, reversible quantise and grouped undo; built-in test
+instrument; engine mixer graph with aux buses, sends, native inserts, latency compensation,
+solo/mute/groups/folders, real meters and stems. Evidence: [audit/PHASE-08-09.md](audit/PHASE-08-09.md).
+Pending: on-device listening, MIDI keyboard, other platforms, automation, plug-in hosting.
+
 ## Later — Instruments and editing
 
-Full piano-roll editing, playback note chase, native synth/sampler and playable loop browser.
+Playback note chase, a production synth/sampler, MIDI 2.0 per-note expression, step input and
+playable loop browser.
 
 ## Later — Plug-ins and production
 

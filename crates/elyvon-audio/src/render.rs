@@ -119,6 +119,62 @@ pub fn render_stream(
     midi: Option<&mut dyn MidiSink>,
     sink: &mut dyn FnMut(&[f32]),
 ) -> RenderReport {
+    render_inner(project, media, request, midi, sink, None)
+}
+
+/// Meter/stem slot of each exported channel strip, with a display name.
+pub fn stem_channels(project: &Project) -> Vec<(usize, String)> {
+    let mut out: Vec<(usize, String)> = project
+        .tracks
+        .iter()
+        .take(crate::plan::MAX_TRACKS)
+        .enumerate()
+        .filter(|(_, t)| t.kind != elyvon_project::TrackKind::Midi)
+        .map(|(i, t)| (i, t.name.clone()))
+        .collect();
+    out.extend(
+        project
+            .mixer
+            .auxes
+            .iter()
+            .take(crate::plan::MAX_AUXES)
+            .enumerate()
+            .map(|(i, a)| (crate::plan::aux_slot(i), a.name.clone())),
+    );
+    out.push((crate::plan::MASTER_SLOT, "Master".into()));
+    out
+}
+
+/// Renders the master and every channel strip's post-fader output (what the
+/// strip sends to its output, after solo/mute) through the same engine.
+/// `stem` receives `(slot, interleaved stereo block)`.
+pub fn render_stems(
+    project: &Project,
+    media: &dyn Fn(MediaId) -> Option<Arc<MediaBuffer>>,
+    request: RenderRequest,
+    stem: &mut dyn FnMut(usize, &[f32]),
+) -> RenderReport {
+    let slots: Vec<usize> = stem_channels(project).into_iter().map(|(s, _)| s).collect();
+    render_inner(
+        project,
+        media,
+        request,
+        None,
+        &mut |_| {},
+        Some((&slots, stem)),
+    )
+}
+
+type StemTap<'a> = (&'a [usize], &'a mut dyn FnMut(usize, &[f32]));
+
+fn render_inner(
+    project: &Project,
+    media: &dyn Fn(MediaId) -> Option<Arc<MediaBuffer>>,
+    request: RenderRequest,
+    midi: Option<&mut dyn MidiSink>,
+    sink: &mut dyn FnMut(&[f32]),
+    mut stems: Option<StemTap<'_>>,
+) -> RenderReport {
     let rate = request.sample_rate;
     let mut plan = build_plan(project, media, rate, 1);
     let _offline = OfflinePages::new(&plan);
@@ -134,6 +190,9 @@ pub fn render_stream(
     let (mut handle, mut engine) = engine::create(rate, block, plan);
     engine.set_clip_output(false);
     engine.enable_measurement();
+    if stems.is_some() {
+        engine.enable_stems();
+    }
     handle.send(TransportCommand::Play {
         from_tick: Some(request.start_tick),
         count_in: false,
@@ -162,6 +221,13 @@ pub fn render_stream(
         engine.process(chunk, 2, midi);
         if handle.shared().stats().streaming_underruns > before {
             streaming_errors += 1;
+        }
+        if let Some((slots, tap)) = stems.as_mut() {
+            for &slot in slots.iter() {
+                if let Some(block) = engine.stem(slot, n) {
+                    tap(slot, block);
+                }
+            }
         }
         for frame in chunk.as_chunks::<2>().0 {
             for ch in 0..2 {
@@ -351,6 +417,156 @@ pub fn export_project(
     report_path.push(".json");
     elyvon_core::fs::atomic_write(
         Path::new(&report_path),
+        &serde_json::to_vec_pretty(&report).map_err(std::io::Error::other)?,
+    )?;
+    Ok(report)
+}
+
+/// One exported stem file.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct StemFile {
+    pub name: String,
+    pub path: String,
+    pub peak: f32,
+    pub rms: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct StemsReport {
+    pub master: RenderReport,
+    pub stems: Vec<StemFile>,
+}
+
+/// Streams a 32-bit float stereo WAV into a temporary file next to its target.
+struct WavStream {
+    temp: tempfile::NamedTempFile,
+    frames: u64,
+    peak: f32,
+    sum: f64,
+    bytes: Vec<u8>,
+    failure: Option<std::io::Error>,
+}
+
+impl WavStream {
+    fn new(dir: &Path, rate: u32) -> std::io::Result<Self> {
+        use std::io::Write;
+        let mut temp = tempfile::NamedTempFile::new_in(dir)?;
+        temp.write_all(&encode_wav_f32(&[], 2, rate))?;
+        Ok(Self {
+            temp,
+            frames: 0,
+            peak: 0.0,
+            sum: 0.0,
+            bytes: Vec::new(),
+            failure: None,
+        })
+    }
+
+    fn push(&mut self, block: &[f32]) {
+        use std::io::Write;
+        if self.failure.is_some() {
+            return;
+        }
+        self.bytes.clear();
+        for s in block {
+            self.peak = self.peak.max(s.abs());
+            self.sum += f64::from(*s) * f64::from(*s);
+            self.bytes.extend_from_slice(&s.to_le_bytes());
+        }
+        self.frames += (block.len() / 2) as u64;
+        if let Err(e) = self.temp.write_all(&self.bytes) {
+            self.failure = Some(e);
+        }
+    }
+
+    fn finish(mut self, path: &Path, rate: u32) -> std::io::Result<(f32, f64)> {
+        use std::io::{Seek, SeekFrom, Write};
+        if let Some(e) = self.failure.take() {
+            return Err(e);
+        }
+        let size = self
+            .frames
+            .checked_mul(8)
+            .filter(|n| *n <= u64::from(u32::MAX) - 58)
+            .ok_or_else(|| std::io::Error::other("stem exceeds the 4 GiB WAV limit"))?
+            as u32;
+        let mut header = encode_wav_f32(&[], 2, rate);
+        header[4..8].copy_from_slice(&(50 + size).to_le_bytes());
+        header[46..50].copy_from_slice(&(self.frames as u32).to_le_bytes());
+        header[54..58].copy_from_slice(&size.to_le_bytes());
+        self.temp.seek(SeekFrom::Start(0))?;
+        self.temp.write_all(&header)?;
+        self.temp.flush()?;
+        self.temp.as_file().sync_all()?;
+        self.temp.persist(path).map_err(|e| e.error)?;
+        let rms = (self.sum / (2.0 * self.frames.max(1) as f64)).sqrt();
+        Ok((self.peak, rms))
+    }
+}
+
+fn file_name(index: usize, name: &str) -> String {
+    let safe: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(64)
+        .collect();
+    format!("{index:02} {}.wav", safe.trim())
+}
+
+/// Exports the master and one post-fader stem per audio/instrument track and
+/// auxiliary channel into `dir`, plus `stems.json`. Files are staged and only
+/// replace existing ones after the whole render succeeded.
+pub fn export_stems(
+    dir: &Path,
+    project: &Project,
+    media: &dyn Fn(MediaId) -> Option<Arc<MediaBuffer>>,
+    request: RenderRequest,
+) -> std::io::Result<StemsReport> {
+    std::fs::create_dir_all(dir)?;
+    let channels = stem_channels(project);
+    let mut writers = channels
+        .iter()
+        .map(|_| WavStream::new(dir, request.sample_rate))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    let index: std::collections::HashMap<usize, usize> = channels
+        .iter()
+        .enumerate()
+        .map(|(i, (slot, _))| (*slot, i))
+        .collect();
+    let master = render_stems(project, media, request, &mut |slot, block| {
+        if let Some(&i) = index.get(&slot) {
+            writers[i].push(block);
+        }
+    });
+    if master.streaming_errors != 0 {
+        return Err(std::io::Error::other(
+            "disk-cache reads failed; previous stems preserved",
+        ));
+    }
+    let mut stems = Vec::with_capacity(channels.len());
+    for (i, ((_, name), writer)) in channels.iter().zip(writers).enumerate() {
+        let path = dir.join(file_name(i + 1, name));
+        let (peak, rms) = writer.finish(&path, request.sample_rate)?;
+        stems.push(StemFile {
+            name: name.clone(),
+            path: path.display().to_string(),
+            peak,
+            rms,
+        });
+    }
+    let report = StemsReport { master, stems };
+    elyvon_core::fs::atomic_write(
+        &dir.join("stems.json"),
         &serde_json::to_vec_pretty(&report).map_err(std::io::Error::other)?,
     )?;
     Ok(report)

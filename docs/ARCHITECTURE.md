@@ -197,3 +197,23 @@ evidencia en [audit/PHASE-04-05.md](audit/PHASE-04-05.md). Resumen:
   crossfade de igual potencia con la región cubierta.
 - Los archivos fuente son inmutables; el audio decodificado vive en memoria
   (presupuesto 4 GiB / 512 MiB en 32 bits). El streaming desde disco no existe aún.
+
+## Piano roll y grafo de mezcla (Fases 08–09)
+
+Ver [ADR 0007](ADR/0007-notes-as-source-and-a-graph-plan-mixer.md) y
+[audit/PHASE-08-09.md](audit/PHASE-08-09.md).
+
+- Las notas (`content.notes`, con `id`, canal y mute) son la fuente editable y de reproducción;
+  `midiEvents` solo guarda controladores/bend/presión/programa/SysEx. El piano roll envía órdenes
+  por id (`moveNotes`, `transformNotes`, …) y `batch` agrupa gestos multi-región en un paso de
+  deshacer. Cuantizar guarda `quantizeOffset` y es reversible.
+- El `PlaybackPlan` es el grafo: pistas → (formato, inserts, envíos pre, fader/pan, envíos post,
+  compuerta de solo/mute, retardo de compensación) → auxiliares en orden topológico → master.
+  La validación del proyecto rechaza ciclos antes de aplicar. El callback adopta el estado vivo
+  del plan anterior (rampas, filtros, look-ahead, voces) intercambiando buffers; nada se libera
+  en el callback. Las notas que siguen existiendo continúan al editar durante la reproducción.
+- Medidores: acumuladores lock-free por tira (pico con `fetch_max`, sumas monótonas para RMS,
+  clip persistente) leídos a ~30 Hz.
+- El instrumento de pistas *Instrument* es un instrumento de prueba integrado (no un sintetizador
+  de producción); teclado virtual, monitor de entrada MIDI y previsualización usan una cola SPSC
+  hacia el callback.

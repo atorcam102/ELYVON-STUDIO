@@ -1,0 +1,90 @@
+{
+  "format": "elyvon-studio-project",
+  "schemaVersion": 3,
+  "savedWith": "0.2.1",
+  "project": {
+    "id": "0b5b8a7e-6a4c-4b8a-9a55-0000000003a0",
+    "name": "MIDI Fixture",
+    "sampleRate": 48000,
+    "transport": {
+      "tempo": 120.0,
+      "timeSignature": { "numerator": 4, "denominator": 4 },
+      "key": { "tonic": "A", "mode": "minor" },
+      "loopRange": { "enabled": false, "start": 0, "end": 15360 },
+      "tempoChanges": [],
+      "meterChanges": [],
+      "metronome": { "enabled": false, "volumeDb": -6.0, "accent": true },
+      "countInBars": 0,
+      "preRollBars": 0,
+      "punch": { "enabled": false, "start": 0, "end": 15360 }
+    },
+    "lengthBars": 16,
+    "tracks": [
+      {
+        "io": {
+          "armed": false,
+          "inputChannel": 0,
+          "inputChannels": 1,
+          "monitor": false,
+          "midiInput": "input:Keyboard#0",
+          "midiOutput": "output:Synth#0",
+          "midiChannel": 1,
+          "outputChannel": 3,
+          "midiMonitor": true
+        },
+        "id": "0b5b8a7e-6a4c-4b8a-9a55-000000000310",
+        "name": "Keys",
+        "kind": "midi",
+        "color": "#365DCD",
+        "muted": false,
+        "soloed": false,
+        "volumeDb": -2.0,
+        "pan": -0.5,
+        "regions": [
+          {
+            "capture": null,
+            "midiEvents": [
+              { "tick": 0, "bytes": [193, 5] },
+              { "tick": 0, "bytes": [145, 60, 100] },
+              { "tick": 240, "bytes": [177, 64, 127] },
+              { "tick": 480, "bytes": [145, 64, 90] },
+              { "tick": 480, "bytes": [225, 0, 80] },
+              { "tick": 960, "bytes": [129, 60, 0] },
+              { "tick": 1440, "bytes": [145, 64, 0] },
+              { "tick": 1920, "bytes": [177, 64, 0] },
+              { "tick": 1920, "bytes": [177, 123, 0] }
+            ],
+            "id": "0b5b8a7e-6a4c-4b8a-9a55-000000000320",
+            "name": "Recorded MIDI · take 1",
+            "start": 3840,
+            "length": 1920,
+            "muted": false,
+            "content": {
+              "type": "midi",
+              "notes": [
+                { "pitch": 60, "velocity": 100, "start": 0, "length": 960 },
+                { "pitch": 64, "velocity": 90, "start": 480, "length": 960 }
+              ]
+            }
+          },
+          {
+            "id": "0b5b8a7e-6a4c-4b8a-9a55-000000000321",
+            "name": "Drawn",
+            "start": 7680,
+            "length": 3840,
+            "muted": false,
+            "content": {
+              "type": "midi",
+              "notes": [
+                { "pitch": 48, "velocity": 70, "start": 0, "length": 480 },
+                { "pitch": 50, "velocity": 71, "start": 960, "length": 480 }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "media": [],
+    "markers": []
+  }
+}

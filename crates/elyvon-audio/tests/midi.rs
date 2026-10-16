@@ -58,7 +58,23 @@ fn smf_type_one_roundtrip_preserves_channels_controls_sysex_and_tempo() {
     let file = smf::encode(&p).unwrap();
     let parsed = smf::decode(&file).unwrap();
     assert_eq!(parsed.regions.len(), 1);
-    assert_eq!(parsed.regions[0].events, p.tracks[0].regions[0].midi_events);
+    let first_events = parsed.regions[0].events.clone();
+    // Schema 4 keeps notes as notes and everything else as raw events; the
+    // file round trip reproduces both (note-off velocity is not preserved).
+    let (notes, rest) = elyvon_project::midi_edit::split_note_events(
+        &parsed.regions[0].events,
+        parsed.regions[0].length,
+    );
+    assert_eq!(rest, p.tracks[0].regions[0].midi_events);
+    let elyvon_project::RegionContent::Midi { notes: stored } = &p.tracks[0].regions[0].content
+    else {
+        panic!("MIDI region expected");
+    };
+    assert_eq!(&notes, stored);
+    assert_eq!(
+        (notes[0].channel, notes[0].start, notes[0].length),
+        (2, 0, 960)
+    );
     assert_eq!(parsed.tempo, p.transport.tempo);
     assert_eq!(parsed.tempo_changes.len(), p.transport.tempo_changes.len());
     for (a, b) in parsed.tempo_changes.iter().zip(&p.transport.tempo_changes) {
@@ -80,11 +96,17 @@ fn smf_type_one_roundtrip_preserves_channels_controls_sysex_and_tempo() {
         },
     )
     .unwrap();
-    let parsed_again = smf::decode(&smf::encode(&reopened).unwrap()).unwrap();
+    // Import → export → import is stable: same notes and events as the source.
     assert_eq!(
-        parsed_again.regions[0].events,
+        reopened.tracks[0].regions[0].midi_events,
         p.tracks[0].regions[0].midi_events
     );
+    assert_eq!(
+        reopened.tracks[0].regions[0].content,
+        p.tracks[0].regions[0].content
+    );
+    let parsed_again = smf::decode(&smf::encode(&reopened).unwrap()).unwrap();
+    assert_eq!(parsed_again.regions[0].events, first_events);
 }
 #[test]
 fn smf_type_zero_scales_ppq_and_invalid_data_fails_explicitly() {

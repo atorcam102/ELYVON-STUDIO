@@ -249,18 +249,19 @@ fn midi_session() -> (Session, elyvon_project::TrackId) {
         .created_regions[0];
     let (ti, ri) = s.project.find_region(r).unwrap();
     if let RegionContent::Midi { notes } = &mut s.project.tracks[ti].regions[ri].content {
-        for (pitch, start, length) in [
+        for (id, (pitch, start, length)) in [
             (60, 0, 480),
             (60, 480, 480), // same pitch retriggered exactly at the previous note-off
             (64, 100, 3000),
             (67, 3500, 1000), // crosses the region end: truncated
             (72, 1919, 2),    // crosses the cycle end below
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             notes.push(MidiNote {
-                pitch,
-                velocity: 100,
-                start,
-                length,
+                id: id as u32 + 1,
+                ..MidiNote::new(pitch, 100, start, length)
             });
         }
     }

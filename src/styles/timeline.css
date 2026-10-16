@@ -1065,3 +1065,338 @@
   min-height: 28px;
   flex-wrap: wrap;
 }
+
+/* ---------- Piano roll (Phase 08) ---------- */
+
+.pr {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--editor-bg);
+}
+
+.pr__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  background: var(--localbar);
+  border-bottom: 1px solid #222;
+  flex: none;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.pr__bar .segmented button {
+  padding: 0 6px;
+}
+
+.pr__bar-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pr__select {
+  height: 20px;
+  background: var(--button-dark);
+  color: var(--text-0);
+  border: 1px solid var(--line-1);
+  border-radius: 4px;
+  font-size: var(--fs-xs, 11px);
+}
+
+.pr__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-xs, 11px);
+  color: var(--text-1);
+}
+
+.pr__btn {
+  height: 20px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 4px;
+  background: var(--button);
+  color: var(--text-0);
+  font-size: var(--fs-xs, 11px);
+  border: none;
+  cursor: pointer;
+}
+
+.pr__btn:hover:not(:disabled) {
+  background: var(--button-hi);
+}
+
+.pr__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pr__sel {
+  font-size: var(--fs-xs, 11px);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  min-width: 70px;
+}
+
+.pr__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+  position: relative;
+}
+
+.pr__scroll:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.pr__spacer {
+  position: relative;
+}
+
+.pr__canvas {
+  position: sticky;
+  top: 0;
+  left: 0;
+  display: block;
+  touch-action: none;
+}
+
+.pr__lane {
+  flex: none;
+  height: 96px;
+  display: flex;
+  border-top: 1px solid #1a1a1a;
+}
+
+.pr__lane-head {
+  width: 52px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px 2px;
+  background: #303030;
+  overflow: hidden;
+}
+
+.pr__lane-head .pr__select {
+  width: 100%;
+}
+
+.pr__lane-head .hint {
+  font-size: 8.5px;
+  line-height: 1.1;
+  white-space: normal;
+}
+
+.pr__lane-canvas {
+  display: block;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* ---------- Mixer graph (Phase 09) ---------- */
+
+.strip--aux .strip__name {
+  font-style: italic;
+}
+
+.strip.is-midi .fader,
+.strip.is-midi .knob {
+  opacity: 0.35;
+}
+
+button.slot {
+  border: none;
+  cursor: pointer;
+  width: 100%;
+  padding: 0 2px;
+}
+
+button.slot:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.slot--fx {
+  background: #2f5b8f;
+  color: #fff;
+}
+
+.slot--fx.is-bypassed {
+  background: var(--slot-dark);
+  color: #8d8d8d;
+  text-decoration: line-through;
+}
+
+.slot--add {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12);
+  color: #bdbdbd;
+}
+
+.strip__sends {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.send {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.send.is-muted {
+  opacity: 0.5;
+}
+
+.send__name {
+  flex: 1;
+  min-width: 0;
+  height: 16px;
+  border: none;
+  border-radius: 3px;
+  background: #5b4a7a;
+  color: #fff;
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.send__level {
+  width: 30px !important;
+  min-width: 0;
+  height: 16px;
+  font-size: 9px;
+}
+
+.strip__flags {
+  display: flex;
+  justify-content: center;
+  gap: 3px;
+}
+
+.strip__flag {
+  height: 15px;
+  min-width: 22px;
+  border: none;
+  border-radius: 3px;
+  background: var(--slot-dark);
+  color: #cfcfcf;
+  font-size: 8.5px;
+  cursor: pointer;
+}
+
+.strip__flag.is-on {
+  background: var(--solo);
+  color: #222;
+}
+
+.meter__rms {
+  position: absolute;
+  inset: 0;
+  transform-origin: bottom;
+  transform: scaleY(0);
+  background: rgb(255 255 255 / 0.28);
+  will-change: transform;
+}
+
+.meter__hold {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  bottom: 0;
+  background: #fff;
+}
+
+.meter__clip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  z-index: 1;
+  border: none;
+  padding: 0;
+  background: #4a1d1b;
+  cursor: pointer;
+}
+
+.meter__clip.is-on {
+  background: var(--danger);
+}
+
+.mixer__divider {
+  width: 6px;
+  flex: none;
+  background: #333;
+}
+
+.mixer__aux {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+}
+
+.mixer__aux > .icon-button {
+  align-self: center;
+}
+
+.mixer-folder {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  border-left: 2px solid var(--track-color);
+  border-right: 1px solid var(--strip-sep);
+}
+
+.mixer-folder__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 18px;
+  padding: 0 4px;
+  background: color-mix(in srgb, var(--track-color) 45%, #333);
+}
+
+.mixer-folder__toggle {
+  border: none;
+  background: transparent;
+  color: #fff;
+  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.mixer-folder__strips {
+  display: flex;
+  flex: 1;
+}
+
+.mixer-folder.is-collapsed {
+  width: 120px;
+}
+
+.insert-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px;
+  min-width: 200px;
+}

@@ -14,6 +14,56 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// Schema 3 (0.2.x) recorded MIDI kept note on/off as raw events. Schema 4
+/// turns them into editable notes, keeps every other event and the routing,
+/// and never rewrites the source file.
+#[test]
+fn schema_v3_midi_fixture_migrates_to_editable_notes() {
+    let path = fixture("v3-midi.elyvon");
+    let before = std::fs::read(&path).unwrap();
+    let p = format::load(&path).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), before, "fixture untouched");
+    let track = &p.tracks[0];
+    assert_eq!(track.io.midi_output.as_deref(), Some("output:Synth#0"));
+    assert_eq!(
+        (track.io.midi_channel, track.io.output_channel),
+        (Some(1), Some(3))
+    );
+    assert_eq!(track.strip, elyvon_project::mixer::StripRouting::default());
+    let recorded = &track.regions[0];
+    let RegionContent::Midi { notes } = &recorded.content else {
+        panic!("MIDI region expected");
+    };
+    let got: Vec<_> = notes
+        .iter()
+        .map(|n| (n.id, n.channel, n.pitch, n.velocity, n.start, n.length))
+        .collect();
+    assert_eq!(got, [(1, 1, 60, 100, 0, 960), (2, 1, 64, 90, 480, 960)]);
+    let raw: Vec<_> = recorded
+        .midi_events
+        .iter()
+        .map(|e| (e.tick, e.bytes.clone()))
+        .collect();
+    assert_eq!(
+        raw,
+        [
+            (0, vec![0xc1, 5]),
+            (240, vec![0xb1, 64, 127]),
+            (480, vec![0xe1, 0, 80]),
+            (1920, vec![0xb1, 64, 0]),
+        ],
+        "controllers, program and bend kept; the trailing all-notes-off closer dropped"
+    );
+    let RegionContent::Midi { notes } = &track.regions[1].content else {
+        panic!("MIDI region expected");
+    };
+    assert_eq!(notes.iter().map(|n| n.id).collect::<Vec<_>>(), [1, 2]);
+    assert!(p.mixer.auxes.is_empty());
+    // Saving writes schema 4 and reopening is lossless.
+    let bytes = format::encode(&p, "0.3.0");
+    assert_eq!(format::decode(&bytes).unwrap(), p);
+}
+
 /// Files written by v0.1.0 (schema 1) must keep loading in every later version.
 #[test]
 fn schema_v1_fixture_loads_with_all_fields() {
@@ -154,12 +204,12 @@ fn encoded_files_carry_the_current_envelope() {
 #[test]
 fn newer_schema_is_refused_with_clear_error() {
     let text = std::fs::read_to_string(fixture("v1-basic.elyvon")).unwrap();
-    let newer = text.replace("\"schemaVersion\": 1", "\"schemaVersion\": 4");
+    let newer = text.replace("\"schemaVersion\": 1", "\"schemaVersion\": 5");
     let err = format::decode(newer.as_bytes()).unwrap_err();
     assert!(matches!(
         err,
         ProjectError::NewerSchema {
-            found: 4,
+            found: 5,
             supported: CURRENT_SCHEMA_VERSION
         }
     ));

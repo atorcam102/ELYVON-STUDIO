@@ -6,8 +6,9 @@ use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::plan::MAX_TRACKS;
-use crate::rt::AtomicF32;
+use std::sync::atomic::{AtomicBool, AtomicU32};
+
+use crate::plan::{MASTER_SLOT, MAX_CHANNELS, aux_slot};
 
 /// A transport request, applied at the start of the next audio block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -94,8 +95,7 @@ pub struct EngineShared {
     max_block_ns: AtomicU64,
     midi_overflow: AtomicU64,
     streaming_underruns: AtomicU64,
-    master_peak: [AtomicF32; 2],
-    track_peaks: Vec<AtomicF32>,
+    meters: Vec<MeterSlot>,
 }
 
 impl EngineShared {
@@ -122,8 +122,7 @@ impl EngineShared {
             max_block_ns: AtomicU64::new(0),
             midi_overflow: AtomicU64::new(0),
             streaming_underruns: AtomicU64::new(0),
-            master_peak: [AtomicF32::new(0.0), AtomicF32::new(0.0)],
-            track_peaks: (0..MAX_TRACKS).map(|_| AtomicF32::new(0.0)).collect(),
+            meters: (0..MAX_CHANNELS).map(|_| MeterSlot::default()).collect(),
         }
     }
 
@@ -283,20 +282,62 @@ impl EngineShared {
         self.midi_overflow.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Audio thread: accumulates one block of a strip's post-fader signal.
     #[inline]
-    pub(crate) fn peak_master(&self, ch: usize, v: f32) {
-        let slot = &self.master_peak[ch];
-        if v > slot.load() {
-            slot.store(v);
+    pub(crate) fn meter(
+        &self,
+        slot: usize,
+        peak: [f32; 2],
+        sum: [f64; 2],
+        frames: u64,
+        clip: bool,
+    ) {
+        if let Some(m) = self.meters.get(slot) {
+            m.add(peak, sum, frames, clip);
         }
     }
 
-    #[inline]
-    pub(crate) fn peak_track(&self, i: usize, v: f32) {
-        if let Some(slot) = self.track_peaks.get(i)
-            && v > slot.load()
-        {
-            slot.store(v);
+    /// Clears every clip indicator (control side).
+    pub fn reset_clips(&self) {
+        for m in &self.meters {
+            m.clip.store(false, Ordering::Relaxed);
+        }
+    }
+
+    /// Reads levels since the previous call: peaks, a 300 ms RMS and sticky
+    /// clip flags of the master, the first `tracks` tracks and `auxes` auxes.
+    pub fn read_meters(&self, reader: &mut MeterReader, tracks: usize, auxes: usize) -> Meters {
+        let mut read = |slot: usize| -> ChannelMeter {
+            let m = &self.meters[slot];
+            let r = &mut reader.slots[slot];
+            let frames = m.frames.load(Ordering::Acquire);
+            let mut out = ChannelMeter::default();
+            let df = frames.wrapping_sub(r.frames);
+            for ch in 0..2 {
+                out.peak[ch] = f32::from_bits(m.peak[ch].swap(0, Ordering::AcqRel));
+                let sum = f64::from_bits(m.sum[ch].load(Ordering::Acquire));
+                let block = if df > 0 {
+                    (sum - r.sum[ch]).max(0.0) / df as f64
+                } else {
+                    0.0
+                };
+                r.sum[ch] = sum;
+                // Exponential average, ~300 ms at the ~30 Hz read rate.
+                r.ms[ch] += (block - r.ms[ch]) * 0.104;
+                out.rms[ch] = r.ms[ch].sqrt() as f32;
+            }
+            r.frames = frames;
+            out.clip = m.clip.load(Ordering::Relaxed);
+            out
+        };
+        Meters {
+            master: read(MASTER_SLOT),
+            tracks: (0..tracks.min(crate::plan::MAX_TRACKS))
+                .map(&mut read)
+                .collect(),
+            auxes: (0..auxes.min(crate::plan::MAX_AUXES))
+                .map(|a| read(aux_slot(a)))
+                .collect(),
         }
     }
 
@@ -337,19 +378,66 @@ impl EngineShared {
             streaming_underruns: self.streaming_underruns.load(Ordering::Relaxed),
         }
     }
+}
 
-    /// Reads and resets peak levels (master L/R, then `tracks` tracks).
-    pub fn take_peaks(&self, tracks: usize) -> Meters {
-        let take = |a: &AtomicF32| {
-            let v = a.load();
-            a.store(0.0);
-            v
-        };
-        Meters {
-            master: [take(&self.master_peak[0]), take(&self.master_peak[1])],
-            tracks: self.track_peaks.iter().take(tracks).map(take).collect(),
+/// Lock-free accumulator written only by the audio thread. Totals grow
+/// monotonically so the reader can take differences without a reset race;
+/// peaks are swapped out by the reader (`fetch_max` on non-negative f32 bits).
+#[derive(Debug, Default)]
+pub struct MeterSlot {
+    peak: [AtomicU32; 2],
+    sum: [AtomicU64; 2],
+    frames: AtomicU64,
+    clip: AtomicBool,
+}
+
+impl MeterSlot {
+    #[inline]
+    fn add(&self, peak: [f32; 2], sum: [f64; 2], frames: u64, clip: bool) {
+        for ch in 0..2 {
+            self.peak[ch].fetch_max(peak[ch].max(0.0).to_bits(), Ordering::AcqRel);
+            let total = f64::from_bits(self.sum[ch].load(Ordering::Relaxed)) + sum[ch];
+            self.sum[ch].store(total.to_bits(), Ordering::Release);
+        }
+        self.frames.fetch_add(frames, Ordering::Release);
+        if clip {
+            self.clip.store(true, Ordering::Relaxed);
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ReaderSlot {
+    sum: [f64; 2],
+    frames: u64,
+    ms: [f64; 2],
+}
+
+/// Control-side state of [`EngineShared::read_meters`].
+#[derive(Debug, Clone)]
+pub struct MeterReader {
+    slots: Vec<ReaderSlot>,
+}
+
+impl Default for MeterReader {
+    fn default() -> Self {
+        Self {
+            slots: vec![ReaderSlot::default(); MAX_CHANNELS],
+        }
+    }
+}
+
+/// Levels of one channel strip (linear, post fader).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ChannelMeter {
+    /// Highest sample since the previous read, L/R.
+    pub peak: [f32; 2],
+    /// ~300 ms RMS, L/R.
+    pub rms: [f32; 2],
+    /// A sample exceeded full scale (or was not finite) since the last reset.
+    pub clip: bool,
 }
 
 /// Playhead and transport state as observed from the audio thread.
@@ -391,13 +479,15 @@ pub struct EngineStats {
     pub streaming_underruns: u64,
 }
 
-/// Peak levels (linear) since the previous read.
+/// Meter levels of the master, tracks (project order) and auxiliary channels
+/// (mixer order) measured on the real signal by the audio thread.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct Meters {
-    pub master: [f32; 2],
-    pub tracks: Vec<f32>,
+    pub master: ChannelMeter,
+    pub tracks: Vec<ChannelMeter>,
+    pub auxes: Vec<ChannelMeter>,
 }
 
 #[cfg(test)]

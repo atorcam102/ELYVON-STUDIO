@@ -7,7 +7,7 @@ use elyvon_project::{
     io::{MidiImportRegion, StoredMidiEvent},
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use ts_rs::TS;
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -218,50 +218,10 @@ pub fn decode(bytes: &[u8]) -> Result<MidiFile, String> {
         meter_changes,
     })
 }
-/// Piano-roll projection only. The byte events remain the playback source.
+/// Note projection of raw events (pairs note on/off per channel and key).
+/// `ImportMidi` performs the same split, so imported notes are editable.
 pub fn notes_from_events(events: &[StoredMidiEvent], end: u64) -> Vec<MidiNote> {
-    let mut active: HashMap<(u8, u8), Vec<(u64, u8)>> = HashMap::new();
-    let mut notes = Vec::new();
-    for e in events {
-        let Some(p) = Packet::parse(&e.bytes) else {
-            continue;
-        };
-        let Some(ch) = p.channel() else {
-            continue;
-        };
-        let key = p.data[1];
-        match p.data[0] & 0xf0 {
-            0x90 if p.data[2] > 0 => active
-                .entry((ch, key))
-                .or_default()
-                .push((e.tick, p.data[2])),
-            0x80 | 0x90 => {
-                if let Some(list) = active.get_mut(&(ch, key))
-                    && let Some((start, velocity)) = list.pop()
-                {
-                    notes.push(MidiNote {
-                        pitch: key,
-                        velocity,
-                        start,
-                        length: e.tick.saturating_sub(start).max(1),
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-    for ((_, pitch), list) in active {
-        for (start, velocity) in list {
-            notes.push(MidiNote {
-                pitch,
-                velocity,
-                start,
-                length: end.saturating_sub(start).max(1),
-            });
-        }
-    }
-    notes.sort_by_key(|n| (n.start, n.pitch));
-    notes
+    elyvon_project::midi_edit::split_note_events(events, end).0
 }
 fn vlq(mut value: u64, out: &mut Vec<u8>) -> Result<(), String> {
     if value > 0x0fff_ffff {
@@ -344,40 +304,48 @@ pub fn encode(project: &Project) -> Result<Vec<u8>, String> {
         vlq(track.name.len() as u64, &mut name)?;
         name.extend_from_slice(track.name.as_bytes());
         let mut events = vec![(0, name)];
+        // (tick, order, bytes): at one tick controllers come first, then
+        // note-offs, then note-ons, so repeated notes are never cut short.
+        let mut timed: Vec<(u64, u8, Vec<u8>)> = Vec::new();
         for region in track.regions.iter().filter(|r| !r.muted) {
-            if region.midi_events.is_empty() {
-                if let RegionContent::Midi { notes } = &region.content {
-                    for n in notes {
-                        let ch = track.io.output_channel.unwrap_or(0);
-                        events.push((region.start + n.start, vec![0x90 | ch, n.pitch, n.velocity]));
-                        events.push((
-                            region.start + n.start + n.length,
-                            vec![0x80 | ch, n.pitch, 0],
-                        ));
-                    }
-                }
-            } else {
-                for e in &region.midi_events {
-                    let Some(packet) = Packet::parse(&e.bytes) else {
-                        return Err("invalid stored MIDI packet".into());
-                    };
-                    let bytes = if packet.data[0] == 0xf0 {
-                        let mut b = vec![0xf0];
-                        vlq(packet.len as u64 - 1, &mut b)?;
-                        b.extend_from_slice(&packet.bytes()[1..]);
-                        b
-                    } else if packet.data[0] >= 0xf0 {
-                        let mut b = vec![0xf7];
-                        vlq(u64::from(packet.len), &mut b)?;
-                        b.extend_from_slice(packet.bytes());
-                        b
-                    } else {
-                        packet.bytes().to_vec()
-                    };
-                    events.push((region.start + e.tick, bytes));
+            if let RegionContent::Midi { notes } = &region.content {
+                for n in notes.iter().filter(|n| !n.muted && n.start < region.length) {
+                    let ch = n.channel & 0x0f;
+                    let end = n.end().min(region.length);
+                    timed.push((
+                        region.start + n.start,
+                        2,
+                        vec![0x90 | ch, n.pitch, n.velocity],
+                    ));
+                    timed.push((region.start + end, 1, vec![0x80 | ch, n.pitch, 0]));
                 }
             }
+            for e in region
+                .midi_events
+                .iter()
+                .filter(|e| e.tick <= region.length)
+            {
+                let Some(packet) = Packet::parse(&e.bytes) else {
+                    return Err("invalid stored MIDI packet".into());
+                };
+                let bytes = if packet.data[0] == 0xf0 {
+                    let mut b = vec![0xf0];
+                    vlq(packet.len as u64 - 1, &mut b)?;
+                    b.extend_from_slice(&packet.bytes()[1..]);
+                    b
+                } else if packet.data[0] >= 0xf0 {
+                    let mut b = vec![0xf7];
+                    vlq(u64::from(packet.len), &mut b)?;
+                    b.extend_from_slice(packet.bytes());
+                    b
+                } else {
+                    packet.bytes().to_vec()
+                };
+                timed.push((region.start + e.tick, 0, bytes));
+            }
         }
+        timed.sort_by_key(|e| (e.0, e.1));
+        events.extend(timed.into_iter().map(|(tick, _, bytes)| (tick, bytes)));
         track_chunk(&mut events, &mut out)?;
     }
     if out.len() > MAX_BYTES {

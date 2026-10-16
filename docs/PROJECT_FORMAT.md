@@ -1,4 +1,4 @@
-# Formato de proyecto `.elyvon` (esquema 3)
+# Formato de proyecto `.elyvon` (esquema 4)
 
 Un proyecto de Elyvon Studio es un único archivo JSON UTF-8 con extensión
 `.elyvon`. Describe la canción (pistas, regiones, ajustes) y **referencia** los
@@ -182,3 +182,38 @@ as a single undoable edit; source WAV/BWF files remain immutable.
 Audio capture journals and `.partial.wav` files are outside the project JSON under the app's
 recordings/project-id folder. Recovery repairs channel-aligned frames, writes a valid BWF header,
 and finalizes without overwriting another take. The project references committed media by ID/path.
+
+> Schema 3 note (superseded by schema 4 below): raw note events are no longer a playback source.
+
+## Schema 4 — editable notes and the mixer (Phases 08–09)
+
+Schema 3 files migrate in memory; the source file is not rewritten
+(`tests/fixtures/v3-midi.elyvon`). Current saves use schema 4.
+
+**Notes.** `content.notes[]` is the authoritative note data: `id` (unique, non-zero within the
+region), `pitch`, `velocity` 1–127, `channel` 0–15, `muted`, `start`, `length` (> 0) and
+`quantizeOffset` (`start` minus the position before quantisation; 0 when unquantised, never
+before the region). `midiEvents` holds only controller, pitch-bend, pressure, program and SysEx
+events; note on/off messages there are rejected. Migration from schema ≤ 3 (and every MIDI
+import/recording) pairs note on/off per channel and key first-in-first-out, ends held notes at the
+region end, drops trailing all-notes-off/all-sound-off closers and keeps every other event.
+Note-off velocity is not stored.
+
+**Tracks** add `strip` and `folder`:
+
+| Field | Meaning |
+| --- | --- |
+| `strip.output` | `{type:"master"}` or `{type:"aux", id}` |
+| `strip.sends[]` | `target` aux, `levelDb` −96…+6, `preFader`, `muted`; one send per target, at most 8 |
+| `strip.inserts[]` | `id`, `bypass`, `processor`: `trim` (−48…+24 dB), `utility` (invert L/R, swap, mono), `filter` (`highPass`/`lowPass`, 20 Hz…20 kHz, Q 0.3…10), `limiter` (ceiling −24…0 dB, look-ahead 0…20 ms, release 1…1000 ms); at most 8 |
+| `strip.soloSafe` | stays audible while others are soloed |
+| `strip.group` | optional mixer group id |
+| `strip.format` | `auto` (mono for audio tracks playing only mono files), `mono`, `stereo` |
+| `folder` | optional mixer folder id |
+
+**Project** adds `mixer`: `auxes[]` (`id`, `name`, `color`, `volumeDb`, `pan`, `muted`, `soloed`,
+`strip`), `groups[]` (`id`, `name`, `color`, `linkVolume`, `linkPan`, `linkMute`, `linkSolo`),
+`folders[]` (`id`, `name`, `color`, `collapsed`), `master` (`volumeDb`, `muted`, `inserts`) and
+`panLaw` (`constantPower` −3 dB, `constantPowerCompensated` 0 dB, `linear` −6 dB). At most 64
+auxes, 32 groups and 64 folders. Every reference must exist and the output/send graph must be
+acyclic; a file or edit with a cycle is rejected (no feedback mode exists).
