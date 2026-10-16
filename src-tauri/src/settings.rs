@@ -138,7 +138,10 @@ impl Settings {
         if a.buffer_frames != 0 {
             a.buffer_frames = a.buffer_frames.clamp(32, 8192);
         }
-        if a.output_device.as_deref().is_some_and(|d| d.is_empty() || d.len() > 512) {
+        if a.output_device
+            .as_deref()
+            .is_some_and(|d| d.is_empty() || d.len() > 512)
+        {
             a.output_device = None;
         }
         self.recent_projects.retain(|p| !p.is_empty());

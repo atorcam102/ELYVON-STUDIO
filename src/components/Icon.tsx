@@ -27,7 +27,16 @@ import {
   Microphone,
   Minus,
   MusicNotes,
+  Pause,
   PencilSimple,
+  Scissors,
+  Clipboard,
+  SpeakerSlash,
+  FileArrowDown,
+  FileAudio,
+  Flag,
+  HandTap,
+  CrosshairSimple,
   PianoKeys,
   Play,
   Plug,
@@ -94,6 +103,15 @@ const glyphs = {
   lock: Lock,
   metronome: Metronome,
   tracks: ChartBar,
+  pause: Pause,
+  split: Scissors,
+  paste: Clipboard,
+  muteRegion: SpeakerSlash,
+  exportAudio: FileArrowDown,
+  importAudio: FileAudio,
+  marker: Flag,
+  tap: HandTap,
+  follow: CrosshairSimple,
 } as const;
 export type IconName = keyof typeof glyphs;
 interface IconProps {
@@ -105,6 +123,7 @@ interface IconProps {
 }
 const filled = new Set<IconName>([
   "play",
+  "pause",
   "stop",
   "record",
   "audio",

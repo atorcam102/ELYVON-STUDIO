@@ -11,6 +11,7 @@ import {
   MIN_DB,
 } from "../../lib/format";
 import { engineAvailable, useApp } from "../../state/app";
+import { useTransport } from "../../state/transport";
 import { useProject } from "../../state/project";
 import { useUi } from "../../state/ui";
 
@@ -259,10 +260,7 @@ const ChannelStrip = memo(function ChannelStrip({
             </span>
           ))}
         </div>
-        <div
-          className="meter"
-          title="Level meter — no signal (audio engine offline)"
-        >
+        <div className="meter" title="Peak level reported by the audio engine (post fader)">
           <div
             className="meter__bar"
             ref={(el) => {
@@ -361,6 +359,37 @@ function useSimulatedMeters(
   }, [on, registry]);
 }
 
+/** Drives the meters from engine peak levels (`audio://meters`). */
+function useEngineMeters(registry: MeterRegistry, tracks: Track[], on: boolean) {
+  const tracksRef = useRef(tracks);
+  useEffect(() => {
+    tracksRef.current = tracks;
+  }, [tracks]);
+  useEffect(() => {
+    if (!on) return;
+    const levels = new Map<string, number>();
+    const show = (id: string, v: number) => {
+      const el = registry.get(id);
+      if (el) el.style.transform = `scaleY(${v.toFixed(3)})`;
+    };
+    return useTransport.subscribe((s, prev) => {
+      if (s.meters !== prev.meters && s.meters) {
+        tracksRef.current.forEach((t, i) => {
+          const peak = s.meters!.tracks[i] ?? 0;
+          const target = peak > 0 ? dbToFaderPos(Math.max(MIN_DB, 20 * Math.log10(peak))) : 0;
+          const next = Math.max(target, (levels.get(t.id) ?? 0) * 0.8);
+          levels.set(t.id, next);
+          show(t.id, next);
+        });
+      }
+      if (s.snapshot?.state !== prev.snapshot?.state && (s.snapshot?.state === "stopped" || s.snapshot?.state === "paused")) {
+        levels.clear();
+        registry.forEach((el) => (el.style.transform = "scaleY(0)"));
+      }
+    });
+  }, [on, registry]);
+}
+
 const KIND_FILTERS: { kind: TrackKind; label: string }[] = [
   { kind: "audio", label: "Audio" },
   { kind: "instrument", label: "Inst" },
@@ -377,6 +406,7 @@ export function Mixer() {
   const [hidden, setHidden] = useState<TrackKind[]>([]);
   const tracks = project?.tracks ?? [];
   useSimulatedMeters(registry, tracks, demoMeters && !engineAvailable(engine));
+  useEngineMeters(registry, tracks, engineAvailable(engine));
 
   const onSelect = (id: string) => useUi.getState().selectTracks([id], id);
   const anySolo = tracks.some((t) => t.soloed);
@@ -386,6 +416,12 @@ export function Mixer() {
     <div className="mixer">
       <div className="mixer__bar">
         <span className="mixer__heading">Mixer</span>
+        {engine?.state === "running" && engine.output === "internalClock" && (
+          <span className="mixer__notice" title="No audio device is open; the engine runs on its internal clock.">
+            <Icon name="info" size={12} />
+            <span>No audio output — meters show the engine signal</span>
+          </span>
+        )}
         {!engineAvailable(engine) && (
           <span
             className="mixer__notice"
@@ -422,12 +458,12 @@ export function Mixer() {
           })}
         </div>
         <div className="mixer__bar-end">
-          {demoMeters && <Badge tone="demo">Simulated</Badge>}
-          <Toggle
-            label="Simulate meters"
-            checked={demoMeters}
-            onChange={setDemoMeters}
-          />
+          {!engineAvailable(engine) && (
+            <>
+              {demoMeters && <Badge tone="demo">Simulated</Badge>}
+              <Toggle label="Simulate meters" checked={demoMeters} onChange={setDemoMeters} />
+            </>
+          )}
         </div>
       </div>
       <div className="mixer__body">

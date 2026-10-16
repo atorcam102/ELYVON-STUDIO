@@ -1046,3 +1046,31 @@
   font-size: var(--fs-xl);
   color: var(--text-0);
 }
+
+.status__pill.is-warn .status__dot {
+  background: var(--warn);
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 0.2);
+}
+
+.cb-text {
+  width: auto;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.lcd__tap {
+  padding: 0 4px;
+  border: 1px solid currentcolor;
+  border-radius: 3px;
+  font: inherit;
+  font-size: 9px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.lcd__tap:active {
+  background: rgb(255 255 255 / 0.2);
+}

@@ -10,6 +10,13 @@ import {
   redo,
   undo,
 } from "../project/editActions";
+import {
+  duplicateSelectedRegions,
+  exportDiagnosticRender,
+  importAudioDialog,
+  setSelectedRegionsMuted,
+  splitSelectedAtPlayhead,
+} from "../project/regionActions";
 
 function ToolbarMenu({
   label,
@@ -41,7 +48,8 @@ export function ArrangementMenus() {
   const view = useProject((s) => s.view);
   const layout = useUi((s) => s.layout);
   const setLayout = useUi((s) => s.setLayout);
-  const selected = useUi((s) => s.selection.trackIds.length > 0);
+  const selected = useUi((s) => s.selection.trackIds.length > 0 || s.selection.regionIds.length > 0);
+  const regions = useUi((s) => s.selection.regionIds.length > 0);
   const edit: MenuEntry[] = [
     {
       id: "undo",
@@ -57,6 +65,10 @@ export function ArrangementMenus() {
       disabled: !view?.redoLabel,
       onSelect: redo,
     },
+    "separator",
+    { id: "split", label: "Split regions at playhead", icon: "split", disabled: !regions, onSelect: () => void splitSelectedAtPlayhead() },
+    { id: "dupRegions", label: "Duplicate regions", icon: "duplicate", disabled: !regions, onSelect: () => void duplicateSelectedRegions() },
+    { id: "muteRegions", label: "Mute / unmute regions", icon: "muteRegion", disabled: !regions, onSelect: () => void setSelectedRegionsMuted() },
     "separator",
     {
       id: "duplicate",
@@ -74,6 +86,9 @@ export function ArrangementMenus() {
     },
   ];
   const functions: MenuEntry[] = [
+    { id: "import", label: "Import audio files…", icon: "importAudio", onSelect: () => void importAudioDialog() },
+    { id: "render", label: "Export diagnostic render…", icon: "exportAudio", onSelect: () => void exportDiagnosticRender() },
+    "separator",
     {
       id: "audio",
       label: "New audio track",

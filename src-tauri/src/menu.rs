@@ -43,6 +43,19 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             "file.saveAs",
             "Save As…",
             Some("CmdOrCtrl+Shift+S"),
+        )?)
+        .separator()
+        .item(&item(
+            app,
+            "file.importAudio",
+            "Import Audio Files…",
+            Some("CmdOrCtrl+Shift+I"),
+        )?)
+        .item(&item(
+            app,
+            "file.exportRender",
+            "Export Diagnostic Render…",
+            None,
         )?);
     if !macos {
         file = file
@@ -61,6 +74,35 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .item(&PredefinedMenuItem::copy(app, None)?)
         .item(&PredefinedMenuItem::paste(app, None)?)
         .item(&PredefinedMenuItem::select_all(app, None)?)
+        .separator()
+        .item(&item(
+            app,
+            "region.split",
+            "Split Regions at Playhead",
+            Some("CmdOrCtrl+T"),
+        )?)
+        .item(&item(app, "region.duplicate", "Duplicate Regions", None)?)
+        .item(&item(app, "region.mute", "Mute/Unmute Regions", None)?)
+        .build()?;
+
+    // Space, Home and K are handled by the UI so they never swallow typing.
+    let transport = SubmenuBuilder::new(app, "Transport")
+        .item(&item(app, "transport.play", "Play / Stop (Space)", None)?)
+        .item(&item(app, "transport.stop", "Stop", None)?)
+        .item(&item(
+            app,
+            "transport.toStart",
+            "Go to Beginning (Home)",
+            None,
+        )?)
+        .separator()
+        .item(&item(app, "transport.metronome", "Metronome (K)", None)?)
+        .item(&item(
+            app,
+            "transport.addMarker",
+            "Add Marker at Cursor",
+            None,
+        )?)
         .build()?;
 
     let track = SubmenuBuilder::new(app, "Track")
@@ -133,6 +175,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     menu = menu
         .item(&file.build()?)
         .item(&edit)
+        .item(&transport)
         .item(&track)
         .item(&view);
     if macos {

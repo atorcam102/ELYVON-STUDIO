@@ -1,13 +1,16 @@
 import type { Project } from "../../bindings/Project";
 import type { Region } from "../../bindings/Region";
 import type { Track } from "../../bindings/Track";
-import { Button } from "../../components/Button";
+import { Button, Toggle } from "../../components/Button";
 import { InlineEdit, NumberField } from "../../components/Fields";
 import { Icon } from "../../components/Icon";
 import { formatDb, formatPan, MAX_DB, MIN_DB } from "../../lib/format";
-import { formatBarBeat, formatKey, formatLength, ticksPerBar } from "../../lib/music";
+import { formatKey, formatLength, ticksPerBar } from "../../lib/music";
 import { useProject } from "../../state/project";
+import { TempoMap } from "../../lib/tempoMap";
+import { useTransport } from "../../state/transport";
 import { useUi } from "../../state/ui";
+import { relinkMedia } from "../project/regionActions";
 import { deleteSelectedTracks, duplicateSelectedTracks, setMuted, setSoloed } from "../project/editActions";
 
 import { KIND_ICON, KIND_LABEL, TRACK_COLORS } from "../tracks/trackMeta";
@@ -102,15 +105,67 @@ function TrackInspector({ track, anySolo }: { track: Track; anySolo: boolean }) 
       </div>
       {silencedBySolo && <p className="insp-note">Silenced because another track is soloed.</p>}
       <p className="insp-note insp-note--muted">
-        Mute, solo, volume and pan are saved with the project and will drive the mixer once the audio engine ships.
+        Mute, solo, volume and pan are saved with the project and applied by the native engine.
       </p>
     </Section>
   );
 }
 
+function AudioRegionFields({ region, project }: { region: Region; project: Project }) {
+  const apply = useProject((s) => s.apply);
+  const mediaState = useTransport((s) => (region.content.type === "audio" && region.content.media ? s.media[region.content.media] : undefined));
+  if (region.content.type !== "audio") return null;
+  const c = region.content;
+  const asset = c.media ? project.media.find((m) => m.id === c.media) : undefined;
+  if (!asset) return <Row label="Source">None (placeholder, silent)</Row>;
+  const rate = asset.info?.sampleRate ?? project.sampleRate;
+  const ms = (frames: number) => Math.round((frames / rate) * 10000) / 10;
+  const frames = (millis: number) => Math.round((millis / 1000) * rate);
+  const set = (patch: Partial<{ gainDb: number; fadeIn: number; fadeOut: number; looped: boolean }>) =>
+    void apply({ type: "setAudioRegion", id: region.id, gainDb: c.gainDb, fadeIn: c.fadeIn, fadeOut: c.fadeOut, looped: c.looped, ...patch });
+  const info = asset.info;
+  const status =
+    mediaState?.state === "ready"
+      ? mediaState.changed
+        ? "Loaded — the file changed since import"
+        : "Loaded"
+      : mediaState?.state === "failed"
+        ? mediaState.message
+        : "Loading…";
+  return (
+    <>
+      <Row label="File">
+        <span title={asset.path}>{asset.name}</span>
+      </Row>
+      <Row label="Status">{status}</Row>
+      {info && (
+        <Row label="Format">{`${info.format.toUpperCase()} · ${info.sampleRate / 1000} kHz · ${info.channels === 1 ? "mono" : info.channels === 2 ? "stereo" : `${info.channels} ch (first 2 used)`} · ${(info.frames / info.sampleRate).toFixed(2)} s`}</Row>
+      )}
+      <Row label="Offset">{`${ms(c.offset)} ms into the file`}</Row>
+      <Row label="Gain">
+        <NumberField label="Region gain" value={c.gainDb} min={-96} max={24} step={0.5} precision={1} suffix="dB" onCommit={(gainDb) => set({ gainDb })} />
+      </Row>
+      <Row label="Fade in">
+        <NumberField label="Fade in" value={ms(c.fadeIn)} min={0} max={60000} step={1} precision={1} suffix="ms" onCommit={(v) => set({ fadeIn: frames(v) })} />
+      </Row>
+      <Row label="Fade out">
+        <NumberField label="Fade out" value={ms(c.fadeOut)} min={0} max={60000} step={1} precision={1} suffix="ms" onCommit={(v) => set({ fadeOut: frames(v) })} />
+      </Row>
+      <Toggle checked={c.looped} onChange={(looped) => set({ looped })} label="Loop" description="Repeat the file to fill the region" />
+      {mediaState?.state === "failed" && (
+        <Button size="sm" icon="folder" onClick={() => void relinkMedia(asset.id)}>
+          Locate file…
+        </Button>
+      )}
+      <p className="insp-note insp-note--muted">Edits are non-destructive: the file on disk is never modified.</p>
+    </>
+  );
+}
+
 function RegionInspector({ region, project }: { region: Region; project: Project }) {
   const apply = useProject((s) => s.apply);
-  const ts = project.transport.timeSignature;
+  const map = TempoMap.fromTransport(project.transport);
+  const ts = map.timeSignatureAt(region.start);
   return (
     <Section title="Region">
       <div className="insp-track-title">
@@ -123,13 +178,10 @@ function RegionInspector({ region, project }: { region: Region; project: Project
         />
       </div>
       <Row label="Type">{region.content.type === "midi" ? "MIDI" : "Audio"}</Row>
-      <Row label="Position">{formatBarBeat(region.start, ts)}</Row>
-      <Row label="Length">{formatLength(region.length, ts)}</Row>
-      {region.content.type === "midi" ? (
-        <Row label="Notes">{region.content.notes.length}</Row>
-      ) : (
-        <Row label="Source">{region.content.source?.path ?? "None (placeholder)"}</Row>
-      )}
+      <Row label="Position">{map.formatPosition(region.start)}</Row>
+      <Row label="Length">{`${formatLength(region.length, ts)} · ${(map.secondsAt(region.start + region.length) - map.secondsAt(region.start)).toFixed(3)} s`}</Row>
+      <Toggle checked={region.muted} onChange={(muted) => void apply({ type: "setRegionsMuted", ids: [region.id], muted })} label="Mute region" />
+      {region.content.type === "midi" ? <Row label="Notes">{region.content.notes.length}</Row> : <AudioRegionFields region={region} project={project} />}
     </Section>
   );
 }
@@ -140,7 +192,10 @@ function ProjectInspector({ project }: { project: Project }) {
   return (
     <Section title="Project">
       <Row label="Name">{project.name}</Row>
-      <Row label="Tempo">{`${t.tempo} BPM`}</Row>
+      <Row label="Tempo">{`${t.tempo} BPM${t.tempoChanges.length ? ` + ${t.tempoChanges.length} change(s)` : ""}`}</Row>
+      <Row label="Sample rate">{`${project.sampleRate / 1000} kHz`}</Row>
+      <Row label="Audio files">{project.media.length}</Row>
+      <Row label="Markers">{project.markers.length}</Row>
       <Row label="Signature">{`${t.timeSignature.numerator}/${t.timeSignature.denominator}`}</Row>
       <Row label="Key">{formatKey(t.key)}</Row>
       <Row label="Length">{`${project.lengthBars} bars`}</Row>

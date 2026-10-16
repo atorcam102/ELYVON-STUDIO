@@ -3,6 +3,7 @@
 
 import { create } from "zustand";
 import type { Selection, SettingsSection, UiPresentationV1 } from "./uiContract";
+import type { GridSpec } from "../bindings/GridSpec";
 import type { Layout } from "../bindings/Layout";
 import type { Project } from "../bindings/Project";
 import { clampZoom, DEFAULT_PX_PER_QUARTER } from "../lib/geometry";
@@ -14,6 +15,9 @@ export type { SettingsSection } from "./uiContract";
 export type { Selection } from "./uiContract";
 
 interface UiState extends UiPresentationV1 {
+  /** User-chosen snap grid; `null` follows the zoom level. */
+  snapSpec: GridSpec | null;
+  setSnapSpec: (spec: GridSpec | null) => void;
   setLayout: (patch: Partial<Layout>) => void;
   replaceLayout: (layout: Layout) => void;
   setZoom: (pxPerQuarter: number) => void;
@@ -53,6 +57,8 @@ export const useUi = create<UiState>((set) => ({
   aboutOpen: false,
   updateOpen: false,
   demoMeters: false,
+  snapSpec: null,
+  setSnapSpec: (snapSpec) => set({ snapSpec }),
 
   setLayout: (patch) => set((s) => ({ layout: { ...s.layout, ...patch } })),
   replaceLayout: (layout) => set({ layout }),

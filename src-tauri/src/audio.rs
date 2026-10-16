@@ -15,7 +15,9 @@ use std::time::{Duration, Instant};
 
 use elyvon_audio::device::{self, RunningOutput};
 use elyvon_audio::engine::{self, EngineHandle, EngineStatus, OutputKind};
-use elyvon_audio::media::{MediaBuffer, MediaStatus, MediaStore, default_budget_bytes, resolve_path};
+use elyvon_audio::media::{
+    MediaBuffer, MediaStatus, MediaStore, default_budget_bytes, resolve_path,
+};
 use elyvon_audio::plan::{PlaybackPlan, build_plan};
 use elyvon_audio::transport::{TransportCommand, TransportSnapshot};
 use elyvon_core::TapTempo;
@@ -119,8 +121,7 @@ impl AudioService {
             match device::negotiate(settings.output_device.as_deref(), project_rate, buffer) {
                 Ok((negotiated, format)) => {
                     let rate = negotiated.config.sample_rate;
-                    let (handle, eng) =
-                        engine::create(rate, MAX_BLOCK, PlaybackPlan::empty(rate));
+                    let (handle, eng) = engine::create(rate, MAX_BLOCK, PlaybackPlan::empty(rate));
                     let shared = Arc::clone(handle.shared());
                     match device::start(&negotiated, format, eng, shared) {
                         Ok(output) => started = Some((handle, output)),
@@ -131,11 +132,8 @@ impl AudioService {
             }
         }
         let (handle, output) = started.unwrap_or_else(|| {
-            let (handle, eng) = engine::create(
-                project_rate,
-                MAX_BLOCK,
-                PlaybackPlan::empty(project_rate),
-            );
+            let (handle, eng) =
+                engine::create(project_rate, MAX_BLOCK, PlaybackPlan::empty(project_rate));
             let output = device::start_internal_clock(eng, project_rate, INTERNAL_BLOCK);
             (handle, output)
         });
@@ -154,7 +152,9 @@ impl AudioService {
         inner.status = EngineStatus::Running {
             config: output.config,
             device: match &device_error {
-                Some(e) if settings.use_device => format!("{} — device unavailable: {e}", output.name),
+                Some(e) if settings.use_device => {
+                    format!("{} — device unavailable: {e}", output.name)
+                }
                 _ => output.name.clone(),
             },
             output: output.kind,
@@ -248,7 +248,11 @@ impl AudioService {
                     let audio = &app.state::<AppState>().audio;
                     let (cached, budget, current_rate) = {
                         let store = lock(&audio.store);
-                        (store.cached(&job.path), store.remaining_bytes(), store.rate())
+                        (
+                            store.cached(&job.path),
+                            store.remaining_bytes(),
+                            store.rate(),
+                        )
                     };
                     if current_rate != job.rate {
                         lock(&audio.loading).remove(&job.id);

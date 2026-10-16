@@ -16,6 +16,13 @@ import type { RecoveryInfo } from "../bindings/RecoveryInfo";
 import type { SessionView } from "../bindings/SessionView";
 import type { Settings } from "../bindings/Settings";
 import type { UpdateCheckResult } from "../bindings/UpdateCheckResult";
+import type { DeviceInfo } from "../bindings/DeviceInfo";
+import type { ImportLayout } from "../bindings/ImportLayout";
+import type { ImportResult } from "../bindings/ImportResult";
+import type { MediaStatus } from "../bindings/MediaStatus";
+import type { RenderReport } from "../bindings/RenderReport";
+import type { TransportCommand } from "../bindings/TransportCommand";
+import type { TransportSnapshot } from "../bindings/TransportSnapshot";
 
 export type { IpcError };
 
@@ -69,6 +76,27 @@ export const ipc = {
     quit: (discardChanges = false) => call<void>("app_quit", { discardChanges }),
     restart: () => call<void>("app_restart"),
   },
+  audio: {
+    devices: () => call<DeviceInfo[]>("audio_devices"),
+    restart: () => call<EngineStatus>("audio_restart"),
+  },
+  transport: {
+    command: (command: TransportCommand) => call<TransportSnapshot>("transport_command", { command }),
+    state: () => call<TransportSnapshot | null>("transport_state"),
+    tap: () => call<number | null>("transport_tap"),
+  },
+  media: {
+    formats: () => call<string[]>("media_formats"),
+    status: () => call<MediaStatus[]>("media_status"),
+    import: (paths: string[], trackId: string | null, start: number, layout: ImportLayout) =>
+      call<ImportResult>("media_import", { paths, trackId, start, layout }),
+    relink: (id: string, path: string) => call<SessionView>("media_relink", { id, path }),
+    /** Binary waveform columns; see `decodePeaks`. */
+    regionPeaks: (regionId: string, fromTick: number, toTick: number, columns: number) =>
+      call<ArrayBuffer>("media_region_peaks", { regionId, fromTick, toTick, columns }),
+    render: (path: string, metronome: boolean, startTick?: number, endTick?: number) =>
+      call<RenderReport>("project_render", { path, startTick: startTick ?? null, endTick: endTick ?? null, metronome }),
+  },
   settings: {
     get: () => call<Settings>("settings_get"),
     set: (settings: Settings) => call<Settings>("settings_set", { settings }),
@@ -84,3 +112,19 @@ export const ipc = {
     install: () => call<InstallResult>("update_install"),
   },
 };
+
+/** Waveform columns: `[minL, maxL, minR, maxR]` per column, in −1…1. */
+export interface Peaks {
+  columns: number;
+  data: Float32Array;
+}
+
+/** Decodes the `media_region_peaks` wire format (u32 LE count, then i16 LE). */
+export function decodePeaks(buffer: ArrayBuffer): Peaks {
+  const view = new DataView(buffer);
+  const columns = buffer.byteLength >= 4 ? view.getUint32(0, true) : 0;
+  const n = Math.min(columns * 4, Math.floor((buffer.byteLength - 4) / 2));
+  const data = new Float32Array(n);
+  for (let i = 0; i < n; i++) data[i] = view.getInt16(4 + i * 2, true) / 32767;
+  return { columns, data };
+}

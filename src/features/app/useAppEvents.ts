@@ -21,6 +21,18 @@ import {
   zoomBy,
 } from "../project/editActions";
 import { newProject, openDemoProject, openProject, quitApp, saveProject, saveProjectAs } from "../project/projectActions";
+import {
+  copySelectedRegions,
+  cutSelectedRegions,
+  duplicateSelectedRegions,
+  exportDiagnosticRender,
+  importAudioDialog,
+  pasteRegions,
+  setSelectedRegionsMuted,
+  splitSelectedAtPlayhead,
+} from "../project/regionActions";
+import { locate, toggleMetronome, togglePlay, stop } from "../transport/transportActions";
+import { connectTransport } from "../../state/transport";
 
 const RECOVERY_DELAY_MS = 15_000;
 const STARTUP_UPDATE_DELAY_MS = 5_000;
@@ -49,6 +61,26 @@ export function runMenuAction(id: string) {
       return void saveProject();
     case "file.saveAs":
       return void saveProjectAs();
+    case "file.importAudio":
+      return void importAudioDialog();
+    case "file.exportRender":
+      return void exportDiagnosticRender();
+    case "region.split":
+      return void splitSelectedAtPlayhead();
+    case "region.duplicate":
+      return void duplicateSelectedRegions();
+    case "region.mute":
+      return void setSelectedRegionsMuted();
+    case "transport.play":
+      return togglePlay();
+    case "transport.stop":
+      return stop();
+    case "transport.toStart":
+      return locate(0);
+    case "transport.metronome":
+      return toggleMetronome();
+    case "transport.addMarker":
+      return void useProject.getState().apply({ type: "addMarker", tick: useUi.getState().cursorTicks });
     case "edit.undo":
       return undo();
     case "edit.redo":
@@ -130,9 +162,19 @@ function onKeyDown(e: KeyboardEvent) {
     case "l":
     case "L":
       return toggleLoop();
+    case " ":
+      e.preventDefault();
+      return togglePlay();
     case "Home":
     case "Enter":
-      return useUi.getState().setCursor(0);
+      return locate(0);
+    case "k":
+    case "K":
+      return toggleMetronome();
+    case "m":
+    case "M":
+      if (useUi.getState().selection.regionIds.length) return void setSelectedRegionsMuted();
+      return;
     case "Escape":
       return useUi.getState().clearSelection();
     case "ArrowUp":
@@ -159,6 +201,28 @@ export function useAppEvents() {
   useEffect(() => {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Engine events: playhead, meters, engine and media status.
+  useEffect(() => connectTransport(), []);
+
+  // Cut/copy/paste of regions through the native Edit menu or the keyboard.
+  // Text fields keep their normal clipboard behaviour.
+  useEffect(() => {
+    const handler = (kind: "copy" | "cut" | "paste") => (e: ClipboardEvent) => {
+      if (isEditableTarget(document.activeElement) || document.querySelector(".dialog-backdrop")) return;
+      if (kind === "paste") {
+        e.preventDefault();
+        return void pasteRegions();
+      }
+      if (!useUi.getState().selection.regionIds.length) return;
+      e.preventDefault();
+      if (kind === "copy") copySelectedRegions();
+      else void cutSelectedRegions();
+    };
+    const listeners = (["copy", "cut", "paste"] as const).map((k) => [k, handler(k)] as const);
+    listeners.forEach(([k, f]) => document.addEventListener(k, f));
+    return () => listeners.forEach(([k, f]) => document.removeEventListener(k, f));
   }, []);
 
   // Keep selection consistent with the project after every change.

@@ -124,14 +124,14 @@ export function AudioEditor() {
       {region && region.content.type === "audio" ? (
         <>
           <p>
-            {region.name}: {region.content.source ? region.content.source.path : "placeholder region without an audio file"}
+            {region.name}: {region.content.media ? (project?.media.find((m) => m.id === (region.content as { media: string }).media)?.path ?? "file") : "placeholder region without an audio file"}
           </p>
-          <span>Waveform display and audio editing need the audio engine and file import (Phase 2).</span>
+          <span>Waveforms, trimming, fades, gain and looping are edited in the arrangement and inspector. A sample-level audio editor is not available yet.</span>
         </>
       ) : (
         <>
           <p>Audio editor</p>
-          <span>Waveform display and audio editing need the audio engine and file import (Phase 2).</span>
+          <span>Select an audio region. Sample-level editing is not available yet; use the arrangement and inspector.</span>
         </>
       )}
     </div>

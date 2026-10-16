@@ -1,9 +1,14 @@
+import { useEffect, useState } from "react";
+import type { DeviceInfo } from "../../bindings/DeviceInfo";
 import { Button, Toggle } from "../../components/Button";
 import { Dialog } from "../../components/Dialog";
 import { Icon } from "../../components/Icon";
 import { fileName } from "../../lib/format";
 import { isMac, shortcutLabel } from "../../lib/platform";
+import { inTauri, ipc } from "../../lib/ipc";
 import { useApp } from "../../state/app";
+import { notifyError } from "../../state/notifications";
+import { useTransport } from "../../state/transport";
 import { useUi, type SettingsSection } from "../../state/ui";
 import { useUpdates } from "../../state/updates";
 import { openProject } from "../project/projectActions";
@@ -113,15 +118,88 @@ function Updates() {
 
 function Audio() {
   const engine = useApp((s) => s.engine);
+  const settings = useApp((s) => s.settings);
+  const update = useApp((s) => s.updateSettings);
+  const stats = useTransport((s) => s.stats);
+  const [devices, setDevices] = useState<DeviceInfo[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!inTauri) return;
+    ipc.audio.devices().then(setDevices, () => setDevices([]));
+  }, []);
+  if (!settings) return null;
+  const a = settings.audio;
+  const apply = async () => {
+    setBusy(true);
+    try {
+      await ipc.settings.set(useApp.getState().settings!);
+      useApp.setState({ engine: await ipc.audio.restart() });
+    } catch (e) {
+      notifyError(e, "Could not restart audio");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="settings-page">
-      <div className="callout callout--info">
-        <Icon name="info" size={16} />
-        <p>{engine?.state === "unavailable" ? engine.reason : "Audio engine running."}</p>
+      <div className={`callout ${engine?.state === "running" && engine.output === "device" ? "callout--info" : "callout--warning"}`}>
+        <Icon name={engine?.state === "running" && engine.output === "device" ? "info" : "warning"} size={16} />
+        <p data-testid="audio-status">
+          {engine?.state === "running"
+            ? `${engine.device} · ${engine.config.sampleRate} Hz · ${engine.config.outputChannels} ch${engine.config.bufferFrames ? ` · ${engine.config.bufferFrames} frames` : " · default buffer"}${
+                engine.output === "internalClock" ? ". No sound is produced: the transport runs on the engine's internal clock." : ""
+              }`
+            : (engine?.reason ?? "The audio engine is starting.")}
+        </p>
       </div>
+      <Toggle
+        checked={a.useDevice}
+        onChange={(useDevice) => update((s) => ({ ...s, audio: { ...s.audio, useDevice } }))}
+        label="Use an audio output device"
+        description="Off: silent internal clock (useful without hardware)."
+      />
+      <label className="settings-field">
+        <span>Output device</span>
+        <select
+          value={a.outputDevice ?? ""}
+          disabled={!a.useDevice}
+          onChange={(e) => update((s) => ({ ...s, audio: { ...s.audio, outputDevice: e.target.value || null } }))}
+        >
+          <option value="">System default</option>
+          {(devices ?? []).map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+              {d.isDefault ? " (default)" : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      {devices !== null && devices.length === 0 && <p className="muted">No output devices were found.</p>}
+      <label className="settings-field">
+        <span>Buffer size</span>
+        <select
+          value={a.bufferFrames}
+          disabled={!a.useDevice}
+          onChange={(e) => update((s) => ({ ...s, audio: { ...s.audio, bufferFrames: Number(e.target.value) } }))}
+        >
+          {[0, 64, 128, 256, 512, 1024, 2048].map((n) => (
+            <option key={n} value={n}>
+              {n === 0 ? "Device default" : `${n} frames`}
+            </option>
+          ))}
+        </select>
+      </label>
+      <Button onClick={() => void apply()} disabled={busy}>
+        {busy ? "Restarting…" : "Apply and restart audio"}
+      </Button>
+      {stats && (
+        <p className="muted">
+          {`Callbacks: ${stats.blocks} · last ${stats.lastBlockUs.toFixed(0)} µs · max ${stats.maxBlockUs.toFixed(0)} µs · xruns: ${stats.xruns}`}
+        </p>
+      )}
       <p className="muted">
-        Device selection, sample rate and buffer size will appear here with the audio engine. The engine will run on a dedicated real-time thread in
-        the native core, separate from the interface and from disk access.
+        The project sample rate is set in Tempo, metre and locators. Audio runs in the native engine on the device thread, with no locks or
+        allocation in the callback; files are decoded and resampled on a worker thread.
       </p>
     </div>
   );
@@ -141,8 +219,14 @@ const SHORTCUTS: [string, string][] = [
   ["Duplicate tracks", "Mod+D"],
   ["Delete selection", "Delete"],
   ["Zoom in / out", "Mod+= / Mod+-"],
-  ["Toggle loop", "L"],
-  ["Cursor to start", "Home"],
+  ["Play / stop", "Space"],
+  ["Toggle cycle", "L"],
+  ["Metronome", "K"],
+  ["Playhead to start", "Home"],
+  ["Import audio files", "Mod+Shift+I"],
+  ["Split regions at playhead", "Mod+T"],
+  ["Cut / copy / paste regions", "Mod+X / Mod+C / Mod+V"],
+  ["Mute selected regions", "M"],
   ["Toggle inspector / browser / editors", "I / B / E"],
   ["Show mixer", "X"],
   ["Select previous / next track", "↑ / ↓"],

@@ -73,7 +73,10 @@ pub async fn transport_tap(state: State<'_, AppState>) -> IpcResult<Option<f64>>
 
 #[tauri::command]
 pub async fn media_formats() -> IpcResult<Vec<String>> {
-    Ok(SUPPORTED_EXTENSIONS.iter().map(|s| (*s).to_owned()).collect())
+    Ok(SUPPORTED_EXTENSIONS
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect())
 }
 
 #[tauri::command]
@@ -214,7 +217,11 @@ pub async fn media_import(
             placements.push(AudioPlacement {
                 media_id: asset.id,
                 track,
-                start: if layout == ImportLayout::NewTracks { start } else { at },
+                start: if layout == ImportLayout::NewTracks {
+                    start
+                } else {
+                    at
+                },
             });
             at = elyvon_project::timeline_edit::tick_after_frames(
                 &map,
@@ -248,10 +255,12 @@ pub async fn media_relink(app: AppHandle, id: MediaId, path: String) -> IpcResul
     let budget = state.audio.remaining_budget();
     let p = PathBuf::from(&path);
     let load_path = p.clone();
-    let buffer = tauri::async_runtime::spawn_blocking(move || MediaStore::load_file(&load_path, rate, budget))
-        .await
-        .map_err(IpcError::from)?
-        .map_err(|e| IpcError::new(ErrorCode::Media, e.to_string()))?;
+    let buffer = tauri::async_runtime::spawn_blocking(move || {
+        MediaStore::load_file(&load_path, rate, budget)
+    })
+    .await
+    .map_err(IpcError::from)?
+    .map_err(|e| IpcError::new(ErrorCode::Media, e.to_string()))?;
     let view = {
         let mut session = state.session();
         session.apply(&EditCommand::RelinkMedia {
@@ -281,26 +290,36 @@ pub async fn media_region_peaks(
     let (region, map) = {
         let s = state.session();
         let p = s.project();
-        let (ti, ri) = p.find_region(region_id).ok_or_else(|| {
-            IpcError::new(ErrorCode::NotFound, "The region no longer exists.")
-        })?;
+        let (ti, ri) = p
+            .find_region(region_id)
+            .ok_or_else(|| IpcError::new(ErrorCode::NotFound, "The region no longer exists."))?;
         let map = p
             .transport
             .tempo_map()
             .map_err(|e| IpcError::internal(e.to_string()))?;
         (p.tracks[ti].regions[ri].clone(), map)
     };
-    let RegionContent::Audio { media: Some(id), .. } = region.content else {
-        return Err(IpcError::new(ErrorCode::NotFound, "The region has no audio file."));
+    let RegionContent::Audio {
+        media: Some(id), ..
+    } = region.content
+    else {
+        return Err(IpcError::new(
+            ErrorCode::NotFound,
+            "The region has no audio file.",
+        ));
     };
     let buffer = state
         .audio
         .buffer(id)
         .ok_or_else(|| IpcError::new(ErrorCode::NotFound, "The audio file is not loaded."))?;
     if !(from_tick.is_finite() && to_tick.is_finite() && to_tick > from_tick) {
-        return Err(IpcError::new(ErrorCode::InvalidEdit, "Invalid waveform range."));
+        return Err(IpcError::new(
+            ErrorCode::InvalidEdit,
+            "Invalid waveform range.",
+        ));
     }
-    let cols = waveform::region_columns(&map, &region, &buffer, from_tick, to_tick, columns as usize);
+    let cols =
+        waveform::region_columns(&map, &region, &buffer, from_tick, to_tick, columns as usize);
     let mut bytes = Vec::with_capacity(4 + cols.len() * 8);
     bytes.extend_from_slice(&(cols.len() as u32).to_le_bytes());
     let q = |v: f32| ((v.clamp(-1.0, 1.0) * 32767.0).round() as i16).to_le_bytes();

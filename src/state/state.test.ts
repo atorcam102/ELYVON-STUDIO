@@ -26,7 +26,16 @@ function project(trackIds: string[], regionIds: string[] = []): Project {
       timeSignature: { numerator: 4, denominator: 4 },
       key: { tonic: "C", mode: "major" },
       loopRange: { enabled: false, start: 0, end: 15360 },
+      tempoChanges: [],
+      meterChanges: [],
+      metronome: { enabled: false, volumeDb: -6, accent: true },
+      countInBars: 0,
+      preRollBars: 0,
+      punch: { enabled: false, start: 0, end: 15360 },
     },
+    sampleRate: 48000,
+    media: [],
+    markers: [],
     tracks: trackIds.map((id, i) => ({
       id,
       name: id,
@@ -36,7 +45,7 @@ function project(trackIds: string[], regionIds: string[] = []): Project {
       soloed: false,
       volumeDb: 0,
       pan: 0,
-      regions: i === 0 ? regionIds.map((r) => ({ id: r, name: r, start: 0, length: 960, content: { type: "midi", notes: [] } })) : [],
+      regions: i === 0 ? regionIds.map((r) => ({ id: r, name: r, start: 0, length: 960, muted: false, content: { type: "midi", notes: [] } })) : [],
     })),
   };
 }
