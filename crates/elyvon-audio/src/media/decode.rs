@@ -55,6 +55,26 @@ pub fn fingerprint(path: &Path) -> Result<(u64, u64), MediaError> {
 /// Decodes a whole file. `max_frames` bounds memory before decoding starts
 /// (when the container states its length) and while decoding.
 pub fn decode_file(path: &Path, max_frames: u64) -> Result<Decoded, MediaError> {
+    let mut planes: Vec<Vec<f32>> = Vec::new();
+    let info = decode_blocks(path, max_frames, &mut |block, _rate| {
+        if planes.is_empty() {
+            planes = vec![Vec::new(); block.len().min(2)];
+        }
+        for (dst, src) in planes.iter_mut().zip(block) {
+            dst.extend_from_slice(src);
+        }
+        Ok(())
+    })?;
+    Ok(Decoded { info, planes })
+}
+
+/// Decodes one bounded packet at a time. The consumer runs on the worker
+/// thread, may write a disk cache, and must not retain the borrowed packet.
+pub fn decode_blocks(
+    path: &Path,
+    max_frames: u64,
+    consume: &mut impl FnMut(&[Vec<f32>], u32) -> Result<(), MediaError>,
+) -> Result<MediaInfo, MediaError> {
     let (hash, size) = fingerprint(path)?;
     let file = File::open(path).map_err(|e| MediaError::from_io(path, e))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
@@ -92,8 +112,9 @@ pub fn decode_file(path: &Path, max_frames: u64) -> Result<Decoded, MediaError> 
         .map_err(|e| MediaError::Unsupported(format!("unsupported codec: {e}")))?;
 
     let mut rate = params.sample_rate.unwrap_or(0);
-    let mut planes: Vec<Vec<f32>> = Vec::new();
     let mut scratch: Vec<Vec<f32>> = Vec::new();
+    let mut frames = 0u64;
+    let mut channels = 0u16;
     let mut bad_packets = 0u32;
     loop {
         let packet = match format.next_packet() {
@@ -111,15 +132,20 @@ pub fn decode_file(path: &Path, max_frames: u64) -> Result<Decoded, MediaError> 
                     rate = buf.spec().rate();
                 }
                 buf.copy_to_vecs_planar::<f32>(&mut scratch);
-                if planes.is_empty() {
-                    planes = vec![Vec::new(); scratch.len()];
+                if buf.spec().rate() != rate {
+                    return Err(MediaError::Decode(
+                        "sample rate changed inside the file".into(),
+                    ));
                 }
-                for (dst, src) in planes.iter_mut().zip(&scratch) {
-                    dst.extend_from_slice(src);
-                }
-                if planes.first().map_or(0, Vec::len) as u64 > max_frames {
+                channels = scratch.len().min(u16::MAX as usize) as u16;
+                frames = frames.saturating_add(scratch.first().map_or(0, Vec::len) as u64);
+                if frames > max_frames {
                     return Err(MediaError::TooLarge);
                 }
+                if scratch.iter().flatten().any(|s| !s.is_finite()) {
+                    return Err(MediaError::Decode("non-finite PCM sample".into()));
+                }
+                consume(&scratch[..usize::from(channels).min(2)], rate)?;
             }
             Err(SymError::DecodeError(_)) | Err(SymError::IoError(_)) => {
                 bad_packets += 1;
@@ -130,23 +156,18 @@ pub fn decode_file(path: &Path, max_frames: u64) -> Result<Decoded, MediaError> 
             Err(e) => return Err(MediaError::Decode(e.to_string())),
         }
     }
-    let frames = planes.first().map_or(0, Vec::len);
-    if frames == 0 || planes.is_empty() {
+    if frames == 0 || channels == 0 {
         return Err(MediaError::Empty);
     }
     if rate == 0 {
         return Err(MediaError::Unsupported("unknown sample rate".into()));
     }
-    let channels = u16::try_from(planes.len()).unwrap_or(u16::MAX);
-    Ok(Decoded {
-        info: MediaInfo {
-            sample_rate: rate,
-            channels,
-            frames: frames as u64,
-            format: format_name.chars().take(16).collect(),
-            size_bytes: size,
-            fingerprint: format!("{hash:016x}"),
-        },
-        planes,
+    Ok(MediaInfo {
+        sample_rate: rate,
+        channels,
+        frames,
+        format: format_name.chars().take(16).collect(),
+        size_bytes: size,
+        fingerprint: format!("{hash:016x}"),
     })
 }

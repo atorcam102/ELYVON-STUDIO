@@ -99,6 +99,18 @@ pub trait AudioProcessor: Send {
 /// There is no instrument yet: the device callback discards them; tests and
 /// diagnostics capture them.
 pub trait MidiSink {
+    fn packet(&mut self, track: usize, frame: u32, packet: crate::midi::Packet) {
+        if let Some(message) = packet.message() {
+            self.event(
+                track,
+                MidiEvent {
+                    frame_offset: frame,
+                    message,
+                },
+            );
+        }
+    }
+    fn reset(&mut self, _frame: u32) {}
     fn event(&mut self, track: usize, event: MidiEvent);
 }
 
@@ -115,18 +127,66 @@ const PLAN_CAPACITY: usize = 4;
 const GARBAGE_CAPACITY: usize = 8;
 const MAX_EVENTS_PER_TRACK_SPAN: usize = 256;
 
+/// Input-side monitor writer. Returned to the control handle when the input
+/// stream is dropped, so repeated Record/Stop does not lose the monitor bus.
+#[derive(Debug)]
+pub struct MonitorInput {
+    producer: Option<Producer<[f32; 2]>>,
+    returns: std::sync::mpsc::Sender<Producer<[f32; 2]>>,
+}
+impl MonitorInput {
+    pub fn push(&mut self, frame: [f32; 2]) -> bool {
+        self.producer
+            .as_mut()
+            .is_some_and(|p| p.push(frame).is_ok())
+    }
+}
+impl Drop for MonitorInput {
+    fn drop(&mut self) {
+        if let Some(p) = self.producer.take() {
+            let _ = self.returns.send(p);
+        }
+    }
+}
+
 /// Control-thread side of an engine.
 #[derive(Debug)]
 pub struct EngineHandle {
     commands: Producer<TransportCommand>,
+    monitor_input: Option<Producer<[f32; 2]>>,
+    monitor_returns: std::sync::mpsc::Receiver<Producer<[f32; 2]>>,
+    monitor_sender: std::sync::mpsc::Sender<Producer<[f32; 2]>>,
     plans: Producer<Box<PlaybackPlan>>,
     garbage: Consumer<Box<PlaybackPlan>>,
     pending: Option<Box<PlaybackPlan>>,
     shared: Arc<EngineShared>,
     sample_rate: u32,
+    midi_output: Consumer<crate::midi::ScheduledPacket>,
+    midi_overflow: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl EngineHandle {
+    pub fn drain_midi(&mut self) -> (Vec<crate::midi::ScheduledPacket>, bool) {
+        let mut packets = Vec::new();
+        while let Ok(p) = self.midi_output.pop() {
+            packets.push(p);
+        }
+        let overflow = self
+            .midi_overflow
+            .swap(false, std::sync::atomic::Ordering::AcqRel);
+        (packets, overflow)
+    }
+
+    pub fn take_monitor_input(&mut self) -> Option<MonitorInput> {
+        if let Ok(p) = self.monitor_returns.try_recv() {
+            self.monitor_input = Some(p);
+        }
+        self.monitor_input.take().map(|producer| MonitorInput {
+            producer: Some(producer),
+            returns: self.monitor_sender.clone(),
+        })
+    }
+
     pub fn shared(&self) -> &Arc<EngineShared> {
         &self.shared
     }
@@ -197,6 +257,7 @@ pub struct Engine {
     plans: Consumer<Box<PlaybackPlan>>,
     garbage: Producer<Box<PlaybackPlan>>,
     commands: Consumer<TransportCommand>,
+    monitor: Consumer<[f32; 2]>,
     shared: Arc<EngineShared>,
     state: PlayState,
     position: u64,
@@ -211,6 +272,11 @@ pub struct Engine {
     events: Vec<PendingEvent>,
     measure: Option<Vec<TrackMeasure>>,
     clip_output: bool,
+    release_pending: bool,
+    callback_frames: u32,
+    callback_clock: u64,
+    midi_output: Option<Producer<crate::midi::ScheduledPacket>>,
+    midi_overflow: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl std::fmt::Debug for Engine {
@@ -229,22 +295,32 @@ pub fn create(sample_rate: u32, max_block: usize, plan: PlaybackPlan) -> (Engine
     assert_eq!(plan.sample_rate, sample_rate, "plan built for another rate");
     let max_block = max_block.clamp(16, 1 << 15);
     let (cmd_tx, cmd_rx) = RingBuffer::new(COMMAND_CAPACITY);
+    let (monitor_tx, monitor_rx) = RingBuffer::new(2048);
+    let (monitor_sender, monitor_returns) = std::sync::mpsc::channel();
     let (plan_tx, plan_rx) = RingBuffer::new(PLAN_CAPACITY);
     let (garbage_tx, garbage_rx) = RingBuffer::new(GARBAGE_CAPACITY);
     let shared = Arc::new(EngineShared::new(sample_rate));
+    let (midi_tx, midi_rx) = RingBuffer::new(4096);
+    let midi_overflow = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let handle = EngineHandle {
         commands: cmd_tx,
+        monitor_input: Some(monitor_tx),
+        monitor_sender,
+        monitor_returns,
         plans: plan_tx,
         garbage: garbage_rx,
         pending: None,
         shared: Arc::clone(&shared),
         sample_rate,
+        midi_output: midi_rx,
+        midi_overflow: Arc::clone(&midi_overflow),
     };
     let engine = Engine {
         plan: Box::new(plan),
         plans: plan_rx,
         garbage: garbage_tx,
         commands: cmd_rx,
+        monitor: monitor_rx,
         shared,
         state: PlayState::Stopped,
         position: 0,
@@ -257,6 +333,11 @@ pub fn create(sample_rate: u32, max_block: usize, plan: PlaybackPlan) -> (Engine
         events: Vec::with_capacity(MAX_EVENTS_PER_TRACK_SPAN),
         measure: None,
         clip_output: true,
+        release_pending: false,
+        callback_frames: 0,
+        callback_clock: 0,
+        midi_output: Some(midi_tx),
+        midi_overflow,
     };
     (handle, engine)
 }
@@ -272,6 +353,16 @@ impl Engine {
 
     pub fn position(&self) -> u64 {
         self.position
+    }
+
+    /// Offline/control thread only. Wait for the disk pages needed by the
+    /// next span; never call this from `process` or a device callback.
+    pub fn prepare_media(
+        &self,
+        position: u64,
+        frames: usize,
+    ) -> Result<(), crate::media::MediaError> {
+        self.plan.prefetch(position, frames)
     }
 
     /// Hard-clip the device output to ±1 (on by default; off for renders).
@@ -290,9 +381,35 @@ impl Engine {
 
     /// Renders `out.len() / channels` interleaved frames. Real-time safe.
     pub fn process(&mut self, out: &mut [f32], channels: usize, midi: &mut dyn MidiSink) {
+        let Some(mut output) = self.midi_output.take() else {
+            out.fill(0.0);
+            return;
+        };
+        let overflow = Arc::clone(&self.midi_overflow);
+        let mut forward = MidiForward {
+            output: &mut output,
+            outer: midi,
+            started: Instant::now()
+                + std::time::Duration::from_secs_f64(
+                    self.shared.output_latency() as f64 / f64::from(self.plan.sample_rate),
+                ),
+            rate: self.plan.sample_rate,
+            overflow: &overflow,
+        };
+        self.process_audio(out, channels, &mut forward);
+        self.midi_output = Some(output);
+    }
+    fn process_audio(&mut self, out: &mut [f32], channels: usize, midi: &mut dyn MidiSink) {
         let started = Instant::now();
         let channels = channels.max(1);
         let frames = out.len() / channels;
+        self.callback_frames = frames.min(u32::MAX as usize) as u32;
+        self.callback_clock = self.shared.clock_now()
+            + self.shared.output_latency() * 1_000_000_000 / u64::from(self.plan.sample_rate);
+        if self.release_pending {
+            self.release_pending = false;
+            self.all_notes_off(0, midi);
+        }
         self.swap_plan(midi);
         self.drain_commands(midi);
         let mut done = 0;
@@ -303,8 +420,9 @@ impl Engine {
             let dst = &mut out[done * channels..(done + n) * channels];
             let (mut pl, mut pr) = (0.0f32, 0.0f32);
             for (i, frame) in dst.chunks_exact_mut(channels).enumerate() {
-                let mut l = self.mix[i * 2];
-                let mut r = self.mix[i * 2 + 1];
+                let input = self.monitor.pop().unwrap_or([0.0; 2]);
+                let mut l = self.mix[i * 2] + input[0];
+                let mut r = self.mix[i * 2 + 1] + input[1];
                 pl = pl.max(l.abs());
                 pr = pr.max(r.abs());
                 if self.clip_output {
@@ -336,6 +454,7 @@ impl Engine {
             ticks,
             remaining,
             self.plan.generation,
+            frames as u64,
         );
         self.shared
             .add_block(frames as u64, started.elapsed().as_nanos() as u64);
@@ -455,6 +574,7 @@ impl Engine {
     }
 
     fn all_notes_off(&mut self, frame: u32, midi: &mut dyn MidiSink) {
+        midi.reset(frame);
         for (track, notes) in self.active_notes.iter_mut().enumerate() {
             for (pitch, count) in notes.iter_mut().enumerate() {
                 while *count > 0 {
@@ -481,6 +601,8 @@ impl Engine {
         let mut off = 0usize;
         if let Some(mut c) = self.count_in {
             let len = n.min((c.total - c.pos) as usize);
+            self.shared
+                .record_clock(self.callback_clock, base, len, c.target, PlayState::CountIn);
             self.render_count_in(&c, len);
             c.pos += len as u64;
             off = len;
@@ -494,6 +616,13 @@ impl Engine {
             }
         }
         if self.state != PlayState::Playing {
+            self.shared.record_clock(
+                self.callback_clock,
+                base + off as u32,
+                n - off,
+                self.position,
+                self.state,
+            );
             return;
         }
         while off < n {
@@ -512,7 +641,12 @@ impl Engine {
                 && self.position == ce
             {
                 self.position = cs;
-                self.all_notes_off(base + off as u32, midi);
+                let boundary = base + off as u32;
+                if boundary == self.callback_frames {
+                    self.release_pending = true;
+                } else {
+                    self.all_notes_off(boundary, midi);
+                }
                 self.shared.add_cycle();
             }
         }
@@ -556,6 +690,13 @@ impl Engine {
         base: u32,
         midi: &mut dyn MidiSink,
     ) {
+        self.shared.record_clock(
+            self.callback_clock,
+            base + off as u32,
+            len,
+            pos,
+            PlayState::Playing,
+        );
         let q = pos + len as u64;
         let plan = &*self.plan;
         for (ti, track) in plan.tracks.iter().enumerate() {
@@ -566,7 +707,7 @@ impl Engine {
             if !track.segments.is_empty() {
                 let buf = &mut self.track_buf[..len * 2];
                 buf.fill(0.0);
-                if mix_track(track, pos, q, buf) {
+                if mix_track(track, pos, q, buf, &self.shared) {
                     let (mut peak, mut sum) = (0.0f32, 0.0f64);
                     let dst = &mut self.mix[off * 2..(off + len) * 2];
                     for (d, s) in dst.iter_mut().zip(buf.iter()) {
@@ -583,6 +724,14 @@ impl Engine {
             }
             if let Some(m) = self.measure.as_mut().and_then(|m| m.get_mut(ti)) {
                 m.frames += len as u64;
+            }
+            let first = track.events.partition_point(|e| e.on < pos);
+            for event in track.events[first..].iter().take_while(|e| e.on < q) {
+                midi.packet(
+                    ti,
+                    base + off as u32 + (event.on - pos) as u32,
+                    event.packet,
+                );
             }
             if !track.notes.is_empty() {
                 schedule_notes(
@@ -634,7 +783,7 @@ fn mix_click(mix: &mut [f32], off: usize, from: u64, to: u64, at: u64, sound: &[
 
 /// Mixes a track's audio for `[p, q)` into `buf` (stereo). Returns whether
 /// anything was written.
-fn mix_track(track: &PlanTrack, p: u64, q: u64, buf: &mut [f32]) -> bool {
+fn mix_track(track: &PlanTrack, p: u64, q: u64, buf: &mut [f32], shared: &EngineShared) -> bool {
     let mut any = false;
     for seg in &track.segments[track.segment_range(p, q)] {
         let a = seg.start.max(p);
@@ -644,23 +793,25 @@ fn mix_track(track: &PlanTrack, p: u64, q: u64, buf: &mut [f32]) -> bool {
         }
         any = true;
         let media = &seg.media;
-        let stereo = media.planes.len() > 1;
+        let before = media.stream.as_ref().map_or(0, |s| s.underruns());
+        let stereo = media.channels() > 1;
         let (gl, gr) = if stereo {
             track.stereo_gain
         } else {
             track.mono_gain
         };
-        let left = &media.planes[0];
-        let right = &media.planes[media.planes.len() - 1];
         for t in a..b {
             let Some(src) = seg.source_frame(t) else {
                 break;
             };
             let g = seg.envelope(t);
+            let [left, right] = media.sample(src);
             let i = ((t - p) as usize) * 2;
-            buf[i] += left[src] * g * gl;
-            buf[i + 1] += right[src] * g * gr;
+            buf[i] += left * g * gl;
+            buf[i + 1] += right * g * gr;
         }
+        let after = media.stream.as_ref().map_or(0, |s| s.underruns());
+        shared.add_streaming_underruns(after.saturating_sub(before));
     }
     any
 }
@@ -697,6 +848,7 @@ fn schedule_notes(
     midi: &mut dyn MidiSink,
 ) {
     events.clear();
+    let mut overflow = false;
     let first = track
         .notes
         .partition_point(|n| n.on < p.saturating_sub(track.max_note_len));
@@ -709,6 +861,7 @@ fn schedule_notes(
                 events.push(e);
             } else {
                 shared.add_midi_overflow();
+                overflow = true;
             }
         };
         if note.on >= p {
@@ -727,6 +880,12 @@ fn schedule_notes(
                 velocity: 0,
             });
         }
+    }
+    if overflow {
+        release_track(active, ti, frame0, midi);
+        midi.reset(frame0);
+        events.clear();
+        return;
     }
     // Stable order: by frame, note-offs before note-ons (allocation-free sort).
     events.sort_unstable_by_key(|e| (e.frame, !e.off, e.pitch));
@@ -763,4 +922,42 @@ fn schedule_notes(
 /// Kept for callers that only need a click sound outside a plan.
 pub fn click_sounds(rate: u32) -> ClickSounds {
     ClickSounds::synthesise(rate)
+}
+
+struct MidiForward<'a> {
+    output: &'a mut Producer<crate::midi::ScheduledPacket>,
+    outer: &'a mut dyn MidiSink,
+    started: Instant,
+    rate: u32,
+    overflow: &'a std::sync::atomic::AtomicBool,
+}
+impl MidiSink for MidiForward<'_> {
+    fn event(&mut self, track: usize, event: MidiEvent) {
+        self.outer.event(track, event);
+        if let Some(packet) = crate::midi::Packet::from_message(event.message) {
+            self.queue(track, event.frame_offset, packet);
+        }
+    }
+    fn packet(&mut self, track: usize, frame: u32, packet: crate::midi::Packet) {
+        self.outer.packet(track, frame, packet);
+        self.queue(track, frame, packet);
+    }
+    fn reset(&mut self, frame: u32) {
+        self.outer.reset(frame);
+        self.queue(usize::MAX, frame, crate::midi::Packet::PANIC);
+    }
+}
+impl MidiForward<'_> {
+    fn queue(&mut self, track: usize, frame: u32, packet: crate::midi::Packet) {
+        let event = crate::midi::ScheduledPacket {
+            track,
+            deadline: self.started
+                + std::time::Duration::from_secs_f64(f64::from(frame) / f64::from(self.rate)),
+            packet,
+        };
+        if self.output.push(event).is_err() {
+            self.overflow
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
 }

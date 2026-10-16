@@ -1,3 +1,7 @@
+import { useMidi } from "../../state/midi";
+import { MidiDialog } from "../midi/MidiDialog";
+import { useCapture } from "../../state/capture";
+import { RecordingDialog } from "../recording/RecordingDialog";
 import { useState } from "react";
 import type { KeyMode } from "../../bindings/KeyMode";
 import type { PitchClass } from "../../bindings/PitchClass";
@@ -160,6 +164,11 @@ function FileButtons() {
 }
 
 function Transport() {
+  const [inputOpen,setInputOpen]=useState(false);
+  const [midiOpen,setMidiOpen]=useState(false);
+  const capture=useCapture();
+  const midiRecording=useMidi(s=>!!s.status?.recording);
+  const recording=!!capture.status?.active&&!capture.status.monitoring||midiRecording;
   const engine = useApp((s) => s.engine);
   const snapshot = useTransport((s) => s.snapshot);
   const available = engineAvailable(engine);
@@ -171,11 +180,15 @@ function Transport() {
       <CbButton icon="toStart" label="Go to beginning (Home)" onClick={() => locate(0)} />
       <CbButton icon="stop" label={label("Stop")} disabled={!available} onClick={stop} active={snapshot?.state === "stopped" ? undefined : false} />
       {rolling ? (
-        <CbButton icon="pause" tone="play" label={label("Pause (Space stops)")} disabled={!available} onClick={pause} active size={17} />
+        <CbButton icon="pause" tone="play" label={label("Pause (Space stops)")} disabled={!available||recording} onClick={pause} active size={17} />
       ) : (
         <CbButton icon="play" tone="play" label={label("Play (Space)")} disabled={!available} onClick={play} size={17} />
       )}
-      <CbButton icon="record" tone="record" label="Record — not available yet (recording is a later phase)" disabled />
+      <CbButton icon="record" tone="record" label={capture.status?.active?(capture.status.monitoring?"Stop input monitoring":"Stop recording"):"Record armed audio tracks"} active={capture.status?.active&&!capture.status.monitoring} disabled={!available||capture.pending||midiRecording} onClick={()=>void(capture.status?.active?capture.stop():capture.start())}/>
+      <button type="button" className="cb-btn" aria-label="Audio recording settings" onClick={()=>setInputOpen(true)}>Input</button>
+      <RecordingDialog open={inputOpen} onClose={()=>setInputOpen(false)}/>
+      <button type="button" className="cb-btn" aria-label="MIDI devices and monitor" onClick={()=>setMidiOpen(true)}>MIDI</button>
+      <MidiDialog open={midiOpen} onClose={()=>setMidiOpen(false)}/>
     </div>
   );
 }

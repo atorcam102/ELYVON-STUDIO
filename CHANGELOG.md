@@ -9,6 +9,13 @@ section of each version into the GitHub release and into the update dialog.
 
 ### Added
 
+- Bounded disk streaming for large audio: packet decoding and FFT conversion into a PCM cache, worker page reads, real-time cache-miss counters and streamed diagnostic WAV export.
+- Audio input selection and per-track mono/stereo routing, record arming and monitoring; multitrack capture, count-in/pre-roll/punch/cycle, take selection and undo.
+- Checkpointed float WAV/BWF takes with recovery journals; interrupted, cancelled and finalized states, explicit disk backpressure, clipping and device-disconnection reporting.
+- Input/output latency estimates, manual recording offset, aligned-file loopback measurement, and tested graph latency planning/delay-line primitives (no hosted plug-in executor yet).
+- Native MIDI 1.0 ports, channel filters/routing, virtual ports on supporting Linux/macOS backends, a monitored virtual keyboard, MIDI recording and SMF 0/1 import/type-1 export.
+- MIDI panic on stop/locate/cycle/edits, bounded SysEx and queues, preserved source timestamps and measured scheduler lateness. Physical-device timing is unverified.
+
 - Native audio engine: lock-free real-time playback with an audio device (cpal) or, without one, a silent internal clock that still drives the transport.
 - Transport: play, stop, pause, locate, cycle, count-in, pre-roll, metronome (accent, level), tap tempo, markers and a stored punch range.
 - Tempo map with tempo changes and time-signature changes (odd and compound metres); ruler, grid and snapping follow it; snap grid with triplets and swing.
@@ -19,7 +26,7 @@ section of each version into the GitHub release and into the update dialog.
 
 ### Changed
 
-- Project files are now schema 2; schema-1 projects are migrated automatically on open (older app versions refuse schema-2 files instead of misreading them).
+- Project files are now schema 3, preserving input/MIDI routing, raw MIDI events and take metadata. Schema-1 and schema-2 projects migrate in memory; original fixtures and files remain unchanged.
 - Engine meters replace the simulated ones while the engine runs.
 
 ## [0.1.0] - 2026-10-15

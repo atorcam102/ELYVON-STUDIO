@@ -1,9 +1,11 @@
 # Status
 
-**Phases 04–05 (2026-10-16): PARTIAL.** Tempo/metre map, transport, lock-free engine with device or
-internal-clock output, audio import/decoding/resampling, real waveforms, non-destructive region
-editing and offline render are implemented and tested; physical audio-device tests and disk
-streaming are pending. Full report: [audit/PHASE-04-05.md](audit/PHASE-04-05.md).
+**Phases 04–07 (2026-10-16): PARTIAL.** Tempo/transport, region playback/editing and incremental
+disk streaming are implemented. Native audio capture, monitoring, recoverable takes and MIDI
+ports/routing/recording/SMF now exist. Physical-device and cross-platform tests, multi-device
+clock drift, live input SRC and active hosted plug-in compensation remain pending. Current
+evidence: [audit/PHASE-06-07.md](audit/PHASE-06-07.md); historical
+[04–05 report](audit/PHASE-04-05.md).
 
 The Phase 02 audit below is kept as the historical baseline; where it says no engine exists, the
 Phase 04–05 report supersedes it.

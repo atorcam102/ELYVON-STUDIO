@@ -9,6 +9,8 @@ pub mod audio;
 pub mod commands;
 pub mod error;
 pub mod menu;
+pub mod midi;
+pub mod recording;
 pub mod settings;
 pub mod state;
 pub mod updater;
@@ -63,10 +65,11 @@ fn request_close(app: &tauri::AppHandle) -> bool {
     if state.exit_confirmed.load(Ordering::SeqCst) {
         return false;
     }
-    if state.is_dirty() {
+    if state.is_dirty() || state.capture.is_active() || state.midi.is_recording() {
         let _ = app.emit(CLOSE_REQUESTED_EVENT, ());
         true
     } else {
+        state.midi.shutdown();
         state.clear_recovery();
         false
     }
@@ -95,6 +98,9 @@ pub fn run() {
             let settings = Settings::load(&paths.config_dir);
             let audio_settings = settings.audio.clone();
             app.manage(AppState::new(paths, settings));
+            app.state::<AppState>()
+                .midi
+                .start_worker(app.handle().clone());
             app.set_menu(menu::build(app.handle())?)?;
             // Opening a device can take a moment: never block the window.
             let handle = app.handle().clone();
@@ -131,6 +137,21 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            commands::midi::midi_status,
+            commands::midi::midi_refresh,
+            commands::midi::midi_panic,
+            commands::midi::midi_send,
+            commands::midi::midi_record_start,
+            commands::midi::midi_record_stop,
+            commands::midi::midi_import,
+            commands::midi::midi_export,
+            commands::recording::recording_measure_latency,
+            commands::recording::recording_devices,
+            commands::recording::recording_status,
+            commands::recording::recording_start,
+            commands::recording::recording_stop,
+            commands::recording::recording_recoverable,
+            commands::recording::recording_recover,
             commands::project::project_get,
             commands::project::project_new,
             commands::project::project_open,

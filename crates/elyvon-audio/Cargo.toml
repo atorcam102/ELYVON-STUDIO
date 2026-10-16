@@ -13,11 +13,14 @@ elyvon-core.workspace = true
 elyvon-project.workspace = true
 cpal = { version = "0.18.2", optional = true }
 rtrb = "0.4.0"
+midly = { version="0.5.3", default-features=false, features=["std"] }
+midir = { version="0.11.1", optional=true }
 rubato = "5.0.1"
 serde.workspace = true
 serde_json.workspace = true
 symphonia = { version = "0.6.1", default-features = false, features = ["wav", "aiff", "pcm", "flac", "mp3", "ogg", "vorbis"] }
 ts-rs.workspace = true
+tempfile.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
@@ -28,4 +31,4 @@ workspace = true
 
 [features]
 # Real audio-device output (cpal). Off for headless engine/render tests.
-device = ["dep:cpal"]
+device = ["dep:cpal", "dep:midir"]

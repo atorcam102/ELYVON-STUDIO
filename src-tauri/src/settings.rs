@@ -36,6 +36,8 @@ pub struct AudioSettings {
     pub use_device: bool,
     /// Device id from `audio_devices`; `None` = system default.
     pub output_device: Option<String>,
+    pub input_device: Option<String>,
+    pub recording_offset_frames: i32,
     /// Requested buffer size in frames; 0 = device default.
     pub buffer_frames: u32,
 }
@@ -45,6 +47,8 @@ impl Default for AudioSettings {
         Self {
             use_device: true,
             output_device: None,
+            input_device: None,
+            recording_offset_frames: 0,
             buffer_frames: 0,
         }
     }

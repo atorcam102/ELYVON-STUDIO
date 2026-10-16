@@ -15,6 +15,8 @@ pub mod edit;
 pub mod error;
 pub mod format;
 pub mod history;
+pub mod io;
+pub use io::TrackIo;
 pub mod model;
 pub mod recovery;
 pub mod session;

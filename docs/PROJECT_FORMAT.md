@@ -159,3 +159,26 @@ de datos de la aplicación) envuelven un sobre de proyecto completo:
 ```json
 { "format": "elyvon-studio-recovery", "originalPath": "/ruta/song.elyvon", "savedAtUnix": 1792070000, "projectFile": { … } }
 ```
+
+
+## Schema 3 — recorded takes and MIDI IO
+
+Schema 2 migrates in memory with neutral defaults; schema 1 migrates through schema 2. Original
+files/fixtures are not rewritten on open. Current saves use schema 3, so older applications refuse
+them rather than silently discarding recording/routing fields.
+
+Each track adds `io`: `armed`, zero-based `inputChannel`, `inputChannels` (1/2), `monitor`,
+`midiInput`/`midiOutput` stable port choices, optional `midiChannel` input filter, optional
+`outputChannel` override, and `midiMonitor`. Missing ports remain selected and unavailable;
+they are never silently replaced by another physical port.
+
+Regions add optional `capture` (`folder`, one-based `take`, `recordedAt` UTC Unix seconds) and
+`midiEvents` (`tick` relative to region start, validated MIDI 1.0 `bytes`, maximum 256 bytes per
+SysEx and 100000 events per region). Raw events are the playback/export source when present;
+`content.notes` is the piano-roll projection. Splitting/trimming preserves source events and
+chases/closes channel/key state at new region edges. Take selection changes region mute state
+as a single undoable edit; source WAV/BWF files remain immutable.
+
+Audio capture journals and `.partial.wav` files are outside the project JSON under the app's
+recordings/project-id folder. Recovery repairs channel-aligned frames, writes a valid BWF header,
+and finalizes without overwriting another take. The project references committed media by ID/path.

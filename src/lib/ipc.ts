@@ -24,6 +24,11 @@ import type { RenderReport } from "../bindings/RenderReport";
 import type { TransportCommand } from "../bindings/TransportCommand";
 import type { TransportSnapshot } from "../bindings/TransportSnapshot";
 
+import type { MidiStatus } from "../bindings/MidiStatus";
+import type { LatencyMeasurement } from "../bindings/LatencyMeasurement";
+import type { CaptureStatus } from "../bindings/CaptureStatus";
+import type { CaptureResult } from "../bindings/CaptureResult";
+import type { RecordedTake } from "../bindings/RecordedTake";
 export type { IpcError };
 
 export function isIpcError(e: unknown): e is IpcError {
@@ -48,6 +53,22 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 export const ipc = {
+  midi: {
+    status:()=>call<MidiStatus>("midi_status"),refresh:()=>call<void>("midi_refresh"),panic:()=>call<void>("midi_panic"),
+    send:(trackId:string,bytes:number[])=>call<void>("midi_send",{trackId,bytes}),
+    recordStart:(fromTick:number)=>call<MidiStatus>("midi_record_start",{fromTick}),recordStop:(cancel=false)=>call<SessionView>("midi_record_stop",{cancel}),
+    import:(path:string,startTick:number,useFileTempo:boolean)=>call<SessionView>("midi_import",{path,startTick,useFileTempo}),
+    export:(path:string)=>call<string>("midi_export",{path}),
+  },
+  recording: {
+    measure:(referencePath:string,capturedPath:string,maxDelay:number)=>call<LatencyMeasurement>("recording_measure_latency",{referencePath,capturedPath,maxDelay}),
+    devices:()=>call<DeviceInfo[]>("recording_devices"),
+    status:()=>call<CaptureStatus>("recording_status"),
+    start:(fromTick:number,monitorOnly=false)=>call<CaptureStatus>("recording_start",{fromTick,monitorOnly}),
+    stop:(cancel=false)=>call<CaptureResult>("recording_stop",{cancel}),
+    recoverable:()=>call<RecordedTake[]>("recording_recoverable"),
+    recover:(path:string)=>call<CaptureResult>("recording_recover",{path}),
+  },
   project: {
     get: () => call<SessionView>("project_get"),
     new: (discardChanges = false) => call<SessionView>("project_new", { discardChanges }),

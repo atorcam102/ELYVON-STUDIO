@@ -29,7 +29,7 @@ use crate::model::Project;
 use crate::validate::validate;
 
 pub const FORMAT_ID: &str = "elyvon-studio-project";
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 pub const FILE_EXTENSION: &str = "elyvon";
 /// Projects reference media instead of embedding it, so 64 MiB is generous.
 pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -109,6 +109,13 @@ pub fn migrate(value: Value, from: u32) -> Result<Value, ProjectError> {
     match from {
         CURRENT_SCHEMA_VERSION => Ok(value),
         1 => migrate(v1_to_v2(value)?, 2),
+        2 => {
+            let mut value = value;
+            value["schemaVersion"] = serde_json::json!(3);
+            // Track IO has explicit neutral serde defaults; schema 2 files and
+            // their source bytes stay unchanged. Schema 3 preserves routing.
+            Ok(value)
+        }
         other => Err(ProjectError::UnsupportedSchema { found: other }),
     }
 }

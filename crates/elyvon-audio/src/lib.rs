@@ -24,8 +24,13 @@ pub mod contracts;
 pub mod device;
 pub mod engine;
 pub mod gain;
+#[cfg(feature = "device")]
+pub mod input;
+pub mod latency;
 pub mod media;
+pub mod midi;
 pub mod plan;
+pub mod recording;
 pub mod render;
 pub mod rt;
 pub mod transport;

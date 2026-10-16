@@ -9,12 +9,16 @@ import type { MediaId } from "./MediaId";
 import type { MediaInfo } from "./MediaInfo";
 import type { MeterChange } from "./MeterChange";
 import type { MetronomeSettings } from "./MetronomeSettings";
+import type { MidiImportRegion } from "./MidiImportRegion";
 import type { RegionId } from "./RegionId";
+import type { Tempo } from "./Tempo";
 import type { TempoChange } from "./TempoChange";
+import type { TimeSignature } from "./TimeSignature";
 import type { TrackId } from "./TrackId";
+import type { TrackIo } from "./TrackIo";
 import type { TrackKind } from "./TrackKind";
 
-export type EditCommand = { "type": "renameProject", name: string, } | { "type": "setTempo", bpm: number, } | { "type": "setTimeSignature", numerator: number, denominator: number, } | { "type": "setKey", key: Key, } | { "type": "setLoop", enabled: boolean, start: number, end: number, } | { "type": "addTrack", kind: TrackKind, name?: string, 
+export type EditCommand = { "type": "importMidi", regions: Array<MidiImportRegion>, tempo: Tempo | null, tempoChanges: Array<TempoChange>, timeSignature: TimeSignature | null, meterChanges: Array<MeterChange>, } | { "type": "importTakes", assets: Array<MediaAsset>, placements: Array<AudioPlacement>, recordedAt: number, } | { "type": "selectTake", trackId: TrackId, folder: RegionId, take: number, } | { "type": "setTrackIo", id: TrackId, io: TrackIo, } | { "type": "renameProject", name: string, } | { "type": "setTempo", bpm: number, } | { "type": "setTimeSignature", numerator: number, denominator: number, } | { "type": "setKey", key: Key, } | { "type": "setLoop", enabled: boolean, start: number, end: number, } | { "type": "addTrack", kind: TrackKind, name?: string, 
 /**
  * Insert position; appended when absent.
  */

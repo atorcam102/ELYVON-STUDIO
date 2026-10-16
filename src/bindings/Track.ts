@@ -2,9 +2,10 @@
 import type { Color } from "./Color";
 import type { Region } from "./Region";
 import type { TrackId } from "./TrackId";
+import type { TrackIo } from "./TrackIo";
 import type { TrackKind } from "./TrackKind";
 
-export type Track = { id: TrackId, name: string, kind: TrackKind, color: Color, muted: boolean, soloed: boolean, 
+export type Track = { io: TrackIo, id: TrackId, name: string, kind: TrackKind, color: Color, muted: boolean, soloed: boolean, 
 /**
  * Channel fader gain in dB. [`Track::MIN_VOLUME_DB`] means silence (−∞).
  */

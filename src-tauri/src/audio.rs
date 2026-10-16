@@ -40,6 +40,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 struct Inner {
+    plan: Option<PlaybackPlan>,
     handle: Option<EngineHandle>,
     output: Option<RunningOutput>,
     status: EngineStatus,
@@ -79,6 +80,7 @@ impl AudioService {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(Inner {
+                plan: None,
                 handle: None,
                 output: None,
                 status: EngineStatus::Unavailable {
@@ -98,6 +100,33 @@ impl AudioService {
         }
     }
 
+    pub fn poll_midi(
+        &self,
+    ) -> Option<(
+        Vec<elyvon_audio::midi::ScheduledPacket>,
+        bool,
+        Arc<elyvon_audio::transport::EngineShared>,
+    )> {
+        let mut inner = lock(&self.inner);
+        let h = inner.handle.as_mut()?;
+        let (events, overflow) = h.drain_midi();
+        Some((events, overflow, Arc::clone(h.shared())))
+    }
+    pub fn capture_context(
+        &self,
+    ) -> Option<(
+        u32,
+        Arc<elyvon_audio::transport::EngineShared>,
+        Option<elyvon_audio::engine::MonitorInput>,
+    )> {
+        let mut inner = lock(&self.inner);
+        let handle = inner.handle.as_mut()?;
+        Some((
+            handle.sample_rate(),
+            Arc::clone(handle.shared()),
+            handle.take_monitor_input(),
+        ))
+    }
     pub fn status(&self) -> EngineStatus {
         lock(&self.inner).status.clone()
     }
@@ -109,10 +138,12 @@ impl AudioService {
     /// (Re)opens the output for `project_rate` and connects a fresh engine.
     /// Falls back to the internal clock when no device can be opened.
     pub fn start(&self, app: &AppHandle, settings: &AudioSettings, project_rate: u32) {
+        app.state::<AppState>().capture.interrupt();
         let mut inner = lock(&self.inner);
         // Stop the old output first so the device is free.
         inner.output = None;
         inner.handle = None;
+        inner.plan = None;
         inner.requested_rate = project_rate;
         let mut device_error = None;
         let mut started = None;
@@ -186,6 +217,7 @@ impl AudioService {
                 s.path().and_then(Path::parent).map(Path::to_path_buf),
             )
         };
+        state.midi.configure(&project);
         let restart = {
             let inner = lock(&self.inner);
             inner.handle.is_some() && inner.requested_rate != project.sample_rate
@@ -207,7 +239,8 @@ impl AudioService {
             build_plan(&project, &|id| store.ready(id), store.rate(), generation)
         };
         if plan.sample_rate == handle.sample_rate() {
-            handle.publish(plan);
+            handle.publish(plan.clone());
+            inner.plan = Some(plan);
         }
     }
 
@@ -320,10 +353,33 @@ impl AudioService {
 
     /// Sends a transport command and returns the state after the request.
     pub fn command(&self, cmd: TransportCommand) -> Option<TransportSnapshot> {
+        let warm = {
+            let inner = lock(&self.inner);
+            let tick = match cmd {
+                TransportCommand::Play { from_tick, .. } => from_tick.or_else(|| {
+                    inner
+                        .handle
+                        .as_ref()
+                        .map(|h| h.shared().snapshot().ticks.round() as u64)
+                }),
+                TransportCommand::Locate { tick } => Some(tick),
+                _ => None,
+            };
+            tick.and_then(|tick| inner.plan.as_ref().map(|plan| (tick, plan.clone())))
+        };
+        // Never hold the engine/control mutex across disk IO: the MIDI worker
+        // needs to drain timestamped events while pages are being prepared.
+        if let Some((tick, plan)) = warm
+            && let Err(e) = plan.prefetch(plan.map.sample_at_tick(tick, plan.sample_rate), 8192)
+        {
+            log::warn!("could not prepare transport: {e}");
+            return None;
+        }
         let mut inner = lock(&self.inner);
         let handle = inner.handle.as_mut()?;
         if !handle.send(cmd) {
             log::warn!("transport command queue full; dropped {cmd:?}");
+            return None;
         }
         Some(handle.shared().snapshot())
     }

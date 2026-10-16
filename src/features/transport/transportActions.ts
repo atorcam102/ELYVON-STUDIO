@@ -1,6 +1,8 @@
 // Transport actions. Each one sends a command to the native engine; the
 // playhead the UI draws comes back from engine events (`state/transport`).
 
+import { useMidi } from "../../state/midi";
+import { useCapture } from "../../state/capture";
 import { ipc } from "../../lib/ipc";
 import { engineAvailable, useApp } from "../../state/app";
 import { notify, notifyError } from "../../state/notifications";
@@ -36,6 +38,8 @@ export function play() {
 
 /** Stop; a second stop returns to where playback started (engine rule). */
 export function stop() {
+  if (useMidi.getState().status?.recording) { void useMidi.getState().stop(); return; }
+  if (useCapture.getState().status?.active) { void useCapture.getState().stop(); return; }
   if (!ready()) return;
   void useTransport.getState().send({ type: "stop" });
 }
@@ -47,6 +51,8 @@ export function pause() {
 
 /** Space bar: play when stopped, stop when rolling. */
 export function togglePlay() {
+  if (useMidi.getState().status?.recording) { void useMidi.getState().stop(); return; }
+  if (useCapture.getState().status?.active) { void useCapture.getState().stop(); return; }
   if (isRolling(useTransport.getState().snapshot)) stop();
   else play();
 }

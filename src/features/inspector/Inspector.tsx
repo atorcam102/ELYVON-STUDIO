@@ -1,3 +1,4 @@
+import { useCapture } from "../../state/capture";
 import type { Project } from "../../bindings/Project";
 import type { Region } from "../../bindings/Region";
 import type { Track } from "../../bindings/Track";
@@ -35,6 +36,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function TrackInspector({ track, anySolo }: { track: Track; anySolo: boolean }) {
   const apply = useProject((s) => s.apply);
+  const captureActive=useCapture(s=>!!s.status?.active);
   const silencedBySolo = anySolo && !track.soloed && !track.muted;
   return (
     <Section title="Track">
@@ -48,6 +50,13 @@ function TrackInspector({ track, anySolo }: { track: Track; anySolo: boolean }) 
         />
       </div>
       <Row label="Type">{KIND_LABEL[track.kind]}</Row>
+      <Toggle checked={track.io.armed} disabled={captureActive} label="Arm track for recording" onChange={armed=>void apply({type:"setTrackIo",id:track.id,io:{...track.io,armed}})}/>
+      {track.kind==="audio"&&<>
+       <Row label="Input channel"><NumberField label="Input channel" value={track.io.inputChannel+1} min={1} max={32} onCommit={v=>void apply({type:"setTrackIo",id:track.id,io:{...track.io,inputChannel:v-1}})}/></Row>
+       <Row label="Channels"><select aria-label="Input channels" disabled={captureActive} value={track.io.inputChannels} onChange={e=>void apply({type:"setTrackIo",id:track.id,io:{...track.io,inputChannels:Number(e.target.value)}})}><option value={1}>Mono</option><option value={2}>Stereo</option></select></Row>
+       <Toggle checked={track.io.monitor} disabled={captureActive} label="Monitor this input" onChange={monitor=>void apply({type:"setTrackIo",id:track.id,io:{...track.io,monitor}})}/>
+      </>}
+
       <Row label="Colour">
         <span className="swatches swatches--inline">
           {TRACK_COLORS.map((c) => (
@@ -178,6 +187,7 @@ function RegionInspector({ region, project }: { region: Region; project: Project
         />
       </div>
       <Row label="Type">{region.content.type === "midi" ? "MIDI" : "Audio"}</Row>
+      {region.capture&&<Row label="Take folder"><select aria-label="Active take" value={project.tracks.find(t=>t.regions.some(r=>r.id===region.id))?.regions.find(r=>r.capture?.folder===region.capture?.folder&&!r.muted)?.capture?.take??""} onChange={e=>{const track=project.tracks.find(t=>t.regions.some(r=>r.id===region.id));if(track&&region.capture)void apply({type:"selectTake",trackId:track.id,folder:region.capture.folder,take:Number(e.target.value)});}}>{project.tracks.flatMap(t=>t.regions).filter(r=>r.capture?.folder===region.capture?.folder).map(r=><option key={r.id} value={r.capture!.take}>Take {r.capture!.take}{r.muted?"":" · active"}</option>)}</select></Row>}
       <Row label="Position">{map.formatPosition(region.start)}</Row>
       <Row label="Length">{`${formatLength(region.length, ts)} · ${(map.secondsAt(region.start + region.length) - map.secondsAt(region.start)).toFixed(3)} s`}</Row>
       <Toggle checked={region.muted} onChange={(muted) => void apply({ type: "setRegionsMuted", ids: [region.id], muted })} label="Mute region" />

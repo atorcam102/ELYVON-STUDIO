@@ -16,6 +16,7 @@ pub(crate) fn app_version(app: &AppHandle) -> String {
 }
 
 fn ensure_can_discard(state: &AppState, discard_changes: bool) -> IpcResult<()> {
+    state.ensure_editable()?;
     if state.is_dirty() && !discard_changes {
         return Err(IpcError::unsaved());
     }
@@ -28,10 +29,11 @@ fn replace_session(
     app: &AppHandle,
     session: ProjectSession,
     recent: Option<PathBuf>,
-) -> SessionView {
+) -> IpcResult<SessionView> {
     let state = app.state::<AppState>();
     let view = {
         let mut s = state.session();
+        state.ensure_editable()?;
         *s = session;
         s.view()
     };
@@ -47,7 +49,7 @@ fn replace_session(
         .audio
         .command(elyvon_audio::transport::TransportCommand::Locate { tick: 0 });
     state.audio.sync(app);
-    view
+    Ok(view)
 }
 
 /// Adds a path to the recent-projects list and persists settings in the background.
@@ -75,14 +77,14 @@ pub async fn project_get(state: State<'_, AppState>) -> IpcResult<SessionView> {
 pub async fn project_new(app: AppHandle, discard_changes: bool) -> IpcResult<SessionView> {
     ensure_can_discard(&app.state::<AppState>(), discard_changes)?;
     log::info!("new project");
-    Ok(replace_session(&app, ProjectSession::new_empty(), None))
+    replace_session(&app, ProjectSession::new_empty(), None)
 }
 
 #[tauri::command]
 pub async fn project_open_demo(app: AppHandle, discard_changes: bool) -> IpcResult<SessionView> {
     ensure_can_discard(&app.state::<AppState>(), discard_changes)?;
     log::info!("opening demo session");
-    Ok(replace_session(&app, ProjectSession::demo(), None))
+    replace_session(&app, ProjectSession::demo(), None)
 }
 
 #[tauri::command]
@@ -104,7 +106,7 @@ pub async fn project_open(
         })?;
     // The user may have edited while the file was loading.
     ensure_can_discard(&app.state::<AppState>(), discard_changes)?;
-    Ok(replace_session(&app, session, Some(path)))
+    replace_session(&app, session, Some(path))
 }
 
 /// Saves the project. `path` is required for Save As (and for projects that
@@ -129,6 +131,7 @@ pub async fn project_save(app: AppHandle, path: Option<String>) -> IpcResult<Ses
     }
     let (saved, view) = {
         let mut s = state.session();
+        state.ensure_editable()?;
         let saved = s.complete_save(ticket);
         (saved, s.view())
     };
@@ -151,8 +154,10 @@ pub struct ApplyResult {
 #[tauri::command]
 pub async fn project_apply(app: AppHandle, command: EditCommand) -> IpcResult<ApplyResult> {
     let state = app.state::<AppState>();
+    state.ensure_editable()?;
     let result = {
         let mut s = state.session();
+        state.ensure_editable()?;
         let outcome = s.apply(&command).map_err(|e| {
             log::debug!("edit rejected: {e}");
             IpcError::from(e)
@@ -170,8 +175,10 @@ pub async fn project_apply(app: AppHandle, command: EditCommand) -> IpcResult<Ap
 #[tauri::command]
 pub async fn project_undo(app: AppHandle) -> IpcResult<SessionView> {
     let state = app.state::<AppState>();
+    state.ensure_editable()?;
     let view = {
         let mut s = state.session();
+        state.ensure_editable()?;
         s.undo();
         s.view()
     };
@@ -182,8 +189,10 @@ pub async fn project_undo(app: AppHandle) -> IpcResult<SessionView> {
 #[tauri::command]
 pub async fn project_redo(app: AppHandle) -> IpcResult<SessionView> {
     let state = app.state::<AppState>();
+    state.ensure_editable()?;
     let view = {
         let mut s = state.session();
+        state.ensure_editable()?;
         s.redo();
         s.view()
     };
@@ -234,6 +243,7 @@ pub async fn recovery_check(app: AppHandle) -> IpcResult<Option<RecoveryInfo>> {
 
 #[tauri::command]
 pub async fn recovery_restore(app: AppHandle) -> IpcResult<SessionView> {
+    app.state::<AppState>().ensure_editable()?;
     let dir = app.state::<AppState>().paths.recovery_dir.clone();
     let found = tauri::async_runtime::spawn_blocking(move || recovery::read(&dir))
         .await
@@ -245,6 +255,7 @@ pub async fn recovery_restore(app: AppHandle) -> IpcResult<SessionView> {
     let state = app.state::<AppState>();
     let view = {
         let mut s = state.session();
+        state.ensure_editable()?;
         *s = session;
         s.view()
     };

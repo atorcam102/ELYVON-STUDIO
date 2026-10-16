@@ -12,7 +12,7 @@ useDevice: boolean,
 /**
  * Device id from `audio_devices`; `None` = system default.
  */
-outputDevice: string | null, 
+outputDevice: string | null, inputDevice: string | null, recordingOffsetFrames: number, 
 /**
  * Requested buffer size in frames; 0 = device default.
  */

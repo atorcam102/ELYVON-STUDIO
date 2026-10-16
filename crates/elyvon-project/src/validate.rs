@@ -216,6 +216,10 @@ fn validate_track(
     track: &Track,
     media: &HashSet<MediaId>,
 ) -> Result<(), ValidationError> {
+    track
+        .io
+        .validate()
+        .map_err(|e| ValidationError::new(format!("{tp}.io"), e))?;
     validate_name(&format!("{tp}.name"), &track.name)?;
     if !(Track::MIN_VOLUME_DB..=Track::MAX_VOLUME_DB).contains(&track.volume_db) {
         return Err(ValidationError::new(
@@ -241,6 +245,31 @@ fn validate_track(
     }
     for (ri, region) in track.regions.iter().enumerate() {
         let rp = format!("{tp}.regions[{ri}]");
+        if region.midi_events.len() > MAX_NOTES_PER_REGION
+            || region
+                .midi_events
+                .iter()
+                .any(|e| e.tick > region.length || !crate::io::validate_midi_bytes(&e.bytes))
+            || region.midi_events.windows(2).any(|w| w[0].tick > w[1].tick)
+        {
+            return Err(ValidationError::new(
+                format!("{rp}.midiEvents"),
+                "invalid, unordered or excessive MIDI events",
+            ));
+        }
+        if !region.midi_events.is_empty() && !matches!(region.content, RegionContent::Midi { .. }) {
+            return Err(ValidationError::new(
+                format!("{rp}.midiEvents"),
+                "MIDI events require a MIDI region",
+            ));
+        }
+        if region.capture.as_ref().is_some_and(|c| c.take == 0) {
+            return Err(ValidationError::new(
+                format!("{rp}.capture"),
+                "take numbers start at one",
+            ));
+        }
+
         validate_name(&format!("{rp}.name"), &region.name)?;
         check_ticks(&format!("{rp}.start"), region.start)?;
         check_ticks(&format!("{rp}.length"), region.length)?;
@@ -371,6 +400,8 @@ mod tests {
     fn rejects_region_on_incompatible_track() {
         let mut p = project_with_track();
         p.tracks[0].regions.push(Region {
+            capture: None,
+            midi_events: Vec::new(),
             id: RegionId::new(),
             name: "Clip".into(),
             start: 0,
@@ -385,6 +416,8 @@ mod tests {
     fn rejects_invalid_notes() {
         let mut p = project_with_track();
         p.tracks[0].regions.push(Region {
+            capture: None,
+            midi_events: Vec::new(),
             id: RegionId::new(),
             name: "Notes".into(),
             start: 0,

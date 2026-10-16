@@ -32,6 +32,8 @@ import {
   splitSelectedAtPlayhead,
 } from "../project/regionActions";
 import { locate, toggleMetronome, togglePlay, stop } from "../transport/transportActions";
+import { connectMidi } from "../../state/midi";
+import { connectCapture } from "../../state/capture";
 import { connectTransport } from "../../state/transport";
 
 const RECOVERY_DELAY_MS = 15_000;
@@ -205,6 +207,8 @@ export function useAppEvents() {
 
   // Engine events: playhead, meters, engine and media status.
   useEffect(() => connectTransport(), []);
+  useEffect(() => connectCapture(), []);
+  useEffect(() => connectMidi(), []);
 
   // Cut/copy/paste of regions through the native Edit menu or the keyboard.
   // Text fields keep their normal clipboard behaviour.

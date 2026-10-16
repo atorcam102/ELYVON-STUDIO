@@ -305,7 +305,11 @@ fn balance(events: &[(u64, usize, MidiMessage)]) -> [i32; 128] {
                 counts[*pitch as usize] -= 1;
                 assert!(counts[*pitch as usize] >= 0, "note-off without note-on");
             }
-            MidiMessage::ControlChange { .. } => {}
+            MidiMessage::ControlChange { .. }
+            | MidiMessage::ProgramChange { .. }
+            | MidiMessage::PitchBend { .. }
+            | MidiMessage::ChannelPressure { .. }
+            | MidiMessage::PolyPressure { .. } => {}
         }
     }
     counts

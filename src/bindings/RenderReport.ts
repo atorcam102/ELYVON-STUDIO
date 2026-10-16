@@ -18,6 +18,10 @@ clips: number,
  */
 missingMedia: number, 
 /**
+ * Nonzero means this diagnostic render is incomplete and cannot be exported.
+ */
+streamingErrors: number, 
+/**
  * FNV-1a 64 over the f32 sample bits, hex.
  */
 checksum: string, };

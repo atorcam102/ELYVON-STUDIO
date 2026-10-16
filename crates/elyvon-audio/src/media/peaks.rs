@@ -24,6 +24,50 @@ pub struct PeakPyramid {
     levels: Vec<Level>,
 }
 
+/// Bounded-packet peak analysis for files decoded to a disk cache.
+#[derive(Debug, Default)]
+pub struct PeakBuilder {
+    channels: usize,
+    frames: u64,
+    pending: usize,
+    bounds: [(f32, f32); 2],
+    data: Vec<i16>,
+}
+
+impl PeakBuilder {
+    pub fn push(&mut self, planes: &[Vec<f32>]) {
+        self.channels = planes.len().clamp(1, 2);
+        for i in 0..planes.first().map_or(0, Vec::len) {
+            if self.pending == 0 {
+                self.bounds = [(f32::MAX, f32::MIN); 2];
+            }
+            for (ch, p) in planes.iter().take(self.channels).enumerate() {
+                self.bounds[ch].0 = self.bounds[ch].0.min(p[i]);
+                self.bounds[ch].1 = self.bounds[ch].1.max(p[i]);
+            }
+            self.frames += 1;
+            self.pending += 1;
+            if self.pending == BASE as usize {
+                self.flush();
+            }
+        }
+    }
+
+    fn flush(&mut self) {
+        for &(lo, hi) in &self.bounds[..self.channels] {
+            self.data.extend([quantise(lo), quantise(hi)]);
+        }
+        self.pending = 0;
+    }
+
+    pub fn finish(mut self) -> PeakPyramid {
+        if self.pending > 0 {
+            self.flush();
+        }
+        PeakPyramid::from_base(self.channels.max(1), self.frames, self.data)
+    }
+}
+
 fn quantise(v: f32) -> i16 {
     (v.clamp(-1.0, 1.0) * 32767.0).round() as i16
 }
@@ -37,7 +81,6 @@ impl PeakPyramid {
     pub fn build(planes: &[Vec<f32>]) -> Self {
         let channels = planes.len().clamp(1, 2);
         let frames = planes.first().map_or(0, Vec::len) as u64;
-        let mut levels = Vec::new();
         let base_buckets = frames.div_ceil(BASE).max(1) as usize;
         let mut data = vec![0i16; base_buckets * channels * 2];
         for ch in 0..channels {
@@ -53,7 +96,11 @@ impl PeakPyramid {
                 data[i + 1] = quantise(hi);
             }
         }
-        levels.push(Level { bucket: BASE, data });
+        Self::from_base(channels, frames, data)
+    }
+
+    fn from_base(channels: usize, frames: u64, data: Vec<i16>) -> Self {
+        let mut levels = vec![Level { bucket: BASE, data }];
         while levels
             .last()
             .is_some_and(|l| l.data.len() / (channels * 2) > 1)

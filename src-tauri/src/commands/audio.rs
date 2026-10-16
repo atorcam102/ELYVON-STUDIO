@@ -43,21 +43,36 @@ pub async fn audio_restart(app: AppHandle) -> IpcResult<EngineStatus> {
     let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = handle.state::<AppState>();
+        state.ensure_editable()?;
         let settings = state.settings().audio.clone();
         let rate = state.session().project().sample_rate;
         state.audio.start(&handle, &settings, rate);
-        state.audio.status()
+        Ok(state.audio.status())
     })
     .await
-    .map_err(IpcError::from)
+    .map_err(IpcError::from)?
 }
 
 #[tauri::command]
 pub async fn transport_command(
-    state: State<'_, AppState>,
+    app: AppHandle,
     command: TransportCommand,
 ) -> IpcResult<TransportSnapshot> {
-    state.audio.command(command).ok_or_else(unavailable)
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        if matches!(command, TransportCommand::Stop) && state.capture.is_active() {
+            state.capture.stop(&app, false)?;
+            return state.audio.snapshot().ok_or_else(unavailable);
+        }
+        if state.capture.status().monitoring {
+            state.midi.ensure_idle()?;
+        } else {
+            state.ensure_editable()?;
+        }
+        state.audio.command(command).ok_or_else(unavailable)
+    })
+    .await
+    .map_err(IpcError::from)?
 }
 
 #[tauri::command]
@@ -146,6 +161,7 @@ pub async fn media_import(
         ));
     }
     let state = app.state::<AppState>();
+    state.ensure_editable()?;
     let rate = state.audio.rate();
     let budget = state.audio.remaining_budget();
     log::info!("importing {} audio file(s)", paths.len());
@@ -200,6 +216,7 @@ pub async fn media_import(
 
     let (view, outcome) = {
         let mut session = state.session();
+        state.ensure_editable()?;
         let map = session
             .project()
             .transport
@@ -251,6 +268,7 @@ pub async fn media_import(
 #[tauri::command]
 pub async fn media_relink(app: AppHandle, id: MediaId, path: String) -> IpcResult<SessionView> {
     let state = app.state::<AppState>();
+    state.ensure_editable()?;
     let rate = state.audio.rate();
     let budget = state.audio.remaining_budget();
     let p = PathBuf::from(&path);
@@ -263,6 +281,7 @@ pub async fn media_relink(app: AppHandle, id: MediaId, path: String) -> IpcResul
     .map_err(|e| IpcError::new(ErrorCode::Media, e.to_string()))?;
     let view = {
         let mut session = state.session();
+        state.ensure_editable()?;
         session.apply(&EditCommand::RelinkMedia {
             id,
             path: p.display().to_string(),
@@ -343,7 +362,33 @@ pub async fn project_render(
     metronome: bool,
 ) -> IpcResult<RenderReport> {
     let state = app.state::<AppState>();
-    let project = state.session().project().clone();
+    let project = {
+        let session = state.session();
+        state.ensure_editable()?;
+        if state.audio.snapshot().is_some_and(|s| {
+            matches!(
+                s.state,
+                elyvon_audio::transport::PlayState::Playing
+                    | elyvon_audio::transport::PlayState::CountIn
+            )
+        }) {
+            return Err(IpcError::new(
+                ErrorCode::Busy,
+                "Stop playback before exporting a diagnostic render.",
+            ));
+        }
+        state
+            .rendering
+            .store(true, std::sync::atomic::Ordering::Release);
+        session.project().clone()
+    };
+    struct RenderGuard(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for RenderGuard {
+        fn drop(&mut self) {
+            self.0.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
+    let render_guard = RenderGuard(std::sync::Arc::clone(&state.rendering));
     let rate = state.audio.rate();
     let media: std::collections::HashMap<MediaId, Arc<MediaBuffer>> = project
         .media
@@ -356,7 +401,9 @@ pub async fn project_render(
     }
     tauri::async_runtime::spawn_blocking(move || {
         let lookup = |id| media.get(&id).cloned();
-        let rendered = render::render(
+        let _render_guard = render_guard;
+        render::export_project(
+            &path,
             &project,
             &lookup,
             RenderRequest {
@@ -366,20 +413,8 @@ pub async fn project_render(
                 block_frames: 1024,
                 metronome,
             },
-            None,
-        );
-        render::export(&path, &rendered)
-            .map(|report_path| {
-                log::info!(
-                    "rendered {} ({:.1} s, peak {:?}) and {}",
-                    path.display(),
-                    rendered.report.seconds,
-                    rendered.report.peak,
-                    report_path.display()
-                );
-                rendered.report
-            })
-            .map_err(|e| IpcError::new(ErrorCode::Io, format!("Could not write the render: {e}")))
+        )
+        .map_err(|e| IpcError::new(ErrorCode::Io, e.to_string()))
     })
     .await
     .map_err(IpcError::from)?

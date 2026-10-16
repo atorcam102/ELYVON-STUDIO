@@ -28,18 +28,35 @@ pub struct AppState {
     pub updater: UpdaterState,
     /// Engine, output device, decoded media. Never locked by the audio thread.
     pub audio: AudioService,
+    pub capture: crate::recording::CaptureService,
+    pub midi: crate::midi::MidiService,
+    pub rendering: std::sync::Arc<AtomicBool>,
     pub paths: AppPaths,
     /// Set once the user confirmed quitting, so close/exit events pass through.
     pub exit_confirmed: AtomicBool,
 }
 
 impl AppState {
+    pub fn ensure_editable(&self) -> crate::error::IpcResult<()> {
+        if self.rendering.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(crate::error::IpcError::new(
+                crate::error::ErrorCode::Busy,
+                "Wait for the diagnostic render to finish.",
+            ));
+        }
+        self.capture.ensure_idle()?;
+        self.midi.ensure_idle()
+    }
+
     pub fn new(paths: AppPaths, settings: Settings) -> Self {
         Self {
             session: Mutex::new(ProjectSession::new_empty()),
             settings: Mutex::new(settings),
             updater: UpdaterState::default(),
             audio: AudioService::new(),
+            capture: crate::recording::CaptureService::default(),
+            midi: crate::midi::MidiService::default(),
+            rendering: std::sync::Arc::new(AtomicBool::new(false)),
             paths,
             exit_confirmed: AtomicBool::new(false),
         }

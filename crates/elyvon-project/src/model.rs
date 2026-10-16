@@ -259,6 +259,8 @@ impl TrackKind {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct Track {
+    #[serde(default)]
+    pub io: crate::io::TrackIo,
     pub id: TrackId,
     pub name: String,
     pub kind: TrackKind,
@@ -278,6 +280,7 @@ impl Track {
 
     pub fn new(kind: TrackKind, name: impl Into<String>, color: Color) -> Self {
         Self {
+            io: crate::io::TrackIo::default(),
             id: TrackId::new(),
             name: name.into(),
             kind,
@@ -303,6 +306,10 @@ impl Track {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct Region {
+    #[serde(default)]
+    pub capture: Option<crate::io::CaptureMetadata>,
+    #[serde(default)]
+    pub midi_events: Vec<crate::io::StoredMidiEvent>,
     pub id: RegionId,
     pub name: String,
     /// Position on the timeline.

@@ -88,9 +88,11 @@ pub async fn settings_set(app: AppHandle, settings: Settings) -> IpcResult<Setti
 #[tauri::command]
 pub async fn app_quit(app: AppHandle, discard_changes: bool) -> IpcResult<()> {
     let state = app.state::<AppState>();
+    state.ensure_editable()?;
     if state.is_dirty() && !discard_changes {
         return Err(IpcError::unsaved());
     }
+    state.midi.shutdown();
     log::info!("quitting");
     state.exit_confirmed.store(true, Ordering::SeqCst);
     state.clear_recovery();

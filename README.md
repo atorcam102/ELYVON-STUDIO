@@ -8,7 +8,7 @@
 
 A desktop digital audio workstation in development, built with **Rust, Tauri 2, React and TypeScript**. It currently supports arranging tracks and regions, inspecting MIDI notes and managing `.elyvon` projects through a graphite studio interface.
 
-**Status: v0.1.0 · Phase 02 technical audit (partial).** Project management and editing controls are implemented. The audio engine is still pending: this version does not play or record sound yet.
+**Development branch: Phases 04–07, partial hardware validation.** The native engine plays imported audio, streams large files, records armed audio inputs to recoverable WAV/BWF takes, and records/routes MIDI 1.0. These branch capabilities are not the published Windows preview. Physical audio/MIDI devices and other operating systems remain unverified here; see [the current validation report](docs/audit/PHASE-06-07.md).
 
 ![Elyvon Studio main interface: a six-track demo session, arrangement and mixer](docs/screenshots/01-arrangement-mixer.png)
 
@@ -34,13 +34,13 @@ A desktop digital audio workstation in development, built with **Rust, Tauri 2, 
 
 ### Still to come
 
-- Audio playback, recording and device selection.
+- Physical-device validation across the intended operating systems; multi-device input clock drift and live input sample-rate conversion.
 - Audio file import and editing; export and bounce.
-- MIDI input/output and piano-roll note editing.
+- Piano-roll note editing, playback note chase and internal instruments; MIDI 2.0/UMP.
 - Built-in instruments, sampler, effects, buses and plug-in hosting.
 - Loop library with audio previews.
 
-Playback and recording controls remain disabled when the engine is unavailable. Effect slots are visual placeholders without processing. Meters animate only when you explicitly enable **Simulate meters**.
+Playback uses the native engine clock; the internal-clock fallback is labelled as silent. Audio recording requires a usable input device, armed tracks and matching sample rates. MIDI without an external output is explicitly monitor-only. Effect slots remain unavailable without hosted processors.
 
 The repository includes update infrastructure with version, platform and signature validation. The current unsigned preview **does not enable automatic updates**. See [releases and signing](docs/RELEASES.md) for configuration details.
 
@@ -59,6 +59,27 @@ Notes from the Keys track's **Chords** region appear below the arrangement. The 
 ![Piano roll showing notes from the Chords region beneath the demo arrangement](docs/screenshots/03-piano-roll.png)
 
 Screenshots show the main frontend from `main`, rendered in Chromium at **1280 × 800** using Tauri's official test bridge and demo-session data. They are not captures of the Windows installer. [Screenshot details](docs/screenshots/README.md).
+
+## Native recording and MIDI development workflow
+
+1. Run `npm ci` and `npm run tauri dev` with the native prerequisites below.
+2. For audio, add audio tracks, arm them in the inspector, choose their zero-based input channels
+   through the displayed one-based channel controls, and enable software monitoring as needed.
+   Open **Input** to select the input device and recording offset. **Record** starts the project
+   count-in/pre-roll/punch/cycle settings. **Stop** finalizes takes into one undoable project edit.
+3. Cycle passes form a take group. Select the active take in the region inspector. Save the
+   project to retain the media references. Interrupted `.partial.wav` takes are listed under
+   **Input → Recoverable takes** after restoring their project.
+4. Open **MIDI**, select a MIDI/instrument track and its ports/channel filters, then arm and record
+   it. The virtual keyboard feeds the native monitor or selected external port. **Panic** releases
+   held keys and sustain. MIDI and audio recording currently run as separate sessions.
+5. **MIDI → Import/Export MIDI** handles SMF 0/1. File tempo/metre maps are applied only when
+   importing into an empty project at the beginning. **Input → Measure aligned loopback files**
+   measures file correlation without automatically applying a possibly inappropriate IO offset.
+
+All engine, recording and MIDI scheduling work runs in Rust. Callback allocation tests, fault
+injection, SMF round trips and native GUI tests are part of the regular checks. A passing headless
+check does not establish microphone, interface or MIDI-keyboard behavior on physical hardware.
 
 ## Download for Windows
 
@@ -150,7 +171,7 @@ Installer generation and publication are documented in [RELEASES](docs/RELEASES.
 
 - **Versioned contracts:** native `app_contracts` reports IPC, project, audio and job contract versions. Rust generates the shared TypeScript types; UI presentation state remains separate from the project model.
 - **Compatibility fixtures:** schema-1 `.elyvon` projects retain their tracks, regions, notes and media references across save, reopen and recovery. Frozen MIDI, graph and job fixtures check wire compatibility and reject invalid data.
-- **Future-engine boundaries:** MIDI events use callback-relative frame offsets; graph plans validate routing, channels and cycles; job snapshots describe progress and errors. These types have no MIDI backend, graph executor or job scheduler yet.
+- **Future-engine boundaries:** MIDI events use callback-relative frame offsets; graph plans validate routing, channels and cycles; job snapshots describe progress and errors. The MIDI backend is now implemented on this development branch; a hosted graph executor and job scheduler remain future work.
 - **Reproducible checks:** shared local/CI commands, `cargo-deny`, npm audit, licence/source inventories and `actionlint`. The GTK3 dependency's maintenance-only exception is documented as **B-01** in [STATUS](docs/STATUS.md).
 
 The [validated baseline CI](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38765992553) passed all six jobs, including both Windows installer builds and native GUI tests. The [validation report](docs/audit/VALIDATION.md) records commands, raw measurements, screenshots and their limitations. Measurements use a debug Linux build under Xvfb; they are not Windows or physical-hardware performance guarantees.

@@ -4,9 +4,31 @@
 
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { readFileSync, readlinkSync } from "node:fs";
+import { basename } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const ELEMENT = "element-6066-11e4-a52e-4f735466cecf";
+
+/** Linux process tree below `pid` (empty elsewhere). */
+function descendants(pid) {
+  let children = [];
+  try {
+    children = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim().split(/\s+/).filter(Boolean).map(Number);
+  } catch {
+    /* exited or not Linux */
+  }
+  return children.flatMap((child) => [child, ...descendants(child)]);
+}
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export class Driver {
   constructor(base, sessionId) {
@@ -15,8 +37,12 @@ export class Driver {
   }
 
   static async start({ application, port = 4444 }) {
-    const proc = spawn("tauri-driver", ["--port", String(port)], { stdio: ["ignore", "pipe", "pipe"] });
-    proc.stderr.on("data", (d) => process.env.E2E_DEBUG && process.stderr.write(d));
+    // Never give the driver (and the app it launches, which inherits these
+    // descriptors) a pipe nobody reads: the app logs to stdout and would block
+    // once the pipe buffer is full, and a lingering app holding the pipe keeps
+    // Node alive after the tests.
+    const output = process.env.E2E_DEBUG ? "inherit" : "ignore";
+    const proc = spawn("tauri-driver", ["--port", String(port)], { stdio: ["ignore", output, output] });
     const base = `http://127.0.0.1:${port}`;
     for (let i = 0; i < 50; i++) {
       try {
@@ -31,6 +57,7 @@ export class Driver {
     });
     const driver = new Driver(base, res.sessionId);
     driver.proc = proc;
+    driver.application = application;
     return driver;
   }
 
@@ -38,16 +65,37 @@ export class Driver {
     return request(this.base, method, `/session/${this.sessionId}${path}`, body);
   }
 
+  /**
+   * Ends the session and waits for the application to exit on its own before
+   * stopping the driver. Returns the app PIDs that had to be killed (an app
+   * that ignores its window closing is a bug the caller can assert on).
+   */
   async stop() {
+    const app = this.application ? basename(this.application) : null;
+    const appPids = this.proc
+      ? descendants(this.proc.pid).filter((pid) => {
+          try {
+            return basename(readlinkSync(`/proc/${pid}/exe`)) === app;
+          } catch {
+            return false;
+          }
+        })
+      : [];
+    let forced = [];
     try {
       await request(this.base, "DELETE", `/session/${this.sessionId}`);
     } finally {
+      const deadline = Date.now() + 10_000;
+      while (appPids.some(alive) && Date.now() < deadline) await sleep(50);
       if (this.proc && this.proc.exitCode === null && this.proc.signalCode === null) {
         const exited = once(this.proc, "exit", { signal: AbortSignal.timeout(5000) });
         this.proc.kill();
         await exited;
       }
+      forced = appPids.filter(alive);
+      for (const pid of forced) process.kill(pid, "SIGKILL");
     }
+    return forced;
   }
 
   async find(css, { timeout = 5000 } = {}) {

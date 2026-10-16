@@ -40,12 +40,13 @@ function project(trackIds: string[], regionIds: string[] = []): Project {
       id,
       name: id,
       kind: "midi",
+      io: {armed:false,inputChannel:0,inputChannels:1,monitor:false,midiInput:null,midiOutput:null,midiChannel:null,outputChannel:null,midiMonitor:true},
       color: "#5B8DEF",
       muted: false,
       soloed: false,
       volumeDb: 0,
       pan: 0,
-      regions: i === 0 ? regionIds.map((r) => ({ id: r, name: r, start: 0, length: 960, muted: false, content: { type: "midi", notes: [] } })) : [],
+      regions: i === 0 ? regionIds.map((r) => ({ capture:null,midiEvents:[],id: r, name: r, start: 0, length: 960, muted: false, content: { type: "midi", notes: [] } })) : [],
     })),
   };
 }

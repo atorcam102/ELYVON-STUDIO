@@ -5,3 +5,7 @@ pub mod audio;
 pub mod browser;
 pub mod project;
 pub mod system;
+
+pub mod recording;
+
+pub mod midi;

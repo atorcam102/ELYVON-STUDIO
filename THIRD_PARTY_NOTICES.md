@@ -59,3 +59,17 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+## MIDI and recording dependencies
+
+| Crate | Licence | Use | Source / notice |
+| --- | --- | --- | --- |
+| midir 0.11.1 | MIT | MIDI 1.0 native input/output through ALSA, CoreMIDI and Windows backends | https://github.com/Boddlnagg/midir — full notice: [midir-MIT.txt](docs/licenses/midir-MIT.txt), copyright 2015 Patrick Reisert and the RtMidi contributors |
+| midly 0.5.3 | Unlicense | SMF type 0/1 parsing | https://github.com/negamartin/midly — the verified crates.io package declares SPDX `Unlicense` in Cargo.toml. A version-specific cargo-deny licence exception documents this permissive public-domain dedication; no other licence-policy entries are broadened. |
+| tempfile 3.27.0 | MIT OR Apache-2.0 | Unique recording takes, bounded PCM cache and atomic export staging | https://github.com/Stebalien/tempfile — previously a workspace test dependency, now also used by native audio at runtime |
+
+MIDI fixtures are original protocol messages and synthetic note sequences. They contain no
+third-party performances, samples, instrument presets or proprietary formats. MIDI 2.0/UMP
+compatibility is not claimed. The dependency inventory covers the full locked graph, including
+platform bindings; the previously documented packaged-notice work remains outstanding.

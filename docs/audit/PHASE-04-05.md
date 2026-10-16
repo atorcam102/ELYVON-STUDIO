@@ -78,3 +78,19 @@ plug-in). JACK/ASIO are not enabled. Plug-ins are not part of these phases.
 
 Recording (input streams, punch in/out, latency measurement and compensation), incremental disk
 streaming, device validation on every target, then instruments so scheduled MIDI becomes audible.
+
+
+## Follow-up on this branch (2026-10-16)
+
+The incremental-disk-streaming limitation above is resolved in the subsequent implementation:
+large sources decode in bounded packets to a PCM cache, rubato runs chunk by chunk, and a worker
+feeds a bounded associative page cache. `streaming.rs` compares resampled samples to the resident
+path and renders twelve differently offset clips from one streamed source without hash-slot
+collisions. Diagnostic export writes blocks to a staged WAV; source/read failures preserve the
+previous export. Cache underruns are counted and failed diagnostic renders cannot be published
+as successful files. MIDI cuts now retain crossing-note tails, and cycle note releases are queued
+into the next valid callback when they land exactly at the boundary.
+
+See [Phases 06–07](PHASE-06-07.md) for the new recording/MIDI implementation, reproducible checks
+and remaining physical-device/platform acceptance. The historical measurements above describe
+the earlier commit, not a claim about the follow-up's hardware performance.

@@ -23,19 +23,28 @@ Tempo/metre map, block scheduler, transport (cycle, count-in, pre-roll, metronom
 locators/markers, punch storage), lock-free engine with cpal output or internal clock, MIDI note
 scheduling with stuck-note protection; decoding (WAV/AIFF/FLAC/MP3/Vorbis), resampling, media pool,
 real waveforms, non-destructive region editing, crossfades, loops, offline render/export. Evidence:
-[audit/PHASE-04-05.md](audit/PHASE-04-05.md). **Partial**: no physical-device validation, no
-disk streaming (in-memory budget), no recording.
+[audit/PHASE-04-05.md](audit/PHASE-04-05.md). **Partial**: physical-device validation remains
+pending. Bounded PCM disk streaming and recording are now implemented in the follow-up below.
 
-## Next functional phase — Recording, latency and streaming
+## Phases 06–07 — Input capture and MIDI (partial)
 
-Input streams and recording into the media pool (punch in/out already stored), latency
-measurement/compensation, incremental disk streaming for long sessions, device tests on each
-target with measured callback deadlines and xruns.
+CPAL input streams, per-track channel selection/arming/monitoring, bounded multitrack disk
+writing, WAV/BWF takes, punch/pre-roll/count-in/cycle, take selection, interrupted-take recovery,
+manual latency offset and file-based loopback measurement. The graph latency planner and delay
+lines are tested primitives; active plug-in compensation awaits a hosted graph.
 
-## Later — MIDI, instruments and editing
+Native MIDI 1.0 input/output, timestamps, filtering and routing, a virtual keyboard/monitor,
+MIDI region recording, panic, missing-port recovery and SMF 0/1 import/type-1 export are implemented.
+Linux/macOS virtual-port APIs are gated by platform/backend availability. No internal instrument
+or MIDI 2.0/UMP support is claimed.
 
-MIDI ports/recording, full piano-roll editing, native synth/sampler and playable loop browser.
-Versioned contracts alone do not implement these features.
+Remaining acceptance: physical voice/guitar/loopback and MIDI-keyboard tests on every intended
+platform; measured hardware latency/jitter, independent-device drift handling and live input SRC.
+Audio and MIDI recording currently use separate sessions. See [validation](audit/PHASE-06-07.md).
+
+## Later — Instruments and editing
+
+Full piano-roll editing, playback note chase, native synth/sampler and playable loop browser.
 
 ## Later — Plug-ins and production
 

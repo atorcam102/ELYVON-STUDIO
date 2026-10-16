@@ -1,12 +1,13 @@
 //! Media pool runtime: decoded, resampled, analysed audio shared with the
 //! engine through immutable `Arc<MediaBuffer>`s.
 //!
-//! Everything here runs on worker/control threads. Source files are only ever
-//! opened for reading. Decoded audio is held in memory (bounded by a budget);
-//! incremental streaming from disk is **not** implemented yet.
+//! Source files are read-only. Small sources use resident buffers; larger
+//! sources decode/resample in bounded packets to a PCM disk cache. Workers
+//! prepare atomic pages, and the callback never reads or waits on a file.
 
 pub mod decode;
 pub mod peaks;
+pub mod stream;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -64,9 +65,9 @@ impl std::fmt::Display for MediaError {
             Self::Unsupported(m) => write!(f, "{m}"),
             Self::Decode(m) => write!(f, "the file could not be decoded: {m}"),
             Self::Empty => f.write_str("the file contains no audio"),
-            Self::TooLarge => f.write_str(
-                "the file exceeds the in-memory audio budget (disk streaming is not implemented yet)",
-            ),
+            Self::TooLarge => {
+                f.write_str("the audio exceeds the configured memory or disk-cache format limit")
+            }
             Self::Resample(m) => write!(f, "sample-rate conversion failed: {m}"),
         }
     }
@@ -85,6 +86,7 @@ pub struct MediaBuffer {
     pub planes: Vec<Vec<f32>>,
     /// Waveform peaks at the source rate.
     pub peaks: PeakPyramid,
+    pub stream: Option<stream::DiskStream>,
 }
 
 impl MediaBuffer {
@@ -103,15 +105,19 @@ impl MediaBuffer {
             rate,
             planes,
             peaks,
+            stream: None,
         })
     }
 
     pub fn frames(&self) -> usize {
-        self.planes.first().map_or(0, Vec::len)
+        self.stream.as_ref().map_or_else(
+            || self.planes.first().map_or(0, Vec::len),
+            |s| s.frames() as usize,
+        )
     }
 
     pub fn channels(&self) -> usize {
-        self.planes.len()
+        usize::from(self.info.channels).min(2)
     }
 
     /// Engine-rate position of a source frame.
@@ -126,7 +132,54 @@ impl MediaBuffer {
     }
 
     pub fn memory_bytes(&self) -> usize {
-        self.planes.iter().map(|p| p.len() * 4).sum::<usize>() + self.peaks.memory_bytes()
+        self.planes.iter().map(|p| p.len() * 4).sum::<usize>()
+            + self.peaks.memory_bytes()
+            + self
+                .stream
+                .as_ref()
+                .map_or(0, |_| stream::DiskStream::cache_bytes())
+    }
+
+    /// Nonblocking read for playback; all disk IO belongs to the cache worker.
+    #[inline]
+    pub fn sample(&self, frame: usize) -> [f32; 2] {
+        if let Some(stream) = &self.stream {
+            return stream.sample(frame as u64);
+        }
+        let left = self
+            .planes
+            .first()
+            .and_then(|p| p.get(frame))
+            .copied()
+            .unwrap_or(0.0);
+        let right = self
+            .planes
+            .last()
+            .and_then(|p| p.get(frame))
+            .copied()
+            .unwrap_or(left);
+        [left, right]
+    }
+
+    pub fn prefetch(&self, start: u64, frames: usize) -> Result<(), MediaError> {
+        self.stream
+            .as_ref()
+            .map_or(Ok(()), |s| s.prefetch(start, frames))
+    }
+
+    pub fn load_streamed(path: &Path, rate: u32, budget: usize) -> Result<Self, MediaError> {
+        let (stream, info, peaks) = stream::DiskStream::prepare(path, rate, budget)?;
+        let buffer = Self {
+            info,
+            rate,
+            planes: Vec::new(),
+            peaks,
+            stream: Some(stream),
+        };
+        if buffer.memory_bytes() > budget {
+            return Err(MediaError::TooLarge);
+        }
+        Ok(buffer)
     }
 
     /// Min/max per channel of source frames `[start, end)`.
@@ -139,14 +192,18 @@ impl MediaBuffer {
         let b = (self.engine_frames(end) as usize)
             .max(a + 1)
             .min(self.frames());
-        for (ch, slot) in out.iter_mut().enumerate() {
-            let plane = &self.planes[ch.min(self.planes.len() - 1)];
-            if a >= b {
-                break;
+        if a < b {
+            if self.prefetch(a as u64, b - a).is_err() {
+                return out;
             }
-            *slot = plane[a..b]
-                .iter()
-                .fold((f32::MAX, f32::MIN), |(lo, hi), &s| (lo.min(s), hi.max(s)));
+            out = [(f32::MAX, f32::MIN); 2];
+            for frame in a..b {
+                let pair = self.sample(frame);
+                for (ch, slot) in out.iter_mut().enumerate() {
+                    slot.0 = slot.0.min(pair[ch]);
+                    slot.1 = slot.1.max(pair[ch]);
+                }
+            }
         }
         out
     }
@@ -337,6 +394,13 @@ impl MediaStore {
                 id: a.id,
                 state: match self.entries.get(&a.id) {
                     None => MediaState::Loading,
+                    Some(Ok(buf)) if buf.stream.as_ref().is_some_and(|s| s.failed()) => {
+                        MediaState::Failed {
+                            code: "streamingIo".into(),
+                            message: "The disk cache could not be read; playback contains silence."
+                                .into(),
+                        }
+                    }
                     Some(Ok(buf)) => MediaState::Ready {
                         changed: a
                             .info
@@ -358,15 +422,25 @@ impl MediaStore {
         rate: u32,
         budget: usize,
     ) -> Result<Arc<MediaBuffer>, MediaError> {
-        // Two f32 channels at the larger of the two rates bound the memory.
-        let max_frames = (budget / 8) as u64;
-        let decoded = decode_file(path, max_frames)?;
+        // Small files stay in memory; larger/expanding compressed files use
+        // bounded packet decoding and a disk cache, independent of file size.
+        let max_frames = (budget.min(16 << 20) / 8) as u64;
+        if std::fs::metadata(path).is_ok_and(|m| m.len() > 16 << 20) {
+            return MediaBuffer::load_streamed(path, rate, budget).map(Arc::new);
+        }
+        let decoded = match decode_file(path, max_frames) {
+            Ok(decoded) => decoded,
+            Err(MediaError::TooLarge) => {
+                return MediaBuffer::load_streamed(path, rate, budget).map(Arc::new);
+            }
+            Err(e) => return Err(e),
+        };
         let estimate = (decoded.info.frames as f64 * f64::from(rate)
             / f64::from(decoded.info.sample_rate)) as usize
             * decoded.planes.len().min(2)
             * 4;
         if estimate > budget {
-            return Err(MediaError::TooLarge);
+            return MediaBuffer::load_streamed(path, rate, budget).map(Arc::new);
         }
         MediaBuffer::prepare(decoded, rate).map(Arc::new)
     }

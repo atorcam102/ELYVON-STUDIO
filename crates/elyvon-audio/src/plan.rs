@@ -101,8 +101,14 @@ pub struct PlanNote {
     pub velocity: u8,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct PlanEvent {
+    pub on: u64,
+    pub packet: crate::midi::Packet,
+}
 #[derive(Debug, Clone)]
 pub struct PlanTrack {
+    pub events: Vec<PlanEvent>,
     pub audible: bool,
     /// Volume × constant-power pan, for mono sources.
     pub mono_gain: (f32, f32),
@@ -193,6 +199,32 @@ pub struct PlaybackPlan {
 }
 
 impl PlaybackPlan {
+    /// Worker/control only: warm streamed sources for a timeline span.
+    pub fn prefetch(&self, position: u64, frames: usize) -> Result<(), crate::media::MediaError> {
+        for track in &self.tracks {
+            for seg in &track.segments
+                [track.segment_range(position, position.saturating_add(frames as u64))]
+            {
+                let mut at = position.max(seg.start);
+                let end = position.saturating_add(frames as u64).min(seg.end);
+                while at < end {
+                    let Some(src) = seg.source_frame(at) else {
+                        break;
+                    };
+                    let n = ((end - at) as usize)
+                        .min(seg.media.frames() - src)
+                        .min(crate::media::stream::PAGE_FRAMES);
+                    if n == 0 {
+                        break;
+                    }
+                    seg.media.prefetch(src as u64, n)?;
+                    at += n as u64;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// A silent plan (no project loaded yet).
     pub fn empty(sample_rate: u32) -> Self {
         let map = TempoMap::constant(Tempo::DEFAULT, TimeSignature::default());
@@ -371,6 +403,7 @@ pub fn build_plan(
         };
         let mut clips = Vec::new();
         let mut notes = Vec::new();
+        let mut events = Vec::new();
         for region in track.regions.iter().filter(|r| !r.muted) {
             let start = at(region.start);
             let end = at(region.end()).max(start + 1);
@@ -410,6 +443,21 @@ pub fn build_plan(
                 RegionContent::Midi {
                     notes: region_notes,
                 } => {
+                    if !region.midi_events.is_empty() {
+                        for event in region
+                            .midi_events
+                            .iter()
+                            .filter(|e| e.tick <= region.length)
+                        {
+                            if let Some(packet) = crate::midi::Packet::parse(&event.bytes) {
+                                events.push(PlanEvent {
+                                    on: at(region.start.saturating_add(event.tick)),
+                                    packet,
+                                });
+                            }
+                        }
+                        continue;
+                    }
                     for n in region_notes.iter().filter(|n| n.start < region.length) {
                         let on_tick = region.start + n.start;
                         let off_tick =
@@ -439,7 +487,9 @@ pub fn build_plan(
         notes.sort_by_key(|n| (n.on, n.pitch));
         stats.notes += notes.len();
         let max_note_len = notes.iter().map(|n| n.off - n.on).max().unwrap_or(0);
+        events.sort_by_key(|e| e.on);
         tracks.push(PlanTrack {
+            events,
             audible: track.is_audible(any_solo),
             mono_gain: (volume * pl as f32, volume * pr as f32),
             stereo_gain: (volume * bl as f32, volume * br as f32),

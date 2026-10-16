@@ -194,7 +194,7 @@ function Audio() {
       </Button>
       {stats && (
         <p className="muted">
-          {`Callbacks: ${stats.blocks} · last ${stats.lastBlockUs.toFixed(0)} µs · max ${stats.maxBlockUs.toFixed(0)} µs · xruns: ${stats.xruns}`}
+          {`Callbacks: ${stats.blocks} · last ${stats.lastBlockUs.toFixed(0)} µs · max ${stats.maxBlockUs.toFixed(0)} µs · xruns: ${stats.xruns} · disk misses: ${stats.streamingUnderruns} · MIDI overflows: ${stats.midiOverflow}`}
         </p>
       )}
       <p className="muted">

@@ -1,4 +1,5 @@
-//! Version 1 control-thread contracts. No MIDI backend or graph executor exists.
+//! Version 1 control-thread contracts, retained for compatibility. Native MIDI
+//! ports use the bounded packet bridge; a hosted graph executor is future work.
 //! Deserialisation is structural; callers MUST validate before using a plan.
 //! Vec allocation and validation belong off the real-time thread.
 
@@ -18,6 +19,23 @@ pub const AUDIO_CONTRACT_VERSION: u32 = 1;
 )]
 #[ts(export)]
 pub enum MidiMessage {
+    ProgramChange {
+        channel: u8,
+        program: u8,
+    },
+    PitchBend {
+        channel: u8,
+        value: u16,
+    },
+    ChannelPressure {
+        channel: u8,
+        pressure: u8,
+    },
+    PolyPressure {
+        channel: u8,
+        pitch: u8,
+        pressure: u8,
+    },
     NoteOn {
         channel: u8,
         pitch: u8,
@@ -50,24 +68,7 @@ impl MidiEvent {
         if self.frame_offset >= block_frames {
             return Err("MIDI frame offset is outside the callback block");
         }
-        let (channel, a, b) = match self.message {
-            MidiMessage::NoteOn {
-                channel,
-                pitch,
-                velocity,
-            }
-            | MidiMessage::NoteOff {
-                channel,
-                pitch,
-                velocity,
-            } => (channel, pitch, velocity),
-            MidiMessage::ControlChange {
-                channel,
-                controller,
-                value,
-            } => (channel, controller, value),
-        };
-        if channel > 15 || a > 127 || b > 127 {
+        if crate::midi::Packet::from_message(self.message).is_none() {
             return Err("invalid MIDI 1.0 channel or data byte");
         }
         // A NoteOn with velocity zero is legal MIDI (interpreted as NoteOff).

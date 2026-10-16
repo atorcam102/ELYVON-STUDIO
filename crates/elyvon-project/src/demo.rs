@@ -15,6 +15,8 @@ const BEAT: Ticks = 960;
 
 fn region(name: &str, start_bar: Ticks, bars: Ticks, content: RegionContent) -> Region {
     Region {
+        capture: None,
+        midi_events: Vec::new(),
         id: RegionId::new(),
         name: name.into(),
         start: start_bar * BAR,

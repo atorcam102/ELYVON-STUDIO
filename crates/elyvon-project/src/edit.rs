@@ -25,6 +25,28 @@ use crate::validate::{limits, validate, validate_name};
 )]
 #[ts(export)]
 pub enum EditCommand {
+    ImportMidi {
+        regions: Vec<crate::io::MidiImportRegion>,
+        tempo: Option<Tempo>,
+        tempo_changes: Vec<TempoChange>,
+        time_signature: Option<TimeSignature>,
+        meter_changes: Vec<MeterChange>,
+    },
+    ImportTakes {
+        assets: Vec<MediaAsset>,
+        placements: Vec<AudioPlacement>,
+        #[ts(type = "number")]
+        recorded_at: u64,
+    },
+    SelectTake {
+        track_id: TrackId,
+        folder: RegionId,
+        take: u32,
+    },
+    SetTrackIo {
+        id: TrackId,
+        io: crate::io::TrackIo,
+    },
     RenameProject {
         name: String,
     },
@@ -248,6 +270,10 @@ impl EditCommand {
     /// Short human-readable description for undo/redo menus.
     pub fn label(&self) -> &'static str {
         match self {
+            Self::ImportMidi { .. } => "Import / Record MIDI",
+            Self::ImportTakes { .. } => "Record Audio",
+            Self::SelectTake { .. } => "Select Take",
+            Self::SetTrackIo { .. } => "Change Track Input",
             Self::RenameProject { .. } => "Rename Project",
             Self::SetTempo { .. } => "Change Tempo",
             Self::SetTimeSignature { .. } => "Change Time Signature",
@@ -429,6 +455,11 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
             validate_name("name", name)?;
             track_mut(project, *id)?.name = name.trim().to_owned();
         }
+        EditCommand::SetTrackIo { id, io } => {
+            io.validate()
+                .map_err(|e| EditError::InvalidValue(e.into()))?;
+            track_mut(project, *id)?.io = io.clone();
+        }
         EditCommand::SetTrackColor { id, color } => track_mut(project, *id)?.color = *color,
         EditCommand::SetTracksMuted { ids, muted } => {
             check_tracks_exist(project, ids)?;
@@ -480,6 +511,8 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
                 return Err(EditError::Limit("too many regions on this track".into()));
             }
             let region = Region {
+                capture: None,
+                midi_events: Vec::new(),
                 id: RegionId::new(),
                 name: track.name.clone(),
                 start: *start,
@@ -568,6 +601,115 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
             tl::update_marker(project, *id, name, *tick)?;
         }
         EditCommand::RemoveMarkers { ids } => tl::remove_markers(project, ids)?,
+        EditCommand::ImportMidi {
+            regions,
+            tempo,
+            tempo_changes,
+            time_signature,
+            meter_changes,
+        } => {
+            if regions.is_empty() || regions.len() > 512 {
+                return Err(invalid("choose 1–512 MIDI tracks"));
+            }
+            if let Some(tempo) = tempo {
+                project.transport.tempo = *tempo;
+                project.transport.tempo_changes = tempo_changes.clone();
+            }
+            if let Some(ts) = time_signature {
+                project.transport.time_signature = *ts;
+                project.transport.meter_changes = meter_changes.clone();
+            }
+            for source in regions {
+                validate_name("MIDI region", &source.name)?;
+                let id = match source.track_id {
+                    Some(id) => id,
+                    None => {
+                        if project.tracks.len() >= limits::MAX_TRACKS {
+                            return Err(EditError::Limit("too many tracks".into()));
+                        }
+                        let track = Track::new(
+                            TrackKind::Midi,
+                            &source.name,
+                            crate::model::TRACK_PALETTE
+                                [project.tracks.len() % crate::model::TRACK_PALETTE.len()],
+                        );
+                        let id = track.id;
+                        project.tracks.push(track);
+                        outcome.created_tracks.push(id);
+                        id
+                    }
+                };
+                let track = track_mut(project, id)?;
+                if track.kind == TrackKind::Audio {
+                    return Err(invalid("MIDI requires a MIDI or instrument track"));
+                }
+                let region = Region {
+                    capture: None,
+                    midi_events: source.events.clone(),
+                    id: RegionId::new(),
+                    name: source.name.clone(),
+                    start: source.start,
+                    length: source.length.max(1),
+                    muted: false,
+                    content: RegionContent::Midi {
+                        notes: source.notes.clone(),
+                    },
+                };
+                outcome.created_regions.push(region.id);
+                track.regions.push(region);
+            }
+            extend_length_to_content(project);
+        }
+        EditCommand::ImportTakes {
+            assets,
+            placements,
+            recorded_at,
+        } => {
+            tl::import_audio(project, assets, placements, &mut outcome)?;
+            for track in &mut project.tracks {
+                let folder = RegionId::new();
+                let mut take = 0;
+                for region in &mut track.regions {
+                    if outcome.created_regions.contains(&region.id) {
+                        take += 1;
+                        region.capture = Some(crate::io::CaptureMetadata {
+                            folder,
+                            take,
+                            recorded_at: *recorded_at,
+                        });
+                    }
+                }
+                for region in &mut track.regions {
+                    if let Some(c) = &region.capture
+                        && c.folder == folder
+                    {
+                        region.muted = c.take != take;
+                    }
+                }
+            }
+            extend_length_to_content(project);
+        }
+        EditCommand::SelectTake {
+            track_id,
+            folder,
+            take,
+        } => {
+            let track = track_mut(project, *track_id)?;
+            if !track.regions.iter().any(|r| {
+                r.capture
+                    .as_ref()
+                    .is_some_and(|c| c.folder == *folder && c.take == *take)
+            }) {
+                return Err(invalid("take does not exist"));
+            }
+            for region in &mut track.regions {
+                if let Some(c) = &region.capture
+                    && c.folder == *folder
+                {
+                    region.muted = c.take != *take;
+                }
+            }
+        }
         EditCommand::ImportAudio { assets, placements } => {
             tl::import_audio(project, assets, placements, &mut outcome)?;
             extend_length_to_content(project);

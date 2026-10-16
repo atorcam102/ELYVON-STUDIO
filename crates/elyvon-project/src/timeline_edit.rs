@@ -186,6 +186,8 @@ pub(crate) fn import_audio(
             return Err(EditError::Limit("too many regions on this track".into()));
         }
         let region = Region {
+            capture: None,
+            midi_events: Vec::new(),
             id: RegionId::new(),
             name,
             start: placement.start,
@@ -232,9 +234,11 @@ fn split_one(project: &Project, map: &TempoMap, region: &mut Region, at: Ticks) 
             *fade_out = 0;
         }
         (RegionContent::Midi { notes }, RegionContent::Midi { notes: right_notes }) => {
-            right_notes.retain(|n| n.start >= rel);
+            right_notes.retain(|n| n.start.saturating_add(n.length) > rel);
             for n in right_notes.iter_mut() {
-                n.start -= rel;
+                let end = n.start.saturating_add(n.length);
+                n.start = n.start.saturating_sub(rel);
+                n.length = end - rel - n.start;
             }
             notes.retain(|n| n.start < rel);
             for n in notes.iter_mut() {
@@ -242,6 +246,11 @@ fn split_one(project: &Project, map: &TempoMap, region: &mut Region, at: Ticks) 
             }
         }
         _ => {}
+    }
+    if !right.midi_events.is_empty() {
+        let source = right.midi_events.clone();
+        region.midi_events = crate::io::crop_midi(&source, 0, rel);
+        right.midi_events = crate::io::crop_midi(&source, rel, rel + right.length);
     }
     right
 }
@@ -352,6 +361,18 @@ pub(crate) fn trim_region(
     }
     if start >= end {
         return Err(invalid("a region must keep a positive length"));
+    }
+    if !region.midi_events.is_empty() {
+        if start >= old_start {
+            region.midi_events =
+                crate::io::crop_midi(&region.midi_events, start - old_start, end - old_start);
+        } else {
+            region.midi_events =
+                crate::io::crop_midi(&region.midi_events, 0, end.saturating_sub(old_start));
+            for event in &mut region.midi_events {
+                event.tick += old_start - start;
+            }
+        }
     }
     region.start = start;
     region.length = end - start;
@@ -769,7 +790,8 @@ mod tests {
             }
         };
         assert_eq!(notes(&p, r), [(0, 960), (900, 100)]);
-        assert_eq!(notes(&p, out.created_regions[0]), [(1000, 100)]);
+        // Splitting retains the tail of the note crossing the cut.
+        assert_eq!(notes(&p, out.created_regions[0]), [(0, 100), (1000, 100)]);
         apply(
             &mut p,
             &EditCommand::TrimRegion {

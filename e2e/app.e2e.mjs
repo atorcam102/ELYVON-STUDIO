@@ -54,7 +54,12 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
   });
 
   after(async () => {
-    await d?.stop();
+    // Close a clean test-owned document so the unsaved-work guard is respected.
+    try {
+      await d?.invoke("project_save", { path: join(work, "final-session.elyvon") });
+    } finally {
+      assert.deepEqual(await d?.stop(), [], "final test process exits without a forced kill");
+    }
   });
 
   it("starts with an empty, clean project and an honest engine status", async () => {
@@ -74,11 +79,12 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     else assert.match(status, /kHz/);
     const play = await d.find('[aria-label^="Play"]');
     assert.notEqual(await d.attr(play, "disabled"), "true", "play is enabled with a running engine");
-    assert.ok(await d.find('[aria-label^="Record"][disabled]'), "recording is honestly unavailable");
+    assert.notEqual(await d.attr(await d.find('[aria-label^="Record"]'),"disabled"),"true","native recording can be started after arming inputs");
+    const missing=await d.invoke("recording_start",{fromTick:0,monitorOnly:false});assert.equal(missing.err.code,"audioUnavailable");
     const view = await d.invoke("project_get");
     assert.equal(view.ok.dirty, false);
     const contracts = await d.invoke("app_contracts");
-    assert.deepEqual(contracts.ok, { ipc: 2, project: 2, audio: 1, jobs: 1 });
+    assert.deepEqual(contracts.ok, { ipc: 2, project: 3, audio: 1, jobs: 1 });
     await shot("01-empty");
   });
 
@@ -130,7 +136,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.ok(saved.ok.path.endsWith("session.elyvon"));
     const file = JSON.parse(readFileSync(saved.ok.path, "utf8"));
     assert.equal(file.format, "elyvon-studio-project");
-    assert.equal(file.schemaVersion, 2);
+    assert.equal(file.schemaVersion, 3);
     assert.equal(file.project.tracks[0].name, "Keys");
 
     const fresh = await d.invoke("project_new", { discardChanges: false });
@@ -260,6 +266,53 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.ok(Math.abs(report.ok.peak[0] - 0.5 * Math.SQRT1_2) < 0.002, `peak ${report.ok.peak[0]}`);
     assert.ok(readFileSync(out).length > 44);
     assert.deepEqual(readFileSync(wav), before, "the source file is never modified");
+  });
+
+  it("validates audio input routing and releases the recording lock after startup failure", async () => {
+    const project=(await d.invoke("project_get")).ok.project;
+    const track=project.tracks.find(t=>t.kind==="audio");
+    const invalid=await d.invoke("project_apply",{command:{type:"setTrackIo",id:track.id,io:{...track.io,armed:true,inputChannel:31,inputChannels:2}}});
+    assert.equal(invalid.err.code,"invalidEdit");
+    const armed=await d.invoke("project_apply",{command:{type:"setTrackIo",id:track.id,io:{...track.io,armed:true,inputChannel:0,inputChannels:1}}});assert.ok(armed.ok);
+    const devices=await d.invoke("recording_devices");assert.ok(Array.isArray(devices.ok));
+    const started=await d.invoke("recording_start",{fromTick:0,monitorOnly:false});
+    if(started.ok){const stopped=await d.invoke("recording_stop",{cancel:true});assert.equal(stopped.ok.report.state,"cancelled");}
+    else{assert.equal(started.err.code,"audioUnavailable");assert.equal((await d.invoke("recording_status")).ok.active,false);}
+    const edited=await d.invoke("project_apply",{command:{type:"renameProject",name:"Input checks"}});assert.ok(edited.ok,"input startup failure must release the project lock");
+  });
+
+  it("records the virtual MIDI keyboard through native timing, saves, restarts and exports SMF", async () => {
+    assert.ok((await d.invoke("project_new",{discardChanges:true})).ok);
+    const added=await d.invoke("project_apply",{command:{type:"addTrack",kind:"midi"}});assert.ok(added.ok);
+    await d.exec("location.reload()");await d.find(".controlbar",{timeout:10000});
+    await d.clickCss('[aria-label="MIDI devices and monitor"]');
+    await d.find('[role="dialog"]');
+    const switches=await d.findAll('[role="dialog"] .toggle__track');await d.click(switches[1]);
+    await d.waitFor(async()=>(await d.invoke("project_get")).ok.project.tracks[0].io.armed,{message:"MIDI track armed through the UI"});
+    await d.clickCss('[aria-label="Record armed MIDI tracks"]');
+    await d.waitFor(async()=>(await d.invoke("midi_status")).ok.recording,{message:"native MIDI recording started"});
+    await d.waitFor(async()=>(await d.invoke("transport_state")).ok.seconds>0.1,{message:"MIDI engine clock running"});
+    const key=await d.find('[aria-label="MIDI C4"]');const rect=await d.rect(key);
+    await d.cmd("POST","/actions",{actions:[{type:"pointer",id:"held-midi-key",parameters:{pointerType:"mouse"},actions:[{type:"pointerMove",duration:0,origin:"viewport",x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)},{type:"pointerDown",button:0}]}]});
+    await d.waitFor(async()=>{const s=(await d.invoke("midi_status")).ok;return s.monitor.some(m=>m.bytes.join(",")==="144,60,100");},{message:"native MIDI monitor receives the virtual key"});
+    await shot("08-midi-record-monitor");
+    const noteOnSeconds=(await d.invoke("transport_state")).ok.seconds;
+    await d.waitFor(async()=>(await d.invoke("transport_state")).ok.seconds>noteOnSeconds+0.2,{message:"held note duration comes from the engine"});
+    const stopped=await d.invoke("midi_record_stop",{cancel:false});assert.ok(stopped.ok,JSON.stringify(stopped.err));
+    await d.cmd("DELETE","/actions");
+    const recorded=stopped.ok.project.tracks[0].regions[0];assert.equal(recorded.content.type,"midi");assert.ok(recorded.content.notes[0].length>=200,"stopping a held note preserves its duration");
+    assert.ok(recorded.midiEvents.some(e=>e.bytes[0]===0x80&&e.bytes[1]===60),"stop closes held MIDI keys");
+    const file=join(work,"captured-midi.elyvon");assert.ok((await d.invoke("project_save",{path:file})).ok);
+    const midiFile=join(work,"captured.mid");assert.equal((await d.invoke("midi_export",{path:midiFile})).ok,midiFile);assert.equal(readFileSync(midiFile).subarray(0,4).toString(),"MThd");
+    assert.deepEqual(await d.stop(),[],"recording process exits without a forced kill");
+    d=await Driver.start({application:app});await d.find(".controlbar",{timeout:20000});
+    const opened=await d.invoke("project_open",{path:file,discardChanges:false});assert.ok(opened.ok,JSON.stringify(opened.err));
+    assert.deepEqual(opened.ok.project.tracks[0].regions[0].midiEvents,recorded.midiEvents);assert.equal(opened.ok.project.tracks[0].io.armed,true);
+    await d.exec("location.reload()");await d.find(".region--midi",{timeout:10000});await shot("09-recorded-midi-reopened");
+    await d.invoke("project_new",{discardChanges:true});
+    const imported=await d.invoke("midi_import",{path:midiFile,startTick:0,useFileTempo:true});assert.ok(imported.ok,JSON.stringify(imported.err));
+    assert.deepEqual(imported.ok.project.tracks[0].regions[0].midiEvents,recorded.midiEvents,"SMF import/export preserves the recorded sequence");
+    await d.exec("location.reload()");await d.find(".controlbar",{timeout:10000});
   });
 
   it("explains why updates are unavailable instead of pretending", async () => {

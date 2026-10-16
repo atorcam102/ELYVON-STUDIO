@@ -40,9 +40,9 @@ pub struct RunningOutput {
     pub config: AudioConfig,
     pub name: String,
     pub kind: OutputKind,
-    stop: Arc<AtomicBool>,
-    failed: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
+    pub(crate) stop: Arc<AtomicBool>,
+    pub(crate) failed: Arc<AtomicBool>,
+    pub(crate) thread: Option<JoinHandle<()>>,
 }
 
 impl RunningOutput {
@@ -262,13 +262,27 @@ mod cpal_output {
                 let stream = match format {
                     SampleFormat::F32 => device.build_output_stream::<f32, _, _>(
                         config,
-                        move |data: &mut [f32], _| engine.process(data, channels, &mut NoMidi),
+                        move |data: &mut [f32], info| {
+                            let ts = info.timestamp();
+                            shared.set_output_latency(
+                                (ts.playback.duration_since(ts.callback).as_secs_f64()
+                                    * f64::from(cfg.sample_rate))
+                                .round() as u64,
+                            );
+                            engine.process(data, channels, &mut NoMidi)
+                        },
                         on_error,
                         None,
                     ),
                     SampleFormat::I16 => device.build_output_stream::<i16, _, _>(
                         config,
-                        move |data: &mut [i16], _| {
+                        move |data: &mut [i16], info| {
+                            let ts = info.timestamp();
+                            shared.set_output_latency(
+                                (ts.playback.duration_since(ts.callback).as_secs_f64()
+                                    * f64::from(cfg.sample_rate))
+                                .round() as u64,
+                            );
                             convert(&mut engine, &mut scratch, data, channels, |s| {
                                 (s * 32767.0) as i16
                             })
@@ -278,7 +292,13 @@ mod cpal_output {
                     ),
                     SampleFormat::I32 => device.build_output_stream::<i32, _, _>(
                         config,
-                        move |data: &mut [i32], _| {
+                        move |data: &mut [i32], info| {
+                            let ts = info.timestamp();
+                            shared.set_output_latency(
+                                (ts.playback.duration_since(ts.callback).as_secs_f64()
+                                    * f64::from(cfg.sample_rate))
+                                .round() as u64,
+                            );
                             convert(&mut engine, &mut scratch, data, channels, |s| {
                                 (f64::from(s) * 2_147_483_647.0) as i32
                             })
@@ -288,7 +308,13 @@ mod cpal_output {
                     ),
                     _ => device.build_output_stream::<u16, _, _>(
                         config,
-                        move |data: &mut [u16], _| {
+                        move |data: &mut [u16], info| {
+                            let ts = info.timestamp();
+                            shared.set_output_latency(
+                                (ts.playback.duration_since(ts.callback).as_secs_f64()
+                                    * f64::from(cfg.sample_rate))
+                                .round() as u64,
+                            );
                             convert(&mut engine, &mut scratch, data, channels, |s| {
                                 ((s + 1.0) * 32767.5) as u16
                             })
