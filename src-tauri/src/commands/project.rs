@@ -39,6 +39,14 @@ fn replace_session(
     if let Some(path) = recent {
         remember_recent(app, path);
     }
+    // Stop playback of the previous song and load the new one.
+    state
+        .audio
+        .command(elyvon_audio::transport::TransportCommand::Stop);
+    state
+        .audio
+        .command(elyvon_audio::transport::TransportCommand::Locate { tick: 0 });
+    state.audio.sync(app);
     view
 }
 
@@ -141,33 +149,46 @@ pub struct ApplyResult {
 }
 
 #[tauri::command]
-pub async fn project_apply(
-    state: State<'_, AppState>,
-    command: EditCommand,
-) -> IpcResult<ApplyResult> {
-    let mut s = state.session();
-    let outcome = s.apply(&command).map_err(|e| {
-        log::debug!("edit rejected: {e}");
-        IpcError::from(e)
-    })?;
-    Ok(ApplyResult {
-        view: s.view(),
-        outcome,
-    })
+pub async fn project_apply(app: AppHandle, command: EditCommand) -> IpcResult<ApplyResult> {
+    let state = app.state::<AppState>();
+    let result = {
+        let mut s = state.session();
+        let outcome = s.apply(&command).map_err(|e| {
+            log::debug!("edit rejected: {e}");
+            IpcError::from(e)
+        })?;
+        ApplyResult {
+            view: s.view(),
+            outcome,
+        }
+    };
+    // Publish the edit to the engine (outside the session lock).
+    state.audio.sync(&app);
+    Ok(result)
 }
 
 #[tauri::command]
-pub async fn project_undo(state: State<'_, AppState>) -> IpcResult<SessionView> {
-    let mut s = state.session();
-    s.undo();
-    Ok(s.view())
+pub async fn project_undo(app: AppHandle) -> IpcResult<SessionView> {
+    let state = app.state::<AppState>();
+    let view = {
+        let mut s = state.session();
+        s.undo();
+        s.view()
+    };
+    state.audio.sync(&app);
+    Ok(view)
 }
 
 #[tauri::command]
-pub async fn project_redo(state: State<'_, AppState>) -> IpcResult<SessionView> {
-    let mut s = state.session();
-    s.redo();
-    Ok(s.view())
+pub async fn project_redo(app: AppHandle) -> IpcResult<SessionView> {
+    let state = app.state::<AppState>();
+    let view = {
+        let mut s = state.session();
+        s.redo();
+        s.view()
+    };
+    state.audio.sync(&app);
+    Ok(view)
 }
 
 /// Writes a crash-recovery snapshot if there are unsaved changes.
@@ -227,6 +248,7 @@ pub async fn recovery_restore(app: AppHandle) -> IpcResult<SessionView> {
         *s = session;
         s.view()
     };
+    state.audio.sync(&app);
     // Keep the snapshot until the user saves: a second crash must not lose it.
     Ok(view)
 }

@@ -6,6 +6,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use elyvon_project::ProjectSession;
 
+use crate::audio::AudioService;
 use crate::settings::Settings;
 use crate::updater::UpdaterState;
 
@@ -25,6 +26,8 @@ pub struct AppState {
     pub session: Mutex<ProjectSession>,
     pub settings: Mutex<Settings>,
     pub updater: UpdaterState,
+    /// Engine, output device, decoded media. Never locked by the audio thread.
+    pub audio: AudioService,
     pub paths: AppPaths,
     /// Set once the user confirmed quitting, so close/exit events pass through.
     pub exit_confirmed: AtomicBool,
@@ -36,6 +39,7 @@ impl AppState {
             session: Mutex::new(ProjectSession::new_empty()),
             settings: Mutex::new(settings),
             updater: UpdaterState::default(),
+            audio: AudioService::new(),
             paths,
             exit_confirmed: AtomicBool::new(false),
         }

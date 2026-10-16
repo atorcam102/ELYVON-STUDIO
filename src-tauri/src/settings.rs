@@ -23,6 +23,31 @@ pub struct Settings {
     pub recent_projects: Vec<String>,
     pub layout: Layout,
     pub browser_dir: Option<String>,
+    pub audio: AudioSettings,
+}
+
+/// Audio output preferences.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct AudioSettings {
+    /// Use an audio device. When off (or when no device works) the engine
+    /// runs on its internal clock without sound.
+    pub use_device: bool,
+    /// Device id from `audio_devices`; `None` = system default.
+    pub output_device: Option<String>,
+    /// Requested buffer size in frames; 0 = device default.
+    pub buffer_frames: u32,
+}
+
+impl Default for AudioSettings {
+    fn default() -> Self {
+        Self {
+            use_device: true,
+            output_device: None,
+            buffer_frames: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -57,6 +82,7 @@ impl Default for Settings {
             recent_projects: Vec::new(),
             layout: Layout::default(),
             browser_dir: None,
+            audio: AudioSettings::default(),
         }
     }
 }
@@ -107,6 +133,13 @@ impl Settings {
         }
         if !["files", "loops", "instruments", "plugins"].contains(&l.browser_tab.as_str()) {
             l.browser_tab = d.browser_tab;
+        }
+        let a = &mut self.audio;
+        if a.buffer_frames != 0 {
+            a.buffer_frames = a.buffer_frames.clamp(32, 8192);
+        }
+        if a.output_device.as_deref().is_some_and(|d| d.is_empty() || d.len() > 512) {
+            a.output_device = None;
         }
         self.recent_projects.retain(|p| !p.is_empty());
         self.recent_projects.dedup();
@@ -218,6 +251,12 @@ mod tests {
         assert_eq!(s.layout.bottom_height, Layout::default().bottom_height);
         assert_eq!(s.layout.bottom_tab, "mixer");
         assert_eq!(s.recent_projects.len(), MAX_RECENT);
+        let mut s = Settings::default();
+        s.audio.buffer_frames = 3;
+        s.audio.output_device = Some(String::new());
+        let s = s.sanitized();
+        assert_eq!(s.audio.buffer_frames, 32);
+        assert_eq!(s.audio.output_device, None);
     }
 
     #[test]

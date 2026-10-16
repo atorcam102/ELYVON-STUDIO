@@ -57,8 +57,8 @@ pub async fn app_contracts() -> IpcResult<ContractVersions> {
 }
 
 #[tauri::command]
-pub async fn audio_status() -> IpcResult<EngineStatus> {
-    Ok(EngineStatus::current())
+pub async fn audio_status(state: State<'_, AppState>) -> IpcResult<EngineStatus> {
+    Ok(state.audio.status())
 }
 
 #[tauri::command]

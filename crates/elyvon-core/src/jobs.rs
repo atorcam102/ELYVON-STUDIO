@@ -74,4 +74,5 @@ pub struct ContractVersions {
     pub jobs: u32,
 }
 
-pub const IPC_CONTRACT_VERSION: u32 = 1;
+/// 2: audio engine status/transport/media/render commands and events (Phases 04–05).
+pub const IPC_CONTRACT_VERSION: u32 = 2;

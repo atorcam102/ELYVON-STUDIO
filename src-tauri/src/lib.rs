@@ -5,6 +5,7 @@
 //! logging, preferences, crash recovery and updates. Musical logic lives in
 //! the core crates; the webview is purely a presentation layer.
 
+pub mod audio;
 pub mod commands;
 pub mod error;
 pub mod menu;
@@ -92,8 +93,19 @@ pub fn run() {
                 std::env::consts::ARCH
             );
             let settings = Settings::load(&paths.config_dir);
+            let audio_settings = settings.audio.clone();
             app.manage(AppState::new(paths, settings));
             app.set_menu(menu::build(app.handle())?)?;
+            // Opening a device can take a moment: never block the window.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let rate = handle.state::<AppState>().session().project().sample_rate;
+                handle
+                    .state::<AppState>()
+                    .audio
+                    .start(&handle, &audio_settings, rate);
+            });
+            audio::spawn_publisher(app.handle().clone());
             Ok(())
         })
         .on_menu_event(|app, event| {
@@ -136,6 +148,17 @@ pub fn run() {
             commands::system::app_info,
             commands::system::app_contracts,
             commands::system::audio_status,
+            commands::audio::audio_devices,
+            commands::audio::audio_restart,
+            commands::audio::transport_command,
+            commands::audio::transport_state,
+            commands::audio::transport_tap,
+            commands::audio::media_formats,
+            commands::audio::media_status,
+            commands::audio::media_import,
+            commands::audio::media_relink,
+            commands::audio::media_region_peaks,
+            commands::audio::project_render,
             commands::system::settings_get,
             commands::system::settings_set,
             commands::system::app_quit,

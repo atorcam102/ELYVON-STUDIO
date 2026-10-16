@@ -27,6 +27,10 @@ pub enum ErrorCode {
     UpdateRejected,
     Cancelled,
     Busy,
+    /// The audio engine is not running.
+    AudioUnavailable,
+    /// An audio file could not be read or decoded.
+    Media,
     Internal,
 }
 
