@@ -240,13 +240,16 @@ pub fn resolve_path(path: &str, project_dir: Option<&Path>) -> PathBuf {
     }
 }
 
-/// Default in-memory budget for decoded audio.
+/// Default in-memory budget for decoded audio (4 GiB; 512 MiB on 32-bit).
+#[cfg(target_pointer_width = "64")]
 pub const fn default_budget_bytes() -> usize {
-    if cfg!(target_pointer_width = "32") {
-        512 << 20
-    } else {
-        4 << 30
-    }
+    4 << 30
+}
+
+/// Default in-memory budget for decoded audio (512 MiB on 32-bit targets).
+#[cfg(not(target_pointer_width = "64"))]
+pub const fn default_budget_bytes() -> usize {
+    512 << 20
 }
 
 /// Decoded media by pool id, plus a content cache so reopening a project or

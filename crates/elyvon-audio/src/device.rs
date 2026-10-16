@@ -14,7 +14,6 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::engine::{AudioConfig, Engine, NoMidi, OutputKind};
-use crate::transport::EngineShared;
 
 /// An output device the user can choose.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -111,6 +110,7 @@ pub fn start_internal_clock(mut engine: Engine, sample_rate: u32, block: u32) ->
 #[cfg(feature = "device")]
 mod cpal_output {
     use super::*;
+    use crate::transport::EngineShared;
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use cpal::{BufferSize, Device, ErrorKind, SampleFormat, StreamConfig, SupportedBufferSize};
 
