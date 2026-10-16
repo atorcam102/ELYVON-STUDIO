@@ -3,10 +3,6 @@
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { ApplyResult } from "../bindings/ApplyResult";
-import type { AudioSetup } from "../bindings/AudioSetup";
-import type { DeviceList } from "../bindings/DeviceList";
-import type { TelemetrySnapshot } from "../bindings/TelemetrySnapshot";
-import type { TestTone } from "../bindings/TestTone";
 import type { ContractVersions } from "../bindings/ContractVersions";
 import type { AppInfo } from "../bindings/AppInfo";
 import type { DirListing } from "../bindings/DirListing";
@@ -20,7 +16,19 @@ import type { RecoveryInfo } from "../bindings/RecoveryInfo";
 import type { SessionView } from "../bindings/SessionView";
 import type { Settings } from "../bindings/Settings";
 import type { UpdateCheckResult } from "../bindings/UpdateCheckResult";
+import type { DeviceInfo } from "../bindings/DeviceInfo";
+import type { ImportLayout } from "../bindings/ImportLayout";
+import type { ImportResult } from "../bindings/ImportResult";
+import type { MediaStatus } from "../bindings/MediaStatus";
+import type { RenderReport } from "../bindings/RenderReport";
+import type { TransportCommand } from "../bindings/TransportCommand";
+import type { TransportSnapshot } from "../bindings/TransportSnapshot";
 
+import type { MidiStatus } from "../bindings/MidiStatus";
+import type { LatencyMeasurement } from "../bindings/LatencyMeasurement";
+import type { CaptureStatus } from "../bindings/CaptureStatus";
+import type { CaptureResult } from "../bindings/CaptureResult";
+import type { RecordedTake } from "../bindings/RecordedTake";
 export type { IpcError };
 
 export function isIpcError(e: unknown): e is IpcError {
@@ -45,6 +53,22 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 export const ipc = {
+  midi: {
+    status:()=>call<MidiStatus>("midi_status"),refresh:()=>call<void>("midi_refresh"),panic:()=>call<void>("midi_panic"),
+    send:(trackId:string,bytes:number[])=>call<void>("midi_send",{trackId,bytes}),
+    recordStart:(fromTick:number)=>call<MidiStatus>("midi_record_start",{fromTick}),recordStop:(cancel=false)=>call<SessionView>("midi_record_stop",{cancel}),
+    import:(path:string,startTick:number,useFileTempo:boolean)=>call<SessionView>("midi_import",{path,startTick,useFileTempo}),
+    export:(path:string)=>call<string>("midi_export",{path}),
+  },
+  recording: {
+    measure:(referencePath:string,capturedPath:string,maxDelay:number)=>call<LatencyMeasurement>("recording_measure_latency",{referencePath,capturedPath,maxDelay}),
+    devices:()=>call<DeviceInfo[]>("recording_devices"),
+    status:()=>call<CaptureStatus>("recording_status"),
+    start:(fromTick:number,monitorOnly=false)=>call<CaptureStatus>("recording_start",{fromTick,monitorOnly}),
+    stop:(cancel=false)=>call<CaptureResult>("recording_stop",{cancel}),
+    recoverable:()=>call<RecordedTake[]>("recording_recoverable"),
+    recover:(path:string)=>call<CaptureResult>("recording_recover",{path}),
+  },
   project: {
     get: () => call<SessionView>("project_get"),
     new: (discardChanges = false) => call<SessionView>("project_new", { discardChanges }),
@@ -69,19 +93,30 @@ export const ipc = {
   app: {
     info: () => call<AppInfo>("app_info"),
     contracts: () => call<ContractVersions>("app_contracts"),
+    audioStatus: () => call<EngineStatus>("audio_status"),
     quit: (discardChanges = false) => call<void>("app_quit", { discardChanges }),
     restart: () => call<void>("app_restart"),
   },
   audio: {
-    status: () => call<EngineStatus>("audio_status"),
-    devices: () => call<DeviceList>("audio_devices"),
-    configure: (setup: AudioSetup) => call<EngineStatus>("audio_configure", { setup }),
-    reconnect: () => call<EngineStatus>("audio_reconnect"),
-    telemetry: () => call<TelemetrySnapshot>("audio_telemetry"),
-    play: (fromTicks?: number) => call<void>("audio_play", { fromTicks: fromTicks ?? null }),
-    stop: () => call<void>("audio_stop"),
-    locate: (ticks: number) => call<void>("audio_locate", { ticks }),
-    testTone: (tone: TestTone) => call<TestTone>("audio_test_tone", { tone }),
+    devices: () => call<DeviceInfo[]>("audio_devices"),
+    restart: () => call<EngineStatus>("audio_restart"),
+  },
+  transport: {
+    command: (command: TransportCommand) => call<TransportSnapshot>("transport_command", { command }),
+    state: () => call<TransportSnapshot | null>("transport_state"),
+    tap: () => call<number | null>("transport_tap"),
+  },
+  media: {
+    formats: () => call<string[]>("media_formats"),
+    status: () => call<MediaStatus[]>("media_status"),
+    import: (paths: string[], trackId: string | null, start: number, layout: ImportLayout) =>
+      call<ImportResult>("media_import", { paths, trackId, start, layout }),
+    relink: (id: string, path: string) => call<SessionView>("media_relink", { id, path }),
+    /** Binary waveform columns; see `decodePeaks`. */
+    regionPeaks: (regionId: string, fromTick: number, toTick: number, columns: number) =>
+      call<ArrayBuffer>("media_region_peaks", { regionId, fromTick, toTick, columns }),
+    render: (path: string, metronome: boolean, startTick?: number, endTick?: number) =>
+      call<RenderReport>("project_render", { path, startTick: startTick ?? null, endTick: endTick ?? null, metronome }),
   },
   settings: {
     get: () => call<Settings>("settings_get"),
@@ -98,3 +133,19 @@ export const ipc = {
     install: () => call<InstallResult>("update_install"),
   },
 };
+
+/** Waveform columns: `[minL, maxL, minR, maxR]` per column, in −1…1. */
+export interface Peaks {
+  columns: number;
+  data: Float32Array;
+}
+
+/** Decodes the `media_region_peaks` wire format (u32 LE count, then i16 LE). */
+export function decodePeaks(buffer: ArrayBuffer): Peaks {
+  const view = new DataView(buffer);
+  const columns = buffer.byteLength >= 4 ? view.getUint32(0, true) : 0;
+  const n = Math.min(columns * 4, Math.floor((buffer.byteLength - 4) / 2));
+  const data = new Float32Array(n);
+  for (let i = 0; i < n; i++) data[i] = view.getInt16(4 + i * 2, true) / 32767;
+  return { columns, data };
+}

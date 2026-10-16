@@ -1,13 +1,12 @@
 //! Process-wide application state managed by Tauri.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use elyvon_audio_device::manager::AudioManager;
 use elyvon_project::ProjectSession;
 
+use crate::audio::AudioService;
 use crate::settings::Settings;
 use crate::updater::UpdaterState;
 
@@ -27,21 +26,38 @@ pub struct AppState {
     pub session: Mutex<ProjectSession>,
     pub settings: Mutex<Settings>,
     pub updater: UpdaterState,
+    /// Engine, output device, decoded media. Never locked by the audio thread.
+    pub audio: AudioService,
+    pub capture: crate::recording::CaptureService,
+    pub midi: crate::midi::MidiService,
+    pub rendering: std::sync::Arc<AtomicBool>,
     pub paths: AppPaths,
-    /// The audio device manager (its own control thread). `None` after exit.
-    pub audio: Mutex<Option<Arc<AudioManager>>>,
     /// Set once the user confirmed quitting, so close/exit events pass through.
     pub exit_confirmed: AtomicBool,
 }
 
 impl AppState {
-    pub fn new(paths: AppPaths, settings: Settings, audio: Option<AudioManager>) -> Self {
+    pub fn ensure_editable(&self) -> crate::error::IpcResult<()> {
+        if self.rendering.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(crate::error::IpcError::new(
+                crate::error::ErrorCode::Busy,
+                "Wait for the diagnostic render to finish.",
+            ));
+        }
+        self.capture.ensure_idle()?;
+        self.midi.ensure_idle()
+    }
+
+    pub fn new(paths: AppPaths, settings: Settings) -> Self {
         Self {
             session: Mutex::new(ProjectSession::new_empty()),
             settings: Mutex::new(settings),
             updater: UpdaterState::default(),
+            audio: AudioService::new(),
+            capture: crate::recording::CaptureService::default(),
+            midi: crate::midi::MidiService::default(),
+            rendering: std::sync::Arc::new(AtomicBool::new(false)),
             paths,
-            audio: Mutex::new(audio.map(Arc::new)),
             exit_confirmed: AtomicBool::new(false),
         }
     }
@@ -54,26 +70,6 @@ impl AppState {
 
     pub fn settings(&self) -> MutexGuard<'_, Settings> {
         self.settings.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// The audio manager, cloned out of the lock so that slow device work
-    /// (opening a driver can take seconds) never blocks other commands.
-    pub fn audio(&self) -> Option<Arc<AudioManager>> {
-        self.audio
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-    }
-
-    /// Stops all audio streams. The manager thread is joined when the last
-    /// in-flight command releases its handle.
-    pub fn shutdown_audio(&self) {
-        let manager = self
-            .audio
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
-        drop(manager);
     }
 
     pub fn is_dirty(&self) -> bool {

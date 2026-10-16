@@ -15,15 +15,18 @@ pub mod edit;
 pub mod error;
 pub mod format;
 pub mod history;
+pub mod io;
+pub use io::TrackIo;
 pub mod model;
 pub mod recovery;
 pub mod session;
+pub mod timeline_edit;
 pub mod validate;
 
-pub use edit::{EditCommand, EditOutcome};
+pub use edit::{AudioPlacement, ClipboardRegion, EditCommand, EditOutcome, PlacementTrack};
 pub use error::{EditError, ProjectError, ValidationError};
 pub use model::{
-    AudioSource, MidiNote, Project, ProjectId, Region, RegionContent, RegionId, Track, TrackId,
-    TrackKind, Transport,
+    Marker, MarkerId, MediaAsset, MediaId, MediaInfo, MetronomeSettings, MidiNote, Project,
+    ProjectId, Region, RegionContent, RegionId, Track, TrackId, TrackKind, Transport,
 };
 pub use session::{ProjectOrigin, ProjectSession, SaveTicket, SessionView};

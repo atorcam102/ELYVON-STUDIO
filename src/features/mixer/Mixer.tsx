@@ -10,7 +10,8 @@ import {
   formatPan,
   MIN_DB,
 } from "../../lib/format";
-import { engineRunning, useAudio } from "../../state/audio";
+import { engineAvailable, useApp } from "../../state/app";
+import { useTransport } from "../../state/transport";
 import { useProject } from "../../state/project";
 import { useUi } from "../../state/ui";
 
@@ -259,10 +260,7 @@ const ChannelStrip = memo(function ChannelStrip({
             </span>
           ))}
         </div>
-        <div
-          className="meter"
-          title="Level meter — no signal (audio engine offline)"
-        >
+        <div className="meter" title="Peak level reported by the audio engine (post fader)">
           <div
             className="meter__bar"
             ref={(el) => {
@@ -317,57 +315,6 @@ const ChannelStrip = memo(function ChannelStrip({
 });
 
 /**
- * Real device output meters. Values come from the native engine's lock-free
- * telemetry; there is no master bus processing yet (no fader).
- */
-function OutputStrip() {
-  const status = useAudio((s) => s.status);
-  const telemetry = useAudio((s) => s.telemetry);
-  const running = engineRunning(status);
-  const peaks = running ? telemetry?.outputPeakDb : undefined;
-  const hold = useAudio((s) => (running ? s.outputHoldDb : MIN_DB));
-  const shown = (peaks ?? [MIN_DB, MIN_DB]).slice(0, 8);
-  const clipped = (telemetry?.stats.clippedSamples ?? 0) > 0;
-  const output = status?.output;
-  return (
-    <div
-      className={`strip strip--master strip--output${running ? "" : " is-unavailable"}`}
-      title={
-        running && output
-          ? `Device output: ${output.deviceName} (${output.host}), ${output.channels} ch. Real meters; master bus processing arrives with the audio graph.`
-          : `Device output — ${status?.message ?? "audio engine not running"}`
-      }
-    >
-      <div className="strip__db">
-        <span
-          className={`strip__db-box strip__db-box--peak${clipped ? " is-clipped" : ""}`}
-          title={clipped ? `${telemetry?.stats.clippedSamples} samples clipped at the device output` : "Output peak (held 1.5 s)"}
-          data-testid="output-peak"
-        >
-          {formatDb(hold)}
-        </span>
-      </div>
-      <div className="strip__fader-row strip__fader-row--output">
-        {shown.map((db, i) => (
-          <div key={i} className="meter meter--live" aria-label={`Output channel ${i + 1} level`}>
-            <div className="meter__bar" style={{ transform: `scaleY(${dbToFaderPos(db).toFixed(3)})` }} />
-          </div>
-        ))}
-      </div>
-      {!running && (
-        <div className="strip__unavailable">
-          <Icon name="lock" size={14} />
-          <span>Engine offline</span>
-        </div>
-      )}
-      <div className="strip__name">
-        <span>{output ? `Out ${output.channels === 1 ? "Mono" : output.channels === 2 ? "Stereo" : `${output.channels} ch`}` : "Output"}</span>
-      </div>
-    </div>
-  );
-}
-
-/**
  * Drives the meters with synthetic levels when the user turns on the
  * clearly-labelled simulation. Never runs otherwise (zero idle cost).
  */
@@ -412,6 +359,37 @@ function useSimulatedMeters(
   }, [on, registry]);
 }
 
+/** Drives the meters from engine peak levels (`audio://meters`). */
+function useEngineMeters(registry: MeterRegistry, tracks: Track[], on: boolean) {
+  const tracksRef = useRef(tracks);
+  useEffect(() => {
+    tracksRef.current = tracks;
+  }, [tracks]);
+  useEffect(() => {
+    if (!on) return;
+    const levels = new Map<string, number>();
+    const show = (id: string, v: number) => {
+      const el = registry.get(id);
+      if (el) el.style.transform = `scaleY(${v.toFixed(3)})`;
+    };
+    return useTransport.subscribe((s, prev) => {
+      if (s.meters !== prev.meters && s.meters) {
+        tracksRef.current.forEach((t, i) => {
+          const peak = s.meters!.tracks[i] ?? 0;
+          const target = peak > 0 ? dbToFaderPos(Math.max(MIN_DB, 20 * Math.log10(peak))) : 0;
+          const next = Math.max(target, (levels.get(t.id) ?? 0) * 0.8);
+          levels.set(t.id, next);
+          show(t.id, next);
+        });
+      }
+      if (s.snapshot?.state !== prev.snapshot?.state && (s.snapshot?.state === "stopped" || s.snapshot?.state === "paused")) {
+        levels.clear();
+        registry.forEach((el) => (el.style.transform = "scaleY(0)"));
+      }
+    });
+  }, [on, registry]);
+}
+
 const KIND_FILTERS: { kind: TrackKind; label: string }[] = [
   { kind: "audio", label: "Audio" },
   { kind: "instrument", label: "Inst" },
@@ -420,17 +398,15 @@ const KIND_FILTERS: { kind: TrackKind; label: string }[] = [
 
 export function Mixer() {
   const project = useProject((s) => s.view?.project);
-  const status = useAudio((s) => s.status);
-  const running = engineRunning(status);
+  const engine = useApp((s) => s.engine);
   const selection = useUi((s) => s.selection);
   const demoMeters = useUi((s) => s.demoMeters);
   const setDemoMeters = useUi((s) => s.setDemoMeters);
   const [registry] = useState<MeterRegistry>(() => new Map());
   const [hidden, setHidden] = useState<TrackKind[]>([]);
   const tracks = project?.tracks ?? [];
-  // Tracks are not rendered by the engine yet, so their meters can only ever
-  // show the labelled simulation, whether or not a device is open.
-  useSimulatedMeters(registry, tracks, demoMeters);
+  useSimulatedMeters(registry, tracks, demoMeters && !engineAvailable(engine));
+  useEngineMeters(registry, tracks, engineAvailable(engine));
 
   const onSelect = (id: string) => useUi.getState().selectTracks([id], id);
   const anySolo = tracks.some((t) => t.soloed);
@@ -440,17 +416,21 @@ export function Mixer() {
     <div className="mixer">
       <div className="mixer__bar">
         <span className="mixer__heading">Mixer</span>
-        <span
-          className="mixer__notice"
-          title={
-            running
-              ? "The engine is running, but track playback is not implemented yet: tracks produce no signal. The output meter shows the real device output (silence or the test tone)."
-              : "Faders, pan, mute and solo edit the project; there is no audio signal without a running engine."
-          }
-        >
-          <Icon name="info" size={12} />
-          <span>{running ? "Tracks not rendered yet — output meter is live" : "No signal — audio engine offline"}</span>
-        </span>
+        {engine?.state === "running" && engine.output === "internalClock" && (
+          <span className="mixer__notice" title="No audio device is open; the engine runs on its internal clock.">
+            <Icon name="info" size={12} />
+            <span>No audio output — meters show the engine signal</span>
+          </span>
+        )}
+        {!engineAvailable(engine) && (
+          <span
+            className="mixer__notice"
+            title="Faders, pan, mute and solo edit the project; there is no audio signal yet."
+          >
+            <Icon name="info" size={12} />
+            <span>No signal — audio engine offline</span>
+          </span>
+        )}
         <div
           className="segmented segmented--blue"
           role="group"
@@ -478,12 +458,12 @@ export function Mixer() {
           })}
         </div>
         <div className="mixer__bar-end">
-          {demoMeters && <Badge tone="demo">Simulated</Badge>}
-          <Toggle
-            label="Simulate meters"
-            checked={demoMeters}
-            onChange={setDemoMeters}
-          />
+          {!engineAvailable(engine) && (
+            <>
+              {demoMeters && <Badge tone="demo">Simulated</Badge>}
+              <Toggle label="Simulate meters" checked={demoMeters} onChange={setDemoMeters} />
+            </>
+          )}
         </div>
       </div>
       <div className="mixer__body">
@@ -513,7 +493,20 @@ export function Mixer() {
               onSelect={onSelect}
             />
           ))}
-          {tracks.length > 0 && <OutputStrip />}
+          {tracks.length > 0 && (
+            <div
+              className="strip strip--master is-unavailable"
+              title="The master bus is created by the audio engine (Phase 2)."
+            >
+              <div className="strip__unavailable">
+                <Icon name="lock" size={14} />
+                <span>Master bus available with the audio engine</span>
+              </div>
+              <div className="strip__name">
+                <span>Stereo Out</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

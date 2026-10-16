@@ -17,23 +17,34 @@ boundaries, compatibility fixtures, shared quality commands, dependency/licence 
 measurement runner. No audio engine or new production UI functionality is claimed. Hardware,
 production-key upgrade, complete packaged notices and release-mode performance work remain pending.
 
-## Phase 03 — Native audio engine and devices (partial)
+## Phases 04–05 — Tempo, transport, audio clips (partial)
 
-Driver-free RT engine core, CPAL device layer (WASAPI/CoreAudio/ALSA), headless clock, device
-manager with fallback/hot-unplug/reconnection, per-device preferences, transport + sample clock,
-opt-in test tone, real output/input meters and xrun statistics. See [AUDIO_ENGINE](AUDIO_ENGINE.md).
-Pending: physical-device validation on every target, Ubuntu ARM64 build, JACK/native PipeWire,
-ASIO (licence), WASAPI exclusive mode.
+Tempo/metre map, block scheduler, transport (cycle, count-in, pre-roll, metronome, tap tempo,
+locators/markers, punch storage), lock-free engine with cpal output or internal clock, MIDI note
+scheduling with stuck-note protection; decoding (WAV/AIFF/FLAC/MP3/Vorbis), resampling, media pool,
+real waveforms, non-destructive region editing, crossfades, loops, offline render/export. Evidence:
+[audit/PHASE-04-05.md](audit/PHASE-04-05.md). **Partial**: physical-device validation remains
+pending. Bounded PCM disk streaming and recording are now implemented in the follow-up below.
 
-## Next functional phase — Audio graph, media and recording
+## Phases 06–07 — Input capture and MIDI (partial)
 
-Preallocated RT graph with atomic swap rendering tracks/regions, media decoding/import,
-streaming and recording with latency compensation. Keep the Phase 03 allocation/deadline checks.
+CPAL input streams, per-track channel selection/arming/monitoring, bounded multitrack disk
+writing, WAV/BWF takes, punch/pre-roll/count-in/cycle, take selection, interrupted-take recovery,
+manual latency offset and file-based loopback measurement. The graph latency planner and delay
+lines are tested primitives; active plug-in compensation awaits a hosted graph.
 
-## Later — MIDI, instruments and editing
+Native MIDI 1.0 input/output, timestamps, filtering and routing, a virtual keyboard/monitor,
+MIDI region recording, panic, missing-port recovery and SMF 0/1 import/type-1 export are implemented.
+Linux/macOS virtual-port APIs are gated by platform/backend availability. No internal instrument
+or MIDI 2.0/UMP support is claimed.
 
-MIDI ports/recording, full piano-roll editing, native synth/sampler and playable loop browser.
-Versioned contracts alone do not implement these features.
+Remaining acceptance: physical voice/guitar/loopback and MIDI-keyboard tests on every intended
+platform; measured hardware latency/jitter, independent-device drift handling and live input SRC.
+Audio and MIDI recording currently use separate sessions. See [validation](audit/PHASE-06-07.md).
+
+## Later — Instruments and editing
+
+Full piano-roll editing, playback note chase, native synth/sampler and playable loop browser.
 
 ## Later — Plug-ins and production
 

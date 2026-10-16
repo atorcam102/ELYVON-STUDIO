@@ -1,3 +1,10 @@
+# Historical Phase 03 evidence
+
+This report describes commits `a141b5e`/`9f60871`, before integration of the
+arrangement and recording engine. It does not describe the current IPC or device
+diagnostic controls. See [ADR 0006](../ADR/0006-converge-phase03-and-arrangement-engines.md).
+
+
 # Phase 03 validation evidence — native audio engine and devices
 
 Date: 2026-10-15. Entry: main `22634ed`. Branch `claude/elegant-feynman-biwgpv`.

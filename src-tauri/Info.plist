@@ -5,6 +5,6 @@
   <!-- Merged into the app bundle by Tauri. macOS terminates an app that opens
        an audio input without this explanation. Untested on macOS hardware. -->
   <key>NSMicrophoneUsageDescription</key>
-  <string>Elyvon Studio shows input levels from the audio input you select in Settings › Audio.</string>
+  <string>Elyvon Studio records and monitors the audio input you explicitly select.</string>
 </dict>
 </plist>

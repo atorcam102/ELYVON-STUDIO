@@ -1,303 +1,357 @@
-//! The real-time engine core: everything the audio callback runs.
-//!
-//! [`EngineCore`] is created on a control thread (where it allocates its
-//! scratch buffers once) and then **moved** into the device callback. From
-//! then on every method reachable from [`EngineCore::process_interleaved`] /
-//! [`EngineCore::process_planar`] is real-time safe: no allocation or
-//! deallocation, no locks, no I/O, no logging and no system calls. This is
-//! enforced by the allocation-counting test in `tests/realtime.rs`.
-//!
-//! Per block the core:
-//! 1. applies at most [`MAX_COMMANDS_PER_BLOCK`] queued commands,
-//! 2. renders silence plus the opt-in test tone into planar `f32` scratch,
-//! 3. measures per-channel peaks (before clamping, so overs are visible),
-//! 4. converts/clamps into the device format and counts clipped samples,
-//! 5. advances the monotonic sample clock and, if playing, the transport,
-//! 6. publishes clocks to [`Telemetry`].
-//!
-//! Device callbacks of any size are split into chunks of at most
-//! [`MAX_BLOCK_FRAMES`], so the output is identical for every buffer size.
+//! Offline rendering through the real-time engine code path, WAV export and a
+//! diagnostic report (levels per channel and per track, checksum).
 
+use std::path::Path;
 use std::sync::Arc;
 
-use crate::command::{Command, CommandReceiver, MAX_COMMANDS_PER_BLOCK, TestTone, ToneChannels};
-use crate::format::{OutputSample, interleave_into};
-use crate::gain::db_to_gain;
-use crate::telemetry::Telemetry;
+use elyvon_core::Ticks;
+use elyvon_project::{MediaId, Project};
+use serde::Serialize;
+use ts_rs::TS;
 
-/// Internal processing chunk. Device blocks larger than this are split.
-pub const MAX_BLOCK_FRAMES: usize = 1024;
-/// Output channels rendered by the engine; extra device channels get silence.
-pub const MAX_ENGINE_CHANNELS: usize = 32;
-/// Test-tone gain ramp, avoids clicks when it is switched on or off.
-pub const TONE_RAMP_SECONDS: f64 = 0.010;
+use crate::engine::{self, MidiSink, NoMidi};
+use crate::media::MediaBuffer;
+use crate::plan::build_plan;
+use crate::transport::TransportCommand;
 
-/// Construction parameters for [`EngineCore`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CoreConfig {
+pub struct RenderRequest {
     pub sample_rate: u32,
-    /// Engine output channels (clamped to 1…[`MAX_ENGINE_CHANNELS`]).
-    pub output_channels: u16,
-    /// Initial value of the monotonic clock (keeps it monotonic across streams).
-    pub start_clock: u64,
-    /// Initial transport position in frames.
-    pub start_transport: u64,
+    pub start_tick: Ticks,
+    /// `None` renders to the end of the last region.
+    pub end_tick: Option<Ticks>,
+    pub block_frames: usize,
+    pub metronome: bool,
 }
 
-#[derive(Debug)]
-struct Tone {
-    settings: TestTone,
-    phase: f64,
-    increment: f64,
-    gain: f32,
-    target: f32,
-    step: f32,
-}
-
-impl Tone {
-    fn new(sample_rate: u32) -> Self {
-        let mut tone = Self {
-            settings: TestTone::default(),
-            phase: 0.0,
-            increment: 0.0,
-            gain: 0.0,
-            target: 0.0,
-            step: 0.0,
-        };
-        tone.apply(TestTone::default(), sample_rate);
-        tone
-    }
-
-    /// Pure arithmetic, no allocation: safe on the audio thread.
-    fn apply(&mut self, settings: TestTone, sample_rate: u32) {
-        let mut settings = settings.sanitized(sample_rate);
-        if !settings.enabled && self.audible() {
-            // Fade out the tone that is sounding, at its own pitch and channels.
-            settings.frequency_hz = self.settings.frequency_hz;
-            settings.channels = self.settings.channels;
-        }
-        self.settings = settings;
-        self.increment = f64::from(settings.frequency_hz) / f64::from(sample_rate.max(1));
-        self.target = if settings.enabled {
-            db_to_gain(f64::from(settings.level_db)) as f32
-        } else {
-            0.0
-        };
-        let ramp_frames = (TONE_RAMP_SECONDS * f64::from(sample_rate)).max(1.0) as f32;
-        self.step = (self.target - self.gain).abs() / ramp_frames;
-    }
-
-    fn audible(&self) -> bool {
-        self.gain > 0.0 || self.target > 0.0
-    }
-
-    #[inline]
-    fn next_gain(&mut self) -> f32 {
-        if self.gain < self.target {
-            self.gain = (self.gain + self.step).min(self.target);
-        } else if self.gain > self.target {
-            self.gain = (self.gain - self.step).max(self.target);
-        }
-        self.gain
-    }
-}
-
-/// Real-time engine core. See the module documentation for the rules.
-#[derive(Debug)]
-pub struct EngineCore {
-    sample_rate: u32,
-    channels: usize,
-    /// Planar scratch: `channels` × [`MAX_BLOCK_FRAMES`], allocated once.
-    scratch: Vec<f32>,
-    commands: CommandReceiver,
-    telemetry: Arc<Telemetry>,
-    clock: u64,
-    transport: u64,
-    playing: bool,
-    tone: Tone,
-}
-
-impl EngineCore {
-    /// Allocates all buffers. Control thread only.
-    pub fn new(config: CoreConfig, commands: CommandReceiver, telemetry: Arc<Telemetry>) -> Self {
-        let channels = usize::from(config.output_channels).clamp(1, MAX_ENGINE_CHANNELS);
-        let sample_rate = config.sample_rate.max(1);
-        telemetry.publish_clock(config.start_clock, config.start_transport, false, false);
+impl RenderRequest {
+    pub fn whole_song(sample_rate: u32) -> Self {
         Self {
             sample_rate,
-            channels,
-            scratch: vec![0.0; channels * MAX_BLOCK_FRAMES],
-            commands,
-            telemetry,
-            clock: config.start_clock,
-            transport: config.start_transport,
-            playing: false,
-            tone: Tone::new(sample_rate),
+            start_tick: 0,
+            end_tick: None,
+            block_frames: 512,
+            metronome: false,
         }
     }
+}
 
-    pub fn sample_rate(&self) -> u32 {
-        self.sample_rate
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TrackLevel {
+    pub name: String,
+    pub peak: f32,
+    pub rms: f64,
+}
+
+/// Diagnostic summary written next to an exported render.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RenderReport {
+    pub sample_rate: u32,
+    #[ts(type = "number")]
+    pub frames: u64,
+    pub seconds: f64,
+    #[ts(type = "number")]
+    pub start_tick: u64,
+    #[ts(type = "number")]
+    pub end_tick: u64,
+    #[ts(type = "number")]
+    pub block_frames: u64,
+    /// Linear peak and RMS per output channel (L, R).
+    pub peak: [f32; 2],
+    pub rms: [f64; 2],
+    pub tracks: Vec<TrackLevel>,
+    /// Audio clips (after muting) that had decoded media.
+    #[ts(type = "number")]
+    pub clips: u64,
+    /// Audio regions that stayed silent because their file is unavailable.
+    #[ts(type = "number")]
+    pub missing_media: u64,
+    /// Nonzero means this diagnostic render is incomplete and cannot be exported.
+    #[ts(type = "number")]
+    pub streaming_errors: u64,
+    /// FNV-1a 64 over the f32 sample bits, hex.
+    pub checksum: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Rendered {
+    /// Interleaved stereo.
+    pub samples: Vec<f32>,
+    pub report: RenderReport,
+}
+
+impl Rendered {
+    pub fn frames(&self) -> usize {
+        self.samples.len() / 2
     }
 
-    pub fn channels(&self) -> usize {
-        self.channels
+    pub fn channel(&self, ch: usize) -> Vec<f32> {
+        self.samples.iter().skip(ch).step_by(2).copied().collect()
     }
+}
 
-    pub fn clock(&self) -> u64 {
-        self.clock
-    }
+/// Renders a project offline with the same [`engine::Engine`] used for
+/// playback and collects the samples. Output is independent of
+/// `block_frames` (tested).
+pub fn render(
+    project: &Project,
+    media: &dyn Fn(MediaId) -> Option<Arc<MediaBuffer>>,
+    request: RenderRequest,
+    midi: Option<&mut dyn MidiSink>,
+) -> Rendered {
+    let mut samples = Vec::new();
+    let report = render_stream(project, media, request, midi, &mut |block| {
+        samples.extend_from_slice(block)
+    });
+    Rendered { samples, report }
+}
 
-    pub fn transport(&self) -> u64 {
-        self.transport
-    }
-
-    pub fn is_playing(&self) -> bool {
-        self.playing
-    }
-
-    fn apply_commands(&mut self) {
-        for _ in 0..MAX_COMMANDS_PER_BLOCK {
-            let Some(command) = self.commands.pop() else {
-                break;
-            };
-            match command {
-                Command::Play => self.playing = true,
-                Command::Stop => self.playing = false,
-                Command::Locate { frame } => self.transport = frame,
-                Command::SetTestTone(tone) => self.tone.apply(tone, self.sample_rate),
-            }
+/// Like [`render`] but hands each interleaved stereo block to `sink` instead
+/// of keeping the whole render in memory.
+pub fn render_stream(
+    project: &Project,
+    media: &dyn Fn(MediaId) -> Option<Arc<MediaBuffer>>,
+    request: RenderRequest,
+    midi: Option<&mut dyn MidiSink>,
+    sink: &mut dyn FnMut(&[f32]),
+) -> RenderReport {
+    let rate = request.sample_rate;
+    let mut plan = build_plan(project, media, rate, 1);
+    let _offline = OfflinePages::new(&plan);
+    plan.metronome = request.metronome;
+    plan.cycle = None;
+    let start = plan.map.sample_at_tick(request.start_tick, rate);
+    let end_tick = request.end_tick.unwrap_or_else(|| project.content_end());
+    let end = plan
+        .map
+        .sample_at_tick(end_tick.max(request.start_tick), rate);
+    let stats = plan.stats;
+    let block = request.block_frames.max(1);
+    let (mut handle, mut engine) = engine::create(rate, block, plan);
+    engine.set_clip_output(false);
+    engine.enable_measurement();
+    handle.send(TransportCommand::Play {
+        from_tick: Some(request.start_tick),
+        count_in: false,
+        pre_roll: false,
+    });
+    let frames = (end - start) as usize;
+    let mut no_midi = NoMidi;
+    let midi: &mut dyn MidiSink = match midi {
+        Some(m) => m,
+        None => &mut no_midi,
+    };
+    let mut buf = vec![0.0f32; block * 2];
+    let mut peak = [0.0f32; 2];
+    let mut sum = [0.0f64; 2];
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut done = 0usize;
+    let mut streaming_errors = 0;
+    while done < frames {
+        let n = block.min(frames - done);
+        let chunk = &mut buf[..n * 2];
+        // Offline rendering may wait for IO; the RT callback never does.
+        if engine.prepare_media(start + done as u64, n).is_err() {
+            streaming_errors += 1;
         }
-    }
-
-    /// Renders `frames` (≤ [`MAX_BLOCK_FRAMES`]) into the scratch buffer and
-    /// meters it. Real-time safe.
-    fn render_chunk(&mut self, frames: usize) {
-        debug_assert!(frames <= MAX_BLOCK_FRAMES);
-        self.apply_commands();
-        let channels = self.channels;
-        // 1. Silence: the engine always produces a defined signal.
-        for channel in self.scratch.as_chunks_mut::<MAX_BLOCK_FRAMES>().0 {
-            channel[..frames].fill(0.0);
+        let before = handle.shared().stats().streaming_underruns;
+        engine.process(chunk, 2, midi);
+        if handle.shared().stats().streaming_underruns > before {
+            streaming_errors += 1;
         }
-        // 2. Opt-in test tone.
-        if self.tone.audible() {
-            let target_channel = match self.tone.settings.channels {
-                ToneChannels::All => None,
-                ToneChannels::Only { channel } => Some(usize::from(channel)),
-            };
-            for frame in 0..frames {
-                let gain = self.tone.next_gain();
-                let value = ((self.tone.phase * std::f64::consts::TAU).sin() as f32) * gain;
-                self.tone.phase += self.tone.increment;
-                if self.tone.phase >= 1.0 {
-                    self.tone.phase -= 1.0;
+        for frame in chunk.as_chunks::<2>().0 {
+            for ch in 0..2 {
+                let s = frame[ch];
+                peak[ch] = peak[ch].max(s.abs());
+                sum[ch] += f64::from(s) * f64::from(s);
+                for b in s.to_bits().to_le_bytes() {
+                    hash ^= u64::from(b);
+                    hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
                 }
-                for channel in 0..channels {
-                    if target_channel.is_none_or(|c| c == channel) {
-                        self.scratch[channel * MAX_BLOCK_FRAMES + frame] += value;
-                    }
+            }
+        }
+        sink(chunk);
+        done += n;
+    }
+    let n = frames.max(1) as f64;
+    let measures = engine.measurements().unwrap_or(&[]);
+    let tracks = project
+        .tracks
+        .iter()
+        .zip(measures)
+        .map(|(t, m)| TrackLevel {
+            name: t.name.clone(),
+            peak: m.peak,
+            rms: (m.sum_squares / (2.0 * m.frames.max(1) as f64)).sqrt(),
+        })
+        .collect();
+    drop(engine);
+    handle.poll();
+    RenderReport {
+        sample_rate: rate,
+        frames: frames as u64,
+        seconds: frames as f64 / f64::from(rate),
+        start_tick: request.start_tick,
+        end_tick,
+        block_frames: block as u64,
+        peak,
+        rms: [(sum[0] / n).sqrt(), (sum[1] / n).sqrt()],
+        tracks,
+        clips: stats.clips as u64,
+        missing_media: stats.missing_media as u64,
+        streaming_errors,
+        checksum: format!("{hash:016x}"),
+    }
+}
+
+/// Encodes interleaved `f32` samples as a 32-bit float WAVE file.
+pub fn encode_wav_f32(samples: &[f32], channels: u16, rate: u32) -> Vec<u8> {
+    let data_len = (samples.len() * 4) as u32;
+    let frames = (samples.len() / usize::from(channels.max(1))) as u32;
+    let mut out = Vec::with_capacity(58 + samples.len() * 4);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(4 + 26 + 12 + 8 + data_len).to_le_bytes());
+    out.extend_from_slice(b"WAVE");
+    out.extend_from_slice(b"fmt ");
+    out.extend_from_slice(&18u32.to_le_bytes());
+    out.extend_from_slice(&3u16.to_le_bytes()); // WAVE_FORMAT_IEEE_FLOAT
+    out.extend_from_slice(&channels.to_le_bytes());
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&(rate * u32::from(channels) * 4).to_le_bytes());
+    out.extend_from_slice(&(channels * 4).to_le_bytes());
+    out.extend_from_slice(&32u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes()); // cbSize
+    out.extend_from_slice(b"fact");
+    out.extend_from_slice(&4u32.to_le_bytes());
+    out.extend_from_slice(&frames.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_len.to_le_bytes());
+    for s in samples {
+        out.extend_from_slice(&s.to_le_bytes());
+    }
+    out
+}
+
+/// Writes a render and its JSON report (`<path>.json`) atomically.
+pub fn export(path: &Path, rendered: &Rendered) -> std::io::Result<std::path::PathBuf> {
+    if rendered.report.streaming_errors != 0 {
+        return Err(std::io::Error::other(
+            "render aborted: disk-cache reads failed",
+        ));
+    }
+    let wav = encode_wav_f32(&rendered.samples, 2, rendered.report.sample_rate);
+    elyvon_core::fs::atomic_write(path, &wav)?;
+    let mut report_path = path.as_os_str().to_owned();
+    report_path.push(".json");
+    let report_path = std::path::PathBuf::from(report_path);
+    let json = serde_json::to_vec_pretty(&rendered.report).map_err(std::io::Error::other)?;
+    elyvon_core::fs::atomic_write(&report_path, &json)?;
+    Ok(report_path)
+}
+
+// Offline callers prepare exactly the next block. Speculative reads must not
+// evict pages from other clips in that prepared working set. Concurrent live
+// playback should use independent MediaBuffers (the desktop export guards it).
+struct OfflinePages(Vec<(Arc<MediaBuffer>, bool)>);
+impl OfflinePages {
+    fn new(plan: &crate::plan::PlaybackPlan) -> Self {
+        let mut held: Vec<(Arc<MediaBuffer>, bool)> = Vec::new();
+        for track in &plan.tracks {
+            for segment in &track.segments {
+                if let Some(stream) = &segment.media.stream
+                    && !held.iter().any(|(m, _)| Arc::ptr_eq(m, &segment.media))
+                {
+                    let old = stream.set_read_ahead(false);
+                    held.push((Arc::clone(&segment.media), old));
                 }
             }
-            if !self.tone.audible() {
-                self.tone.phase = 0.0;
+        }
+        Self(held)
+    }
+}
+impl Drop for OfflinePages {
+    fn drop(&mut self) {
+        for (media, old) in &self.0 {
+            if let Some(stream) = &media.stream {
+                stream.set_read_ahead(*old);
             }
         }
-        // 3. Meters (pre-clamp so overs are visible).
-        for (channel, samples) in self
-            .scratch
-            .as_chunks::<MAX_BLOCK_FRAMES>()
-            .0
-            .iter()
-            .enumerate()
-        {
-            let peak = samples[..frames].iter().fold(0.0f32, |peak, v| {
-                if v.is_nan() { 1.0 } else { peak.max(v.abs()) }
-            });
-            self.telemetry.hold_output_peak(channel, peak);
-        }
     }
+}
 
-    fn advance(&mut self, frames: usize) {
-        let frames = frames as u64;
-        self.clock = self.clock.saturating_add(frames);
-        if self.playing {
-            self.transport = self.transport.saturating_add(frames);
-        }
-    }
-
-    fn publish(&self) {
-        self.telemetry.publish_clock(
-            self.clock,
-            self.transport,
-            self.playing,
-            self.tone.audible(),
-        );
-    }
-
-    /// Fills an interleaved device buffer of `device_channels` channels.
-    /// Real-time safe for every [`OutputSample`] type.
-    pub fn process_interleaved<S: OutputSample>(&mut self, out: &mut [S], device_channels: usize) {
-        if device_channels == 0 {
+/// Bounded-memory WAV export. Samples go directly to a temporary file; source
+/// files and an existing successful export remain intact on read/write failure.
+pub fn export_project(
+    path: &Path,
+    project: &Project,
+    media: &dyn Fn(MediaId) -> Option<Arc<MediaBuffer>>,
+    request: RenderRequest,
+) -> std::io::Result<RenderReport> {
+    use std::io::{Seek, SeekFrom, Write};
+    let map = project
+        .transport
+        .tempo_map()
+        .map_err(std::io::Error::other)?;
+    let start = map.sample_at_tick(request.start_tick, request.sample_rate);
+    let end = map.sample_at_tick(
+        request.end_tick.unwrap_or_else(|| project.content_end()),
+        request.sample_rate,
+    );
+    let frames = end.saturating_sub(start);
+    let size = frames
+        .checked_mul(8)
+        .filter(|n| *n <= u64::from(u32::MAX) - 58)
+        .ok_or_else(|| {
+            std::io::Error::other(
+                "diagnostic WAV exceeds the 4 GiB format limit; export a shorter range",
+            )
+        })? as u32;
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+    temp.write_all(&encode_wav_f32(&[], 2, request.sample_rate))?;
+    let mut bytes = Vec::with_capacity(request.block_frames.max(1).saturating_mul(8));
+    let mut failure = None;
+    let report = render_stream(project, media, request, None, &mut |block| {
+        if failure.is_some() {
             return;
         }
-        let total = out.len() / device_channels;
-        let mut done = 0;
-        let mut clipped = 0;
-        while done < total {
-            let frames = (total - done).min(MAX_BLOCK_FRAMES);
-            self.render_chunk(frames);
-            let mut planar: [&[f32]; MAX_ENGINE_CHANNELS] = [&[]; MAX_ENGINE_CHANNELS];
-            for (slot, channel) in planar
-                .iter_mut()
-                .zip(self.scratch.as_chunks::<MAX_BLOCK_FRAMES>().0)
-            {
-                *slot = &channel[..frames];
-            }
-            let start = done * device_channels;
-            clipped += interleave_into(
-                &planar[..self.channels],
-                frames,
-                &mut out[start..start + frames * device_channels],
-                device_channels,
-            );
-            self.advance(frames);
-            done += frames;
+        bytes.clear();
+        for sample in block {
+            bytes.extend_from_slice(&sample.to_le_bytes());
         }
-        // Samples left over by a buffer that is not a whole number of frames.
-        for s in &mut out[total * device_channels..] {
-            *s = S::SILENCE;
+        if let Err(e) = temp.write_all(&bytes) {
+            failure = Some(e);
         }
-        self.telemetry.add_clipped(clipped);
-        self.publish();
+    });
+    if let Some(e) = failure {
+        return Err(e);
     }
-
-    /// Fills planar `f32` output buffers (one slice per channel, equal length).
-    /// Values are clamped exactly like a device stream. Real-time safe.
-    pub fn process_planar(&mut self, outputs: &mut [&mut [f32]]) {
-        let total = outputs.iter().map(|c| c.len()).min().unwrap_or(0);
-        let mut done = 0;
-        let mut clipped = 0u64;
-        while done < total {
-            let frames = (total - done).min(MAX_BLOCK_FRAMES);
-            self.render_chunk(frames);
-            for (channel, out) in outputs.iter_mut().enumerate() {
-                let dst = &mut out[done..done + frames];
-                if channel < self.channels {
-                    let src = &self.scratch[channel * MAX_BLOCK_FRAMES..][..frames];
-                    for (d, s) in dst.iter_mut().zip(src) {
-                        let (v, was_clipped) = crate::format::clamp_unit(*s);
-                        clipped += u64::from(was_clipped);
-                        *d = v;
-                    }
-                } else {
-                    dst.fill(0.0);
-                }
-            }
-            self.advance(frames);
-            done += frames;
-        }
-        self.telemetry.add_clipped(clipped);
-        self.publish();
+    if report.streaming_errors != 0 {
+        return Err(std::io::Error::other(
+            "disk-cache reads failed; previous export preserved",
+        ));
     }
+    let mut header = encode_wav_f32(&[], 2, request.sample_rate);
+    header[4..8].copy_from_slice(&(50 + size).to_le_bytes());
+    header[46..50].copy_from_slice(&(frames as u32).to_le_bytes());
+    header[54..58].copy_from_slice(&size.to_le_bytes());
+    temp.seek(SeekFrom::Start(0))?;
+    temp.write_all(&header)?;
+    temp.flush()?;
+    temp.as_file().sync_all()?;
+    temp.persist(path).map_err(|e| e.error)?;
+    let mut report_path = path.as_os_str().to_owned();
+    report_path.push(".json");
+    elyvon_core::fs::atomic_write(
+        Path::new(&report_path),
+        &serde_json::to_vec_pretty(&report).map_err(std::io::Error::other)?,
+    )?;
+    Ok(report)
 }

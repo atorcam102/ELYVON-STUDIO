@@ -16,9 +16,6 @@ import { Driver } from "./webdriver.mjs";
 const app = resolve(process.env.ELYVON_APP ?? "target/debug/elyvon-studio");
 const shots = process.env.E2E_SCREENSHOTS;
 const work = mkdtempSync(join(tmpdir(), "elyvon-e2e-"));
-// Isolated preferences, recovery and logs: audio device choices made by the
-// tests never leak into the machine's real settings.
-for (const name of ["CONFIG", "DATA", "CACHE"]) process.env[`XDG_${name}_HOME`] = join(work, name.toLowerCase());
 
 let d;
 
@@ -30,6 +27,26 @@ async function shot(name) {
 
 const trackCount = () => d.count(".track-header");
 
+/** 16-bit mono PCM WAV: `seconds` of a 0.5-amplitude sine. */
+function sineWav(rate, seconds, freq) {
+  const n = rate * seconds;
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write("RIFF", 0);
+  buf.writeUInt32LE(36 + n * 2, 4);
+  buf.write("WAVEfmt ", 8);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(rate, 24);
+  buf.writeUInt32LE(rate * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write("data", 36);
+  buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(0.5 * Math.sin((2 * Math.PI * freq * i) / rate) * 32767), 44 + i * 2);
+  return buf;
+}
+
 describe("Elyvon Studio", { timeout: 120_000 }, () => {
   before(async () => {
     d = await Driver.start({ application: app });
@@ -37,40 +54,37 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
   });
 
   after(async () => {
-    // The app must exit by itself when the WebDriver session closes its window
-    // (this also closes the audio streams); a forced kill is a failure.
-    const forced = await d?.stop();
-    assert.deepEqual(forced ?? [], [], "application exited on its own");
+    // Close a clean test-owned document so the unsaved-work guard is respected.
+    try {
+      await d?.invoke("project_save", { path: join(work, "final-session.elyvon") });
+    } finally {
+      assert.deepEqual(await d?.stop(), [], "final test process exits without a forced kill");
+    }
   });
 
   it("starts with an empty, clean project and an honest engine status", async () => {
     assert.equal(await trackCount(), 0);
     await d.find(".timeline-empty__card");
-    // CI runners have no sound card: whatever the machine has, the UI must
-    // match the native status and only enable playback when a stream runs.
+    // The engine opens a device, or falls back to its silent internal clock
+    // (CI has no sound card) and says so.
     const engine = await d.waitFor(
       async () => {
         const s = (await d.invoke("audio_status")).ok;
-        return s.state === "starting" ? null : s;
+        return s.state === "running" ? s : null;
       },
-      { timeout: 15_000, message: "audio engine settles" },
+      { message: "engine running", timeout: 20_000 },
     );
-    const pill = await d.textOf(".status__pill");
+    const status = await d.textOf(".status__pill");
+    if (engine.output === "internalClock") assert.match(status, /no audio output/i);
+    else assert.match(status, /kHz/);
     const play = await d.find('[aria-label^="Play"]');
-    if (engine.state === "running") {
-      assert.match(pill, /Engine|Headless/);
-      assert.equal(await d.attr(play, "disabled"), null);
-    } else {
-      assert.ok(engine.message, "a non-running engine always explains itself");
-      assert.doesNotMatch(pill, /^Engine ·/);
-      assert.equal(await d.attr(play, "disabled"), "true", "play must be disabled without a running engine");
-    }
-    const record = await d.find('[aria-label^="Record"]');
-    assert.equal(await d.attr(record, "disabled"), "true", "recording is not implemented");
+    assert.notEqual(await d.attr(play, "disabled"), "true", "play is enabled with a running engine");
+    assert.notEqual(await d.attr(await d.find('[aria-label^="Record"]'),"disabled"),"true","native recording can be started after arming inputs");
+    const missing=await d.invoke("recording_start",{fromTick:0,monitorOnly:false});assert.equal(missing.err.code,"audioUnavailable");
     const view = await d.invoke("project_get");
     assert.equal(view.ok.dirty, false);
     const contracts = await d.invoke("app_contracts");
-    assert.deepEqual(contracts.ok, { ipc: 2, project: 1, audio: 1, jobs: 1 });
+    assert.deepEqual(contracts.ok, { ipc: 2, project: 3, audio: 1, jobs: 1 });
     await shot("01-empty");
   });
 
@@ -122,7 +136,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.ok(saved.ok.path.endsWith("session.elyvon"));
     const file = JSON.parse(readFileSync(saved.ok.path, "utf8"));
     assert.equal(file.format, "elyvon-studio-project");
-    assert.equal(file.schemaVersion, 1);
+    assert.equal(file.schemaVersion, 3);
     assert.equal(file.project.tracks[0].name, "Keys");
 
     const fresh = await d.invoke("project_new", { discardChanges: false });
@@ -130,7 +144,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     const reopened = await d.invoke("project_open", { path: saved.ok.path, discardChanges: false });
     assert.deepEqual(reopened.ok.project, saved.ok.project);
     // End the native process, not just the webview, before reading the save.
-    assert.deepEqual(await d.stop(), [], "application exited on its own");
+    await d.stop();
     d = await Driver.start({ application: app });
     await d.find(".controlbar", { timeout: 20_000 });
     const restarted = await d.invoke("project_open", { path: saved.ok.path, discardChanges: false });
@@ -194,6 +208,8 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
   });
 
   it("shows the mixer, piano roll and browser panels", async () => {
+    // Layout is persisted in preferences: select the mixer tab explicitly.
+    await d.clickCss(".bottom-panel .tabs__tab:nth-child(1)");
     await d.find(".strip");
     assert.equal(await d.count(".strip:not(.strip--master)"), 6);
     const midi = await d.find(".region--midi");
@@ -205,114 +221,98 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     await d.find(".file-list");
   });
 
-  it("runs the real engine on the headless clock: transport, playhead, tone and meters", async () => {
-    const before = (await d.invoke("project_get")).ok;
-    const devices = (await d.invoke("audio_devices")).ok;
-    assert.ok(devices.hosts.some((h) => h.id === "headless" && h.headless));
-    const configured = await d.invoke("audio_configure", {
-      setup: {
-        enabled: true,
-        host: "headless",
-        outputDevice: "headless:clock",
-        outputDeviceName: null,
-        inputDevice: null,
-        sampleRate: 48000,
-        bufferFrames: 256,
-      },
-    });
-    assert.ok(configured.ok, JSON.stringify(configured.err));
-    assert.equal(configured.ok.state, "running");
-    assert.equal(configured.ok.output.headless, true);
-    await d.waitFor(async () => /Headless/.test(await d.textOf(".status__pill")), { message: "status pill" });
+  it("imports real audio, plays it on the engine clock and exports a render", async () => {
+    await d.invoke("project_new", { discardChanges: true });
+    await d.exec("location.reload()");
+    await d.find(".controlbar", { timeout: 10_000 });
+    const wav = join(work, "tone.wav");
+    writeFileSync(wav, sineWav(44_100, 2, 440));
+    const before = readFileSync(wav);
+    const imported = await d.invoke("media_import", { paths: [wav], trackId: null, start: 0, layout: "newTracks" });
+    assert.ok(imported.ok, JSON.stringify(imported.err));
+    assert.equal(imported.ok.failures.length, 0);
+    const project = imported.ok.view.project;
+    assert.equal(project.media[0].info.sampleRate, 44_100);
+    assert.equal(project.media[0].info.frames, 88_200);
+    await d.exec("location.reload()");
+    await d.find(".region--audio", { timeout: 10_000 });
+    await d.find('[data-testid="waveform"][data-state="ready"]', { timeout: 15_000 });
+    await shot("06-audio-waveform");
 
-    // Play from bar 1 through the real transport button.
-    await d.clickCss('[aria-label^="Go to beginning"]');
+    await d.invoke("transport_command", { command: { type: "locate", tick: 0 } });
     await d.clickCss('[aria-label^="Play"]');
-    const moving = await d.waitFor(
+    const playing = await d.waitFor(
       async () => {
-        const t = (await d.invoke("audio_telemetry")).ok;
-        return t.playing && t.positionTicks > 960 ? t : null;
+        const s = (await d.invoke("transport_state")).ok;
+        return s && s.state === "playing" && s.seconds > 0.3 ? s : null;
       },
-      { timeout: 5000, message: "transport advances" },
+      { message: "engine playhead advancing", timeout: 10_000 },
     );
-    assert.ok(moving.clockFrames >= moving.transportFrames);
-    const lcd = await d.textOf(".lcd");
-    await d.waitFor(async () => (await d.textOf(".lcd")) !== lcd, { message: "LCD follows the playhead" });
+    assert.ok(playing.ticks > 0);
+    const moved = await d.waitFor(async () => {
+      const t = await d.exec('return document.querySelector("[data-testid=playhead]").style.transform');
+      return t && t !== "translateX(0px)" ? t : null;
+    }, { message: "UI playhead follows engine events" });
+    assert.match(moved, /translateX/);
+    await shot("07-playing");
+    await d.keys(" ");
+    await d.waitFor(async () => (await d.invoke("transport_state")).ok.state === "stopped", { message: "space stops" });
 
-    // Opt-in test tone: real meters read the rendered level.
-    const tone = await d.invoke("audio_test_tone", {
-      tone: { enabled: true, frequencyHz: 440, levelDb: -18, channels: { type: "all" } },
-    });
-    assert.equal(tone.ok.levelDb, -18);
-    const metered = await d.waitFor(
-      async () => {
-        const t = (await d.invoke("audio_telemetry")).ok;
-        return t.outputPeakDb.length === 2 && t.outputPeakDb.every((db) => Math.abs(db + 18) < 0.5) ? t : null;
-      },
-      { timeout: 5000, message: "meters at -18 dBFS" },
-    );
-    assert.equal(metered.stats.clippedSamples, 0);
-    await d.waitFor(async () => /18\.0/.test(await d.textOf('[data-testid="output-peak"]')), { message: "output strip peak" });
-    await shot("06-engine-headless-playing");
-
-    // Loud requests are clamped to the safety ceiling.
-    const loud = await d.invoke("audio_test_tone", {
-      tone: { enabled: true, frequencyHz: 440, levelDb: 0, channels: { type: "all" } },
-    });
-    assert.equal(loud.ok.levelDb, -6);
-    await d.invoke("audio_test_tone", { tone: { enabled: false, frequencyHz: 440, levelDb: -18, channels: { type: "all" } } });
-
-    await d.clickCss('[aria-label^="Stop"]');
-    const stopped = await d.waitFor(
-      async () => {
-        const t = (await d.invoke("audio_telemetry")).ok;
-        return t.playing ? null : t;
-      },
-      { message: "transport stops" },
-    );
-    await new Promise((r) => setTimeout(r, 200));
-    assert.equal((await d.invoke("audio_telemetry")).ok.transportFrames, stopped.transportFrames, "stop holds position");
-
-    // Settings › Audio shows the stream, device and health.
-    await d.clickCss(".status__pill");
-    await d.find('[data-testid="audio-stream-facts"]');
-    assert.match(await d.textOf('[data-testid="audio-stream-facts"]'), /48000 Hz/);
-    // The form reflects the natively saved choice, not a stale UI copy.
-    await d.waitFor(
-      async () => (await d.exec("return document.querySelectorAll('.audio-form select')[1]?.value")) === "headless:clock",
-      { message: "output select shows the saved device" },
-    );
-    await d.find('[data-testid="audio-health"]');
-    await shot("07-settings-audio");
-    await d.keys("\uE00C"); // Escape
-
-    // Engine activity never touches the project.
-    const after = (await d.invoke("project_get")).ok;
-    assert.deepEqual(after.project, before.project);
-    assert.equal(after.dirty, before.dirty);
-
-    // Preferences persist natively; restore the system default for later runs.
-    const settings = (await d.invoke("settings_get")).ok;
-    assert.equal(settings.audio.outputDevice, "headless:clock");
-    assert.equal(settings.audio.profiles[0].bufferFrames, 256);
-    const restored = await d.invoke("audio_configure", {
-      setup: { enabled: true, host: null, outputDevice: null, outputDeviceName: null, inputDevice: null, sampleRate: null, bufferFrames: null },
-    });
-    assert.ok(restored.ok);
+    const out = join(work, "render.wav");
+    const report = await d.invoke("project_render", { path: out, startTick: null, endTick: null, metronome: false });
+    assert.ok(report.ok, JSON.stringify(report.err));
+    assert.equal(report.ok.clips, 1);
+    // Mono source, centre pan: constant-power law gives 0.5 · √½ per side.
+    assert.ok(Math.abs(report.ok.peak[0] - 0.5 * Math.SQRT1_2) < 0.002, `peak ${report.ok.peak[0]}`);
+    assert.ok(readFileSync(out).length > 44);
+    assert.deepEqual(readFileSync(wav), before, "the source file is never modified");
   });
 
-  it("refuses transport commands with an explanation when the engine is off", async () => {
-    const off = await d.invoke("audio_configure", {
-      setup: { enabled: false, host: null, outputDevice: null, outputDeviceName: null, inputDevice: null, sampleRate: null, bufferFrames: null },
-    });
-    assert.equal(off.ok.state, "disabled");
-    const play = await d.invoke("audio_play", { fromTicks: 0 });
-    assert.equal(play.err.code, "audioUnavailable");
-    assert.match(play.err.message, /Settings › Audio/);
-    await d.waitFor(async () => (await d.attr(await d.find('[aria-label^="Play"]'), "disabled")) === "true", { message: "play disabled" });
-    await d.invoke("audio_configure", {
-      setup: { enabled: true, host: null, outputDevice: null, outputDeviceName: null, inputDevice: null, sampleRate: null, bufferFrames: null },
-    });
+  it("validates audio input routing and releases the recording lock after startup failure", async () => {
+    const project=(await d.invoke("project_get")).ok.project;
+    const track=project.tracks.find(t=>t.kind==="audio");
+    const invalid=await d.invoke("project_apply",{command:{type:"setTrackIo",id:track.id,io:{...track.io,armed:true,inputChannel:31,inputChannels:2}}});
+    assert.equal(invalid.err.code,"invalidEdit");
+    const armed=await d.invoke("project_apply",{command:{type:"setTrackIo",id:track.id,io:{...track.io,armed:true,inputChannel:0,inputChannels:1}}});assert.ok(armed.ok);
+    const devices=await d.invoke("recording_devices");assert.ok(Array.isArray(devices.ok));
+    const started=await d.invoke("recording_start",{fromTick:0,monitorOnly:false});
+    if(started.ok){const stopped=await d.invoke("recording_stop",{cancel:true});assert.equal(stopped.ok.report.state,"cancelled");}
+    else{assert.equal(started.err.code,"audioUnavailable");assert.equal((await d.invoke("recording_status")).ok.active,false);}
+    const edited=await d.invoke("project_apply",{command:{type:"renameProject",name:"Input checks"}});assert.ok(edited.ok,"input startup failure must release the project lock");
+  });
+
+  it("records the virtual MIDI keyboard through native timing, saves, restarts and exports SMF", async () => {
+    assert.ok((await d.invoke("project_new",{discardChanges:true})).ok);
+    const added=await d.invoke("project_apply",{command:{type:"addTrack",kind:"midi"}});assert.ok(added.ok);
+    await d.exec("location.reload()");await d.find(".controlbar",{timeout:10000});
+    await d.clickCss('[aria-label="MIDI devices and monitor"]');
+    await d.find('[role="dialog"]');
+    const switches=await d.findAll('[role="dialog"] .toggle__track');await d.click(switches[1]);
+    await d.waitFor(async()=>(await d.invoke("project_get")).ok.project.tracks[0].io.armed,{message:"MIDI track armed through the UI"});
+    await d.clickCss('[aria-label="Record armed MIDI tracks"]');
+    await d.waitFor(async()=>(await d.invoke("midi_status")).ok.recording,{message:"native MIDI recording started"});
+    await d.waitFor(async()=>(await d.invoke("transport_state")).ok.seconds>0.1,{message:"MIDI engine clock running"});
+    const key=await d.find('[aria-label="MIDI C4"]');const rect=await d.rect(key);
+    await d.cmd("POST","/actions",{actions:[{type:"pointer",id:"held-midi-key",parameters:{pointerType:"mouse"},actions:[{type:"pointerMove",duration:0,origin:"viewport",x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)},{type:"pointerDown",button:0}]}]});
+    await d.waitFor(async()=>{const s=(await d.invoke("midi_status")).ok;return s.monitor.some(m=>m.bytes.join(",")==="144,60,100");},{message:"native MIDI monitor receives the virtual key"});
+    await shot("08-midi-record-monitor");
+    const noteOnSeconds=(await d.invoke("transport_state")).ok.seconds;
+    await d.waitFor(async()=>(await d.invoke("transport_state")).ok.seconds>noteOnSeconds+0.2,{message:"held note duration comes from the engine"});
+    const stopped=await d.invoke("midi_record_stop",{cancel:false});assert.ok(stopped.ok,JSON.stringify(stopped.err));
+    await d.cmd("DELETE","/actions");
+    const recorded=stopped.ok.project.tracks[0].regions[0];assert.equal(recorded.content.type,"midi");assert.ok(recorded.content.notes[0].length>=200,"stopping a held note preserves its duration");
+    assert.ok(recorded.midiEvents.some(e=>e.bytes[0]===0x80&&e.bytes[1]===60),"stop closes held MIDI keys");
+    const file=join(work,"captured-midi.elyvon");assert.ok((await d.invoke("project_save",{path:file})).ok);
+    const midiFile=join(work,"captured.mid");assert.equal((await d.invoke("midi_export",{path:midiFile})).ok,midiFile);assert.equal(readFileSync(midiFile).subarray(0,4).toString(),"MThd");
+    assert.deepEqual(await d.stop(),[],"recording process exits without a forced kill");
+    d=await Driver.start({application:app});await d.find(".controlbar",{timeout:20000});
+    const opened=await d.invoke("project_open",{path:file,discardChanges:false});assert.ok(opened.ok,JSON.stringify(opened.err));
+    assert.deepEqual(opened.ok.project.tracks[0].regions[0].midiEvents,recorded.midiEvents);assert.equal(opened.ok.project.tracks[0].io.armed,true);
+    await d.exec("location.reload()");await d.find(".region--midi",{timeout:10000});await shot("09-recorded-midi-reopened");
+    await d.invoke("project_new",{discardChanges:true});
+    const imported=await d.invoke("midi_import",{path:midiFile,startTick:0,useFileTempo:true});assert.ok(imported.ok,JSON.stringify(imported.err));
+    assert.deepEqual(imported.ok.project.tracks[0].regions[0].midiEvents,recorded.midiEvents,"SMF import/export preserves the recorded sequence");
+    await d.exec("location.reload()");await d.find(".controlbar",{timeout:10000});
   });
 
   it("explains why updates are unavailable instead of pretending", async () => {

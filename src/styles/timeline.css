@@ -918,28 +918,150 @@
   white-space: nowrap;
 }
 
-/* Real device output meters (Phase 03). */
-.strip--output {
-  justify-content: flex-start;
+/* ---------- Phases 04/05: engine playhead, metre grid, markers, audio ---------- */
+
+.cursor-line {
+  left: 0;
+  will-change: transform;
 }
 
-.strip--output .strip__fader-row--output {
-  gap: 3px;
+.cursor-line.is-playing {
+  background: var(--playhead, #fff);
+  opacity: 1;
 }
 
-.strip--output .strip__unavailable {
-  flex: none;
-  padding: 6px 4px;
+.lanes__grid {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
 }
 
-.strip--output.is-unavailable .strip__fader-row {
+.ruler .ruler__ticks {
+  right: auto;
+}
+
+.lane-highlight.is-drop {
+  background: rgb(80 160 255 / 0.18);
+  box-shadow: inset 0 0 0 1px rgb(80 160 255 / 0.6);
+}
+
+.ruler__punch {
+  position: absolute;
+  bottom: 0;
+  height: 3px;
+  background: var(--danger);
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.ruler__meter {
+  position: absolute;
+  top: 12px;
+  padding-left: 3px;
+  font-size: 9px;
+  color: var(--cycle-region);
+  pointer-events: none;
+}
+
+.ruler__marker {
+  position: absolute;
+  top: 0;
+  max-width: 120px;
+  height: 12px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0 3px 3px 0;
+  font-size: 9px;
+  line-height: 12px;
+  color: #111;
+  background: #f0c34a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.marker-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgb(240 195 74 / 0.35);
+  pointer-events: none;
+}
+
+.region.is-muted .region__body {
   opacity: 0.45;
 }
 
-.strip__db-box--peak.is-clipped {
-  color: #ff6b61;
+.region__waveform {
+  position: absolute;
+  top: 1px;
+  height: calc(100% - 2px);
+  pointer-events: none;
 }
 
-.meter--live .meter__bar {
-  transition: transform 60ms linear;
+.region__waveform.is-pending {
+  opacity: 0.4;
+}
+
+.region__fades {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.region__fades polyline {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.9);
+  stroke-width: 1;
+}
+
+.region__placeholder--error {
+  color: #fff;
+  background: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.region__trim {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 2;
+}
+
+.region__trim--start {
+  left: 0;
+}
+
+.region__trim--end {
+  right: 0;
+}
+
+.region__trim:hover {
+  background: rgb(255 255 255 / 0.25);
+}
+
+/* Tempo, metre and locators dialog */
+.timeline-settings .ts-section {
+  padding: 8px 0 12px;
+  border-bottom: 1px solid var(--line, rgb(255 255 255 / 0.08));
+}
+
+.timeline-settings .ts-section h3 {
+  margin: 0 0 8px;
+  font-size: var(--fs-md, 13px);
+}
+
+.timeline-settings .ts-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  flex-wrap: wrap;
 }

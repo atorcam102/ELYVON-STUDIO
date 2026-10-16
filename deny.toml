@@ -17,6 +17,9 @@ allow = [
   "0BSD", "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
+# midly is a pure-Rust SMF parser under the permissive public-domain Unlicense.
+# Keep this specific to the reviewed parser/version; other new licences fail.
+exceptions = [{ name = "midly", version = "=0.5.3", allow = ["Unlicense"] }]
 
 [licenses.private]
 # Elyvon's 5 unpublished workspace crates have no distribution licence yet.

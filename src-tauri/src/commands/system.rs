@@ -2,6 +2,7 @@
 
 use std::sync::atomic::Ordering;
 
+use elyvon_audio::engine::EngineStatus;
 use elyvon_core::jobs::{ContractVersions, IPC_CONTRACT_VERSION, JOB_CONTRACT_VERSION};
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -56,6 +57,11 @@ pub async fn app_contracts() -> IpcResult<ContractVersions> {
 }
 
 #[tauri::command]
+pub async fn audio_status(state: State<'_, AppState>) -> IpcResult<EngineStatus> {
+    Ok(state.audio.status())
+}
+
+#[tauri::command]
 pub async fn settings_get(state: State<'_, AppState>) -> IpcResult<Settings> {
     Ok(state.settings().clone())
 }
@@ -63,18 +69,8 @@ pub async fn settings_get(state: State<'_, AppState>) -> IpcResult<Settings> {
 #[tauri::command]
 pub async fn settings_set(app: AppHandle, settings: Settings) -> IpcResult<Settings> {
     let state = app.state::<AppState>();
-    let settings = {
-        let mut current = state.settings();
-        // Audio preferences change only through `audio_configure`, so a UI
-        // holding an older copy can never overwrite the device choice.
-        let settings = Settings {
-            audio: current.audio.clone(),
-            ..settings
-        }
-        .sanitized();
-        *current = settings.clone();
-        settings
-    };
+    let settings = settings.sanitized();
+    *state.settings() = settings.clone();
     let dir = state.paths.config_dir.clone();
     let to_save = settings.clone();
     tauri::async_runtime::spawn_blocking(move || to_save.save(&dir))
@@ -92,9 +88,11 @@ pub async fn settings_set(app: AppHandle, settings: Settings) -> IpcResult<Setti
 #[tauri::command]
 pub async fn app_quit(app: AppHandle, discard_changes: bool) -> IpcResult<()> {
     let state = app.state::<AppState>();
+    state.ensure_editable()?;
     if state.is_dirty() && !discard_changes {
         return Err(IpcError::unsaved());
     }
+    state.midi.shutdown();
     log::info!("quitting");
     state.exit_confirmed.store(true, Ordering::SeqCst);
     state.clear_recovery();

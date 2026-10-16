@@ -7,18 +7,30 @@ section of each version into the GitHub release and into the update dialog.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-16
+
 ### Added
 
-- Native audio engine (Phase 03): real-time-safe engine core with transport, monotonic sample clock, silence rendering, opt-in test tone and real peak meters.
-- Audio devices through WASAPI (Windows), CoreAudio (macOS) and ALSA (Linux, reaching PipeWire/PulseAudio): device list with channels, sample rates, buffer sizes, formats and bit depth; per-device sample rate and buffer preferences.
-- Settings › Audio with stream details, test tone, input/output level meters and stream health (xruns, probable dropouts, late callbacks, clipping, load).
-- Play/stop from the control bar and the Space key; the playhead follows the engine. Tracks are not rendered yet.
-- Safe fallback when the preferred device is missing, automatic recovery after unplugging, and an explicit headless clock for machines without audio hardware.
-- Real output meters in the mixer.
+- Bounded disk streaming for large audio: packet decoding and FFT conversion into a PCM cache, worker page reads, real-time cache-miss counters and streamed diagnostic WAV export.
+- Audio input selection and per-track mono/stereo routing, record arming and monitoring; multitrack capture, count-in/pre-roll/punch/cycle, take selection and undo.
+- Checkpointed float WAV/BWF takes with recovery journals; interrupted, cancelled and finalized states, explicit disk backpressure, clipping and device-disconnection reporting.
+- Input/output latency estimates, manual recording offset, aligned-file loopback measurement, and tested graph latency planning/delay-line primitives (no hosted plug-in executor yet).
+- Native MIDI 1.0 ports, channel filters/routing, virtual ports on supporting Linux/macOS backends, a monitored virtual keyboard, MIDI recording and SMF 0/1 import/type-1 export.
+- MIDI panic on stop/locate/cycle/edits, bounded SysEx and queues, preserved source timestamps and measured scheduler lateness. Physical-device timing is unverified.
 
-### Fixed
+- Native audio engine: lock-free real-time playback with an audio device (cpal) or, without one, a silent internal clock that still drives the transport.
+- Transport: play, stop, pause, locate, cycle, count-in, pre-roll, metronome (accent, level), tap tempo, markers and a stored punch range.
+- Tempo map with tempo changes and time-signature changes (odd and compound metres); ruler, grid and snapping follow it; snap grid with triplets and swing.
+- Audio import (WAV, AIFF, FLAC, MP3, Ogg Vorbis; any sample rate) by dialog, drag and drop and the file browser; media pool with missing/changed-file detection and relink.
+- Real waveforms; non-destructive trim, split, duplicate, cut/copy/paste, region mute, gain, fades, crossfades between overlapping regions and looping.
+- Offline diagnostic render to 32-bit float WAV with a JSON level report.
+- Audio preferences: output device, buffer size, internal clock.
 
-- The declared minimum Rust version was 1.88, but the locked Tauri 2.12 crates need 1.90; it is now 1.90 and checked in CI.
+### Changed
+
+- Consolidated main's Phase 03 and the arrangement/recording engine into one production audio path; retained main's Rust 1.90 minimum and macOS microphone entitlements. The earlier separate diagnostic-tone panel and automatic reconnect manager are superseded (ADR 0006).
+- Project files are now schema 3, preserving input/MIDI routing, raw MIDI events and take metadata. Schema-1 and schema-2 projects migrate in memory; original fixtures and files remain unchanged.
+- Engine meters replace the simulated ones while the engine runs.
 
 ## [0.1.0] - 2026-10-15
 

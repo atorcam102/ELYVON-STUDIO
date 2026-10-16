@@ -8,7 +8,7 @@
 
 A desktop digital audio workstation in development, built with **Rust, Tauri 2, React and TypeScript**. It currently supports arranging tracks and regions, inspecting MIDI notes and managing `.elyvon` projects through a graphite studio interface.
 
-**Status: v0.1.0 · Phase 03 native audio engine (partial).** Project management and editing controls are implemented. The native audio engine opens your output device, runs the transport and plays an opt-in test tone with real meters. Tracks and regions are not rendered yet and recording is not available. Audio on physical hardware has not been validated yet; see the [audio engine notes](docs/AUDIO_ENGINE.md).
+**Development branch: Phases 04–07, partial hardware validation.** The native engine plays imported audio, streams large files, records armed audio inputs to recoverable WAV/BWF takes, and records/routes MIDI 1.0. These branch capabilities are not the published Windows preview. Physical audio/MIDI devices and other operating systems remain unverified here; see [the current validation report](docs/audit/PHASE-06-07.md).
 
 ![Elyvon Studio main interface: a six-track demo session, arrangement and mixer](docs/screenshots/01-arrangement-mixer.png)
 
@@ -25,8 +25,7 @@ A desktop digital audio workstation in development, built with **Rust, Tauri 2, 
 | **Tracks** | Create audio, instrument and MIDI tracks; rename, duplicate, delete, reorder, recolour and select multiple tracks. |
 | **Arrangement** | Navigate by bar, move the cursor, adjust zoom and use the grid and snapping. Move regions in time or between compatible tracks, and create empty MIDI regions. |
 | **Musical settings** | Change tempo, time signature and key; define and edit the project's cycle range. |
-| **Audio engine** | Choose the audio system, output, sample rate and buffer size in **Settings › Audio** (remembered per device); play a test tone; see real output/input levels, latency and stream health (xruns, dropouts, clipping). Play/stop with the control bar or Space: the transport and playhead run on the engine's sample clock. Missing or unplugged devices fall back safely without touching the project. |
-| **Mixer** | Adjust volume, pan, mute and solo per track. These settings are saved in the project; tracks are not rendered yet. The output strip shows real device output levels. |
+| **Mixer** | Adjust volume, pan, mute and solo per track. These settings are saved in the project; they do not process audio yet. |
 | **Piano roll** | Inspect a MIDI region's notes and their timing. This is a read-only preview. |
 | **File library** | Browse folders and open `.elyvon` projects from the left sidebar. |
 | **Workspace** | Show, hide and resize the library, inspector and editors; switch between mixer and piano roll. |
@@ -35,14 +34,13 @@ A desktop digital audio workstation in development, built with **Rust, Tauri 2, 
 
 ### Still to come
 
-- Rendering tracks and regions through the audio engine; recording.
-- Hardware validation of audio devices on each platform; JACK/native PipeWire and ASIO.
-- Audio file import and editing; export and bounce.
-- MIDI input/output and piano-roll note editing.
+- Physical-device validation across the intended operating systems; multi-device input clock drift and live input sample-rate conversion.
+- Advanced audio editing, final mixdown formats and bounce; import, region editing and diagnostic WAV export are implemented.
+- Piano-roll note editing, playback note chase and internal instruments; MIDI 2.0/UMP.
 - Built-in instruments, sampler, effects, buses and plug-in hosting.
 - Loop library with audio previews.
 
-Playback controls are enabled only while an audio stream is running; recording stays disabled. Effect slots are visual placeholders without processing. Track meters animate only when you explicitly enable **Simulate meters**; the output meter is real.
+Playback uses the native engine clock; the internal-clock fallback is labelled as silent. Audio recording requires a usable input device, armed tracks and matching sample rates. MIDI without an external output is explicitly monitor-only. Effect slots remain unavailable without hosted processors.
 
 The repository includes update infrastructure with version, platform and signature validation. The current unsigned preview **does not enable automatic updates**. See [releases and signing](docs/RELEASES.md) for configuration details.
 
@@ -54,14 +52,6 @@ The library sits on the left, with the selected track's properties and project c
 
 ![File library and inspector open beside the selected Keys track and arrangement](docs/screenshots/02-library-inspector.png)
 
-### Audio engine
-
-The real desktop binary playing on the headless clock (used by CI, no sound output) with the test tone; the output strip reads −18.0 dBFS and the playhead follows the engine. Captured by the native end-to-end tests.
-
-![Demo session playing on the native engine with the output meter at -18 dBFS](docs/screenshots/04-engine-headless-playing.png)
-
-![Settings › Audio with the open stream, format, buffer and device selection](docs/screenshots/05-settings-audio.png)
-
 ### Piano-roll preview
 
 Notes from the Keys track's **Chords** region appear below the arrangement. The **READ-ONLY PREVIEW** label identifies the editor's current scope.
@@ -69,6 +59,27 @@ Notes from the Keys track's **Chords** region appear below the arrangement. The 
 ![Piano roll showing notes from the Chords region beneath the demo arrangement](docs/screenshots/03-piano-roll.png)
 
 Screenshots show the main frontend from `main`, rendered in Chromium at **1280 × 800** using Tauri's official test bridge and demo-session data. They are not captures of the Windows installer. [Screenshot details](docs/screenshots/README.md).
+
+## Native recording and MIDI development workflow
+
+1. Run `npm ci` and `npm run tauri dev` with the native prerequisites below.
+2. For audio, add audio tracks, arm them in the inspector, choose their zero-based input channels
+   through the displayed one-based channel controls, and enable software monitoring as needed.
+   Open **Input** to select the input device and recording offset. **Record** starts the project
+   count-in/pre-roll/punch/cycle settings. **Stop** finalizes takes into one undoable project edit.
+3. Cycle passes form a take group. Select the active take in the region inspector. Save the
+   project to retain the media references. Interrupted `.partial.wav` takes are listed under
+   **Input → Recoverable takes** after restoring their project.
+4. Open **MIDI**, select a MIDI/instrument track and its ports/channel filters, then arm and record
+   it. The virtual keyboard feeds the native monitor or selected external port. **Panic** releases
+   held keys and sustain. MIDI and audio recording currently run as separate sessions.
+5. **MIDI → Import/Export MIDI** handles SMF 0/1. File tempo/metre maps are applied only when
+   importing into an empty project at the beginning. **Input → Measure aligned loopback files**
+   measures file correlation without automatically applying a possibly inappropriate IO offset.
+
+All engine, recording and MIDI scheduling work runs in Rust. Callback allocation tests, fault
+injection, SMF round trips and native GUI tests are part of the regular checks. A passing headless
+check does not establish microphone, interface or MIDI-keyboard behavior on physical hardware.
 
 ## Download for Windows
 
@@ -111,7 +122,6 @@ Windows installer builds do not establish installation or audio-device support o
 3. Select and arrange regions. Double-click an empty area on an instrument or MIDI track to create a MIDI region.
 4. Adjust volume, pan, mute and solo in the mixer. Select a MIDI region and open **Piano Roll** to inspect its notes.
 5. Save your project as an `.elyvon` file.
-6. Open **Settings › Audio** (or click the engine indicator at the top right) to pick your output and try **Play test tone** — turn your speakers down first. Press Space to play/stop.
 
 ### Main Windows shortcuts
 
@@ -124,7 +134,6 @@ Windows installer builds do not establish installation or audio-device support o
 | Delete selection | `Delete` |
 | Inspector / library / editors | `I` / `B` / `E` |
 | Mixer | `X` |
-| Play / stop | `Space` |
 | Toggle the cycle range | `L` |
 | Move the cursor to the start | `Home` |
 
@@ -162,7 +171,7 @@ Installer generation and publication are documented in [RELEASES](docs/RELEASES.
 
 - **Versioned contracts:** native `app_contracts` reports IPC, project, audio and job contract versions. Rust generates the shared TypeScript types; UI presentation state remains separate from the project model.
 - **Compatibility fixtures:** schema-1 `.elyvon` projects retain their tracks, regions, notes and media references across save, reopen and recovery. Frozen MIDI, graph and job fixtures check wire compatibility and reject invalid data.
-- **Future-engine boundaries:** MIDI events use callback-relative frame offsets; graph plans validate routing, channels and cycles; job snapshots describe progress and errors. These types have no MIDI backend, graph executor or job scheduler yet.
+- **Future-engine boundaries:** MIDI events use callback-relative frame offsets; graph plans validate routing, channels and cycles; job snapshots describe progress and errors. The MIDI backend is now implemented on this development branch; a hosted graph executor and job scheduler remain future work.
 - **Reproducible checks:** shared local/CI commands, `cargo-deny`, npm audit, licence/source inventories and `actionlint`. The GTK3 dependency's maintenance-only exception is documented as **B-01** in [STATUS](docs/STATUS.md).
 
 The [validated baseline CI](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38765992553) passed all six jobs, including both Windows installer builds and native GUI tests. The [validation report](docs/audit/VALIDATION.md) records commands, raw measurements, screenshots and their limitations. Measurements use a debug Linux build under Xvfb; they are not Windows or physical-hardware performance guarantees.

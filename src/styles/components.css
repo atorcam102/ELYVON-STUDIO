@@ -761,3 +761,15 @@
   background: var(--accent);
   outline: none;
 }
+
+.callout--warning .icon {
+  color: var(--warn);
+}
+
+.settings-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0;
+}

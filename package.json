@@ -1,9 +1,9 @@
 {
   "name": "elyvon-studio",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Elyvon Studio \u2014 digital audio workstation (UI layer)",
+  "description": "Elyvon Studio — digital audio workstation (UI layer)",
   "engines": {
     "node": ">=22.12"
   },

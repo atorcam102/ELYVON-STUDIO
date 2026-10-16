@@ -29,7 +29,7 @@ use crate::model::Project;
 use crate::validate::validate;
 
 pub const FORMAT_ID: &str = "elyvon-studio-project";
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 pub const FILE_EXTENSION: &str = "elyvon";
 /// Projects reference media instead of embedding it, so 64 MiB is generous.
 pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -108,10 +108,112 @@ fn upgrade_envelope(value: Value) -> Result<Value, ProjectError> {
 pub fn migrate(value: Value, from: u32) -> Result<Value, ProjectError> {
     match from {
         CURRENT_SCHEMA_VERSION => Ok(value),
-        // Example for the future:
-        // 1 => migrate(v1_to_v2(value)?, 2),
+        1 => migrate(v1_to_v2(value)?, 2),
+        2 => {
+            let mut value = value;
+            value["schemaVersion"] = serde_json::json!(3);
+            // Track IO has explicit neutral serde defaults; schema 2 files and
+            // their source bytes stay unchanged. Schema 3 preserves routing.
+            Ok(value)
+        }
         other => Err(ProjectError::UnsupportedSchema { found: other }),
     }
+}
+
+/// Schema 1 → 2 (Phases 04/05):
+///
+/// * `project.sampleRate` = 48000, `media` = [], `markers` = [].
+/// * transport gains `tempoChanges`, `meterChanges`, `metronome`,
+///   `countInBars`, `preRollBars` and `punch` with neutral defaults.
+/// * every region gains `muted: false`.
+/// * audio content `{source: {path} | null}` becomes a media-pool reference
+///   (one pool entry per distinct path, `info: null` until decoded) with
+///   offset 0, unity gain, no fades and no looping. No path is lost.
+fn v1_to_v2(mut value: Value) -> Result<Value, ProjectError> {
+    use serde_json::json;
+    let structure = |m: &str| ProjectError::Structure(m.to_owned());
+    let project = value
+        .get_mut("project")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| structure("missing project"))?;
+    project.insert("sampleRate".into(), json!(48_000));
+    project.insert("markers".into(), json!([]));
+    let transport = project
+        .get_mut("transport")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| structure("missing transport"))?;
+    transport.insert("tempoChanges".into(), json!([]));
+    transport.insert("meterChanges".into(), json!([]));
+    transport.insert(
+        "metronome".into(),
+        json!({ "enabled": false, "volumeDb": -6.0, "accent": true }),
+    );
+    transport.insert("countInBars".into(), json!(0));
+    transport.insert("preRollBars".into(), json!(0));
+    transport.insert(
+        "punch".into(),
+        json!({ "enabled": false, "start": 0, "end": 15360 }),
+    );
+    let mut media: Vec<(String, String)> = Vec::new(); // (path, id)
+    let tracks = project
+        .get_mut("tracks")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| structure("missing tracks"))?;
+    for track in tracks {
+        let Some(regions) = track.get_mut("regions").and_then(Value::as_array_mut) else {
+            return Err(structure("missing regions"));
+        };
+        for region in regions {
+            let region = region
+                .as_object_mut()
+                .ok_or_else(|| structure("region is not an object"))?;
+            region.insert("muted".into(), json!(false));
+            let Some(content) = region.get_mut("content").and_then(Value::as_object_mut) else {
+                return Err(structure("missing region content"));
+            };
+            if content.get("type").and_then(Value::as_str) != Some("audio") {
+                continue;
+            }
+            let path = content
+                .remove("source")
+                .and_then(|s| s.get("path").and_then(Value::as_str).map(str::to_owned));
+            let id = path.map(|path| {
+                if let Some((_, id)) = media.iter().find(|(p, _)| *p == path) {
+                    id.clone()
+                } else {
+                    let id = uuid::Uuid::new_v4().to_string();
+                    media.push((path, id.clone()));
+                    id
+                }
+            });
+            content.insert("media".into(), json!(id));
+            content.insert("offset".into(), json!(0));
+            content.insert("gainDb".into(), json!(0.0));
+            content.insert("fadeIn".into(), json!(0));
+            content.insert("fadeOut".into(), json!(0));
+            content.insert("looped".into(), json!(false));
+        }
+    }
+    let pool: Vec<Value> = media
+        .into_iter()
+        .map(|(path, id)| {
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| "Audio".into());
+            let name: String = name
+                .chars()
+                .take(crate::validate::limits::MAX_NAME_CHARS)
+                .collect();
+            json!({ "id": id, "name": name, "path": path, "info": null })
+        })
+        .collect();
+    project.insert("media".into(), Value::Array(pool));
+    if let Some(v) = value.get_mut("schemaVersion") {
+        *v = json!(2);
+    }
+    Ok(value)
 }
 
 /// Reads and decodes a project file from disk.

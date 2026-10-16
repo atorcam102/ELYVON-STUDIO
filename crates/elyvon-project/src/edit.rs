@@ -5,12 +5,16 @@
 //! Continuous gestures (dragging a fader or a region) are previewed in the UI
 //! and committed as a single command on release, giving one undo step each.
 
-use elyvon_core::{Color, Key, Tempo, Ticks, TimeSignature};
+use elyvon_core::{Color, Key, MeterChange, Tempo, TempoChange, Ticks, TimeSignature};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::error::EditError;
-use crate::model::{Project, Region, RegionContent, RegionId, Track, TrackId, TrackKind};
+use crate::model::{
+    MarkerId, MediaAsset, MediaId, MediaInfo, MetronomeSettings, Project, Region, RegionContent,
+    RegionId, Track, TrackId, TrackKind,
+};
+use crate::timeline_edit as tl;
 use crate::validate::{limits, validate, validate_name};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -21,6 +25,28 @@ use crate::validate::{limits, validate, validate_name};
 )]
 #[ts(export)]
 pub enum EditCommand {
+    ImportMidi {
+        regions: Vec<crate::io::MidiImportRegion>,
+        tempo: Option<Tempo>,
+        tempo_changes: Vec<TempoChange>,
+        time_signature: Option<TimeSignature>,
+        meter_changes: Vec<MeterChange>,
+    },
+    ImportTakes {
+        assets: Vec<MediaAsset>,
+        placements: Vec<AudioPlacement>,
+        #[ts(type = "number")]
+        recorded_at: u64,
+    },
+    SelectTake {
+        track_id: TrackId,
+        folder: RegionId,
+        take: u32,
+    },
+    SetTrackIo {
+        id: TrackId,
+        io: crate::io::TrackIo,
+    },
     RenameProject {
         name: String,
     },
@@ -106,12 +132,148 @@ pub enum EditCommand {
         id: RegionId,
         name: String,
     },
+    SetSampleRate {
+        sample_rate: u32,
+    },
+    /// Replaces the tempo steps after the start (sorted by tick).
+    SetTempoChanges {
+        changes: Vec<TempoChange>,
+    },
+    /// Replaces the metre changes after bar 1 (sorted by bar).
+    SetMeterChanges {
+        changes: Vec<MeterChange>,
+    },
+    SetMetronome {
+        settings: MetronomeSettings,
+    },
+    SetCountIn {
+        bars: u8,
+    },
+    SetPreRoll {
+        bars: u8,
+    },
+    SetPunch {
+        enabled: bool,
+        #[ts(type = "number")]
+        start: Ticks,
+        #[ts(type = "number")]
+        end: Ticks,
+    },
+    AddMarker {
+        #[ts(type = "number")]
+        tick: Ticks,
+        #[ts(optional)]
+        name: Option<String>,
+    },
+    UpdateMarker {
+        id: MarkerId,
+        name: String,
+        #[ts(type = "number")]
+        tick: Ticks,
+    },
+    RemoveMarkers {
+        ids: Vec<MarkerId>,
+    },
+    /// Adds decoded files to the media pool and places regions for them.
+    /// Built by the native importer, which measured each file.
+    ImportAudio {
+        assets: Vec<MediaAsset>,
+        placements: Vec<AudioPlacement>,
+    },
+    /// Points a media-pool entry at another file (e.g. a moved, missing file).
+    RelinkMedia {
+        id: MediaId,
+        path: String,
+        info: Option<MediaInfo>,
+    },
+    /// Splits each region that spans `at` into two (non-destructive for audio).
+    SplitRegions {
+        ids: Vec<RegionId>,
+        #[ts(type = "number")]
+        at: Ticks,
+    },
+    /// Moves a region's edges. Audio keeps its timeline position: trimming the
+    /// start advances the source offset instead of moving the sound.
+    TrimRegion {
+        id: RegionId,
+        #[ts(type = "number")]
+        start: Ticks,
+        #[ts(type = "number")]
+        end: Ticks,
+    },
+    /// Copies regions right after the selection on their own tracks.
+    DuplicateRegions {
+        ids: Vec<RegionId>,
+    },
+    /// Inserts copies (fresh ids) of clipboard regions at `at`, starting on
+    /// `track_id` and keeping relative track offsets.
+    PasteRegions {
+        track_id: TrackId,
+        #[ts(type = "number")]
+        at: Ticks,
+        items: Vec<ClipboardRegion>,
+    },
+    SetRegionsMuted {
+        ids: Vec<RegionId>,
+        muted: bool,
+    },
+    /// Gain, fades (source frames) and looping of an audio region.
+    SetAudioRegion {
+        id: RegionId,
+        gain_db: f64,
+        #[ts(type = "number")]
+        fade_in: u64,
+        #[ts(type = "number")]
+        fade_out: u64,
+        looped: bool,
+    },
+}
+
+/// Where an imported file goes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(export)]
+pub enum PlacementTrack {
+    Existing {
+        id: TrackId,
+    },
+    /// A new audio track named after the file, appended at the end.
+    New,
+    /// The track used by the previous placement of the same command.
+    SameAsPrevious,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AudioPlacement {
+    pub media_id: MediaId,
+    pub track: PlacementTrack,
+    #[ts(type = "number")]
+    pub start: Ticks,
+}
+
+/// A region captured by Copy/Cut, with its track relative to the first one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ClipboardRegion {
+    pub track_offset: u32,
+    pub region: Region,
 }
 
 impl EditCommand {
     /// Short human-readable description for undo/redo menus.
     pub fn label(&self) -> &'static str {
         match self {
+            Self::ImportMidi { .. } => "Import / Record MIDI",
+            Self::ImportTakes { .. } => "Record Audio",
+            Self::SelectTake { .. } => "Select Take",
+            Self::SetTrackIo { .. } => "Change Track Input",
             Self::RenameProject { .. } => "Rename Project",
             Self::SetTempo { .. } => "Change Tempo",
             Self::SetTimeSignature { .. } => "Change Time Signature",
@@ -131,6 +293,24 @@ impl EditCommand {
             Self::MoveRegions { .. } => "Move Regions",
             Self::RemoveRegions { .. } => "Delete Regions",
             Self::RenameRegion { .. } => "Rename Region",
+            Self::SetSampleRate { .. } => "Change Sample Rate",
+            Self::SetTempoChanges { .. } => "Change Tempo Map",
+            Self::SetMeterChanges { .. } => "Change Time Signature Map",
+            Self::SetMetronome { .. } => "Metronome Settings",
+            Self::SetCountIn { .. } => "Count-in",
+            Self::SetPreRoll { .. } => "Pre-roll",
+            Self::SetPunch { .. } => "Change Punch Range",
+            Self::AddMarker { .. } => "Add Marker",
+            Self::UpdateMarker { .. } => "Edit Marker",
+            Self::RemoveMarkers { .. } => "Delete Markers",
+            Self::ImportAudio { .. } => "Import Audio",
+            Self::RelinkMedia { .. } => "Relink Audio File",
+            Self::SplitRegions { .. } => "Split Regions",
+            Self::TrimRegion { .. } => "Trim Region",
+            Self::DuplicateRegions { .. } => "Duplicate Regions",
+            Self::PasteRegions { .. } => "Paste Regions",
+            Self::SetRegionsMuted { .. } => "Mute Regions",
+            Self::SetAudioRegion { .. } => "Change Region Gain/Fades",
         }
     }
 }
@@ -142,6 +322,7 @@ impl EditCommand {
 pub struct EditOutcome {
     pub created_tracks: Vec<TrackId>,
     pub created_regions: Vec<RegionId>,
+    pub created_markers: Vec<MarkerId>,
 }
 
 /// Applies `cmd` to `project`. On error `project` is left untouched.
@@ -170,7 +351,7 @@ pub(crate) fn apply_with_backup(
     }
 }
 
-fn invalid(msg: impl Into<String>) -> EditError {
+pub(crate) fn invalid(msg: impl Into<String>) -> EditError {
     EditError::InvalidValue(msg.into())
 }
 
@@ -274,6 +455,11 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
             validate_name("name", name)?;
             track_mut(project, *id)?.name = name.trim().to_owned();
         }
+        EditCommand::SetTrackIo { id, io } => {
+            io.validate()
+                .map_err(|e| EditError::InvalidValue(e.into()))?;
+            track_mut(project, *id)?.io = io.clone();
+        }
         EditCommand::SetTrackColor { id, color } => track_mut(project, *id)?.color = *color,
         EditCommand::SetTracksMuted { ids, muted } => {
             check_tracks_exist(project, ids)?;
@@ -325,10 +511,13 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
                 return Err(EditError::Limit("too many regions on this track".into()));
             }
             let region = Region {
+                capture: None,
+                midi_events: Vec::new(),
                 id: RegionId::new(),
                 name: track.name.clone(),
                 start: *start,
                 length: *length,
+                muted: false,
                 content: RegionContent::Midi { notes: Vec::new() },
             };
             outcome.created_regions.push(region.id);
@@ -360,6 +549,215 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
                 .find_region(*id)
                 .ok_or(EditError::UnknownRegion(*id))?;
             project.tracks[ti].regions[ri].name = name.trim().to_owned();
+        }
+        EditCommand::SetSampleRate { sample_rate } => {
+            if !Project::SAMPLE_RATES.contains(sample_rate) {
+                return Err(invalid("unsupported sample rate"));
+            }
+            project.sample_rate = *sample_rate;
+        }
+        EditCommand::SetTempoChanges { changes } => {
+            project.transport.tempo_changes = changes.clone();
+            project
+                .transport
+                .tempo_map()
+                .map_err(|e| invalid(e.to_string()))?;
+        }
+        EditCommand::SetMeterChanges { changes } => {
+            project.transport.meter_changes = changes.clone();
+            project
+                .transport
+                .tempo_map()
+                .map_err(|e| invalid(e.to_string()))?;
+            extend_length_to_content(project);
+        }
+        EditCommand::SetMetronome { settings } => {
+            if !(Track::MIN_VOLUME_DB..=Track::MAX_VOLUME_DB).contains(&settings.volume_db) {
+                return Err(invalid("metronome volume out of range"));
+            }
+            project.transport.metronome = *settings;
+        }
+        EditCommand::SetCountIn { bars } => project.transport.count_in_bars = *bars,
+        EditCommand::SetPreRoll { bars } => project.transport.pre_roll_bars = *bars,
+        EditCommand::SetPunch {
+            enabled,
+            start,
+            end,
+        } => {
+            if start >= end {
+                return Err(invalid("punch-in must be before punch-out"));
+            }
+            let punch = &mut project.transport.punch;
+            punch.enabled = *enabled;
+            punch.start = *start;
+            punch.end = *end;
+        }
+        EditCommand::AddMarker { tick, name } => {
+            outcome
+                .created_markers
+                .push(tl::add_marker(project, *tick, name.as_deref())?);
+        }
+        EditCommand::UpdateMarker { id, name, tick } => {
+            tl::update_marker(project, *id, name, *tick)?;
+        }
+        EditCommand::RemoveMarkers { ids } => tl::remove_markers(project, ids)?,
+        EditCommand::ImportMidi {
+            regions,
+            tempo,
+            tempo_changes,
+            time_signature,
+            meter_changes,
+        } => {
+            if regions.is_empty() || regions.len() > 512 {
+                return Err(invalid("choose 1–512 MIDI tracks"));
+            }
+            if let Some(tempo) = tempo {
+                project.transport.tempo = *tempo;
+                project.transport.tempo_changes = tempo_changes.clone();
+            }
+            if let Some(ts) = time_signature {
+                project.transport.time_signature = *ts;
+                project.transport.meter_changes = meter_changes.clone();
+            }
+            for source in regions {
+                validate_name("MIDI region", &source.name)?;
+                let id = match source.track_id {
+                    Some(id) => id,
+                    None => {
+                        if project.tracks.len() >= limits::MAX_TRACKS {
+                            return Err(EditError::Limit("too many tracks".into()));
+                        }
+                        let track = Track::new(
+                            TrackKind::Midi,
+                            &source.name,
+                            crate::model::TRACK_PALETTE
+                                [project.tracks.len() % crate::model::TRACK_PALETTE.len()],
+                        );
+                        let id = track.id;
+                        project.tracks.push(track);
+                        outcome.created_tracks.push(id);
+                        id
+                    }
+                };
+                let track = track_mut(project, id)?;
+                if track.kind == TrackKind::Audio {
+                    return Err(invalid("MIDI requires a MIDI or instrument track"));
+                }
+                let region = Region {
+                    capture: None,
+                    midi_events: source.events.clone(),
+                    id: RegionId::new(),
+                    name: source.name.clone(),
+                    start: source.start,
+                    length: source.length.max(1),
+                    muted: false,
+                    content: RegionContent::Midi {
+                        notes: source.notes.clone(),
+                    },
+                };
+                outcome.created_regions.push(region.id);
+                track.regions.push(region);
+            }
+            extend_length_to_content(project);
+        }
+        EditCommand::ImportTakes {
+            assets,
+            placements,
+            recorded_at,
+        } => {
+            tl::import_audio(project, assets, placements, &mut outcome)?;
+            for track in &mut project.tracks {
+                let folder = RegionId::new();
+                let mut take = 0;
+                for region in &mut track.regions {
+                    if outcome.created_regions.contains(&region.id) {
+                        take += 1;
+                        region.capture = Some(crate::io::CaptureMetadata {
+                            folder,
+                            take,
+                            recorded_at: *recorded_at,
+                        });
+                    }
+                }
+                for region in &mut track.regions {
+                    if let Some(c) = &region.capture
+                        && c.folder == folder
+                    {
+                        region.muted = c.take != take;
+                    }
+                }
+            }
+            extend_length_to_content(project);
+        }
+        EditCommand::SelectTake {
+            track_id,
+            folder,
+            take,
+        } => {
+            let track = track_mut(project, *track_id)?;
+            if !track.regions.iter().any(|r| {
+                r.capture
+                    .as_ref()
+                    .is_some_and(|c| c.folder == *folder && c.take == *take)
+            }) {
+                return Err(invalid("take does not exist"));
+            }
+            for region in &mut track.regions {
+                if let Some(c) = &region.capture
+                    && c.folder == *folder
+                {
+                    region.muted = c.take != *take;
+                }
+            }
+        }
+        EditCommand::ImportAudio { assets, placements } => {
+            tl::import_audio(project, assets, placements, &mut outcome)?;
+            extend_length_to_content(project);
+        }
+        EditCommand::RelinkMedia { id, path, info } => {
+            let asset = project
+                .media
+                .iter_mut()
+                .find(|m| m.id == *id)
+                .ok_or_else(|| invalid("unknown media file"))?;
+            asset.path = path.clone();
+            asset.info = info.clone();
+        }
+        EditCommand::SplitRegions { ids, at } => {
+            tl::split_regions(project, ids, *at, &mut outcome)?;
+        }
+        EditCommand::TrimRegion { id, start, end } => {
+            tl::trim_region(project, *id, *start, *end)?;
+            extend_length_to_content(project);
+        }
+        EditCommand::DuplicateRegions { ids } => {
+            tl::duplicate_regions(project, ids, &mut outcome)?;
+            extend_length_to_content(project);
+        }
+        EditCommand::PasteRegions {
+            track_id,
+            at,
+            items,
+        } => {
+            tl::paste_regions(project, *track_id, *at, items, &mut outcome)?;
+            extend_length_to_content(project);
+        }
+        EditCommand::SetRegionsMuted { ids, muted } => {
+            for id in ids {
+                let (ti, ri) = project
+                    .find_region(*id)
+                    .ok_or(EditError::UnknownRegion(*id))?;
+                project.tracks[ti].regions[ri].muted = *muted;
+            }
+        }
+        EditCommand::SetAudioRegion {
+            id,
+            gain_db,
+            fade_in,
+            fade_out,
+            looped,
+        } => {
+            tl::set_audio_region(project, *id, *gain_db, *fade_in, *fade_out, *looped)?;
         }
     }
     Ok(outcome)
@@ -427,14 +825,23 @@ fn move_regions(
     Ok(())
 }
 
-fn sort_regions(track: &mut Track) {
+pub(crate) fn sort_regions(track: &mut Track) {
     track.regions.sort_by_key(|r| r.start);
 }
 
 /// Grows the song so the last region ends at least two bars before the end.
 fn extend_length_to_content(project: &mut Project) {
-    let per_bar = project.transport.time_signature.ticks_per_bar();
-    let needed = project.content_end().div_ceil(per_bar) + 2;
+    let end = project.content_end();
+    let needed = match project.transport.tempo_map() {
+        Ok(map) => {
+            let bar = map.bar_at(end);
+            bar.bar + u64::from(end > bar.start) + 2
+        }
+        Err(_) => {
+            let per_bar = project.transport.time_signature.ticks_per_bar();
+            end.div_ceil(per_bar) + 2
+        }
+    };
     let needed = u32::try_from(needed)
         .unwrap_or(u32::MAX)
         .min(limits::MAX_LENGTH_BARS);

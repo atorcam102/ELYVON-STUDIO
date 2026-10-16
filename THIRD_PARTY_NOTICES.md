@@ -15,22 +15,23 @@ an identifier in a CI policy does not discharge those obligations. No commercial
 Apple instrument, private project format or proprietary DSP is included in the new test fixtures.
 The origin/licensing of historical brand assets is not established by this technical audit.
 
-## Audio engine dependencies (Phase 03)
+## Audio engine dependencies (Phases 04–05)
 
-| Crate | Version | Licence | Use |
+Versions are pinned in Cargo.lock; `cargo deny --locked check` reports licences ok.
+
+| Crate | Licence | Use | Notes |
 | --- | --- | --- | --- |
-| cpal | 0.18.2 | Apache-2.0 | Audio device I/O (WASAPI, CoreAudio, ALSA) |
-| rtrb | 0.4.0 | MIT OR Apache-2.0 | Wait-free command ring buffer |
-| audio_thread_priority | 0.35.1 | **MPL-2.0** | Real-time thread priority (CPAL `realtime` feature) |
-| alsa / alsa-sys | 0.11.0 / 0.4.0 | Apache-2.0 OR MIT / MIT | Linux ALSA bindings |
-| coreaudio-rs, objc2-core-audio, objc2-audio-toolbox, objc2-avf-audio | see Cargo.lock | MIT/Apache-2.0/Zlib | macOS CoreAudio bindings |
-| dasp_sample, mach2, num-derive | see Cargo.lock | MIT/Apache-2.0/BSD-2-Clause | Transitive helpers |
+| symphonia 0.6.1 (+ symphonia-core, -common, -metadata, -format-riff, -format-ogg, -bundle-flac, -bundle-mp3, -codec-pcm, -codec-vorbis) | MPL-2.0 | Decoding WAV/AIFF/FLAC/MP3/Ogg Vorbis | Used **unmodified** from crates.io. MPL-2.0 is file-level copyleft: distributions must keep the notice and make the Source Code Form of these files available (https://github.com/pdeljanov/Symphonia). No Elyvon file is MPL-licensed. |
+| rubato 5.0.1, audioadapter 5.x, realfft, rustfft | MIT OR Apache-2.0 | Sample-rate conversion (FFT) | |
+| cpal 0.18.2 | Apache-2.0 | Audio device output (WASAPI, CoreAudio, ALSA) | Linux builds link the system ALSA library (libasound, LGPL-2.1, dynamically linked). |
+| rtrb 0.4.0 | MIT OR Apache-2.0 | Lock-free SPSC queues to the audio thread | |
 
-MPL-2.0 is file-level copyleft: shipping binaries requires including its licence notice and making
-the source of the (unmodified) MPL files available, e.g. by reference to the published crate. This
-is a shipping obligation to discharge before stable distribution, not a legal clearance. The Linux
-build links the system `libasound` (LGPL-2.1) dynamically. No ASIO SDK, JACK or proprietary audio
-code is included; the test tone is generated mathematically and no audio samples are shipped.
+Codec notes: MP3 patents have expired; FLAC and Vorbis are royalty-free open formats. No
+proprietary codec (AAC, ALAC, Atmos) is enabled.
+
+The test signals `crates/elyvon-audio/tests/fixtures/tone.{flac,mp3,ogg}` and every WAV/AIFF written
+by the tests are synthetic sines created for this repository (see the fixtures README). The
+metronome click is synthesised in code. No third-party audio is included.
 
 ## Phosphor Icons React
 
@@ -58,3 +59,17 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+## MIDI and recording dependencies
+
+| Crate | Licence | Use | Source / notice |
+| --- | --- | --- | --- |
+| midir 0.11.1 | MIT | MIDI 1.0 native input/output through ALSA, CoreMIDI and Windows backends | https://github.com/Boddlnagg/midir — full notice: [midir-MIT.txt](docs/licenses/midir-MIT.txt), copyright 2015 Patrick Reisert and the RtMidi contributors |
+| midly 0.5.3 | Unlicense | SMF type 0/1 parsing | https://github.com/negamartin/midly — the verified crates.io package declares SPDX `Unlicense` in Cargo.toml. A version-specific cargo-deny licence exception documents this permissive public-domain dedication; no other licence-policy entries are broadened. |
+| tempfile 3.27.0 | MIT OR Apache-2.0 | Unique recording takes, bounded PCM cache and atomic export staging | https://github.com/Stebalien/tempfile — previously a workspace test dependency, now also used by native audio at runtime |
+
+MIDI fixtures are original protocol messages and synthetic note sequences. They contain no
+third-party performances, samples, instrument presets or proprietary formats. MIDI 2.0/UMP
+compatibility is not claimed. The dependency inventory covers the full locked graph, including
+platform bindings; the previously documented packaged-notice work remains outstanding.

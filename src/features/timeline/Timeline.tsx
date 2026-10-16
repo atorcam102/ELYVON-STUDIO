@@ -6,39 +6,52 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import type { GridSpec } from "../../bindings/GridSpec";
 import type { Project } from "../../bindings/Project";
 import type { Region } from "../../bindings/Region";
 import { Button, IconButton } from "../../components/Button";
+import { Menu, type MenuEntry } from "../../components/Popover";
 import {
   gridFor,
   MAX_PX_PER_QUARTER,
   MIN_PX_PER_QUARTER,
   pxToTicks,
   RULER_HEIGHT,
-  snap,
   ticksToPx,
   TRACK_HEIGHT,
   visibleTicks,
   zoomAround,
 } from "../../lib/geometry";
 import { gridBackground } from "../../lib/gridBackground";
+import { inTauri } from "../../lib/ipc";
 import { PPQ, ticksPerBar, ticksPerBeat } from "../../lib/music";
 import { hasPrimaryModifier } from "../../lib/platform";
+import { GRID_LABELS, snapTick, TempoMap } from "../../lib/tempoMap";
 import { notify } from "../../state/notifications";
 import { useProject } from "../../state/project";
+import { isRolling, useTransport } from "../../state/transport";
 import { nextTrackSelection, useUi } from "../../state/ui";
-import {
-  addTrack,
-  duplicateSelectedTracks,
-  deleteSelectedTracks,
-} from "../project/editActions";
+import { addTrack, duplicateSelectedTracks, deleteSelectedTracks } from "../project/editActions";
 import { openDemoProject } from "../project/projectActions";
+import {
+  clipboardSize,
+  copySelectedRegions,
+  cutSelectedRegions,
+  duplicateSelectedRegions,
+  importAudioDialog,
+  importAudioFiles,
+  pasteRegions,
+  setSelectedRegionsMuted,
+  splitSelectedAtPlayhead,
+} from "../project/regionActions";
 import { AddTrackButton } from "../tracks/AddTrackMenu";
 import { TrackHeader } from "../tracks/TrackHeader";
-import { RegionView } from "./RegionView";
+import { ArrangementMenus } from "./ArrangementMenus";
+import { MeterGrid } from "./MeterGrid";
+import { RegionView, type AudioDisplay } from "./RegionView";
 import { Ruler } from "./Ruler";
 import { useViewport } from "./useViewport";
-import { ArrangementMenus } from "./ArrangementMenus";
 
 interface RegionDrag {
   ids: string[];
@@ -50,6 +63,15 @@ interface RegionDrag {
   dTicks: number;
   dTracks: number;
   valid: boolean;
+}
+
+interface TrimDrag {
+  region: Region;
+  edge: "start" | "end";
+  startX: number;
+  start: number;
+  end: number;
+  moved: boolean;
 }
 
 interface TrackDrag {
@@ -66,53 +88,61 @@ function regionTrackIndex(project: Project): Map<string, number> {
   return m;
 }
 
-function canMove(
-  project: Project,
-  ids: string[],
-  index: Map<string, number>,
-  dTracks: number,
-): boolean {
+function canMove(project: Project, ids: string[], index: Map<string, number>, dTracks: number): boolean {
   for (const id of ids) {
     const from = index.get(id);
     if (from === undefined) return false;
     const target = project.tracks[from + dTracks];
     if (!target) return false;
     const region = project.tracks[from]!.regions.find((r) => r.id === id)!;
-    const isAudio = region.content.type === "audio";
-    if (isAudio !== (target.kind === "audio")) return false;
+    if ((region.content.type === "audio") !== (target.kind === "audio")) return false;
   }
   return true;
 }
 
+/** Snap spec matching the zoom-dependent grid when the user chose none. */
+function autoSpec(snapTicks: number, barTicks: number, beatTicks: number): GridSpec {
+  const division = snapTicks >= barTicks ? "bar" : snapTicks >= beatTicks ? "beat" : snapTicks >= PPQ / 2 ? "eighth" : "sixteenth";
+  return { division, triplet: false, swing: 0 };
+}
+
+const SNAP_CHOICES: (GridSpec | null)[] = [
+  null,
+  ...(["bar", "beat", "quarter", "eighth", "sixteenth", "thirtySecond"] as const).map((division) => ({ division, triplet: false, swing: 0 })),
+  { division: "eighth", triplet: true, swing: 0 },
+  { division: "sixteenth", triplet: true, swing: 0 },
+  { division: "eighth", triplet: false, swing: 50 },
+  { division: "sixteenth", triplet: false, swing: 50 },
+];
+
+function specLabel(s: GridSpec | null): string {
+  if (!s) return "Auto";
+  return `${GRID_LABELS[s.division]}${s.triplet ? "T" : ""}${s.swing ? ` swing ${s.swing}%` : ""}`;
+}
+
 function EmptyProject() {
   return (
-    <>
-      <div className="timeline-empty__card">
-        <h3>Start with a track</h3>
-        <p>
-          Choose the kind of track to add. You can change names, colours and
-          order at any time.
-        </p>
-        <div className="timeline-empty__actions">
-          <Button icon="audio" onClick={() => void addTrack("audio")}>
-            Audio
-          </Button>
-          <Button icon="instrument" onClick={() => void addTrack("instrument")}>
-            Instrument
-          </Button>
-          <Button icon="midi" onClick={() => void addTrack("midi")}>
-            External MIDI
-          </Button>
-        </div>
-        <button
-          type="button"
-          className="link-btn"
-          onClick={() => void openDemoProject()}
-        >
-          Or explore the demo session
-        </button>
+    <div className="timeline-empty__card">
+      <h3>Start with a track</h3>
+      <p>Choose the kind of track to add, or import audio files (drag them here or use Functions ▸ Import audio).</p>
+      <div className="timeline-empty__actions">
+        <Button icon="audio" onClick={() => void addTrack("audio")}>
+          Audio
+        </Button>
+        <Button icon="instrument" onClick={() => void addTrack("instrument")}>
+          Instrument
+        </Button>
+        <Button icon="midi" onClick={() => void addTrack("midi")}>
+          External MIDI
+        </Button>
+        <Button icon="importAudio" onClick={() => void importAudioDialog()}>
+          Import audio…
+        </Button>
       </div>
-    </>
+      <button type="button" className="link-btn" onClick={() => void openDemoProject()}>
+        Or explore the demo session
+      </button>
+    </div>
   );
 }
 
@@ -125,10 +155,33 @@ export function Timeline() {
   const cursorTicks = useUi((s) => s.cursorTicks);
   const selection = useUi((s) => s.selection);
   const headerWidth = useUi((s) => s.layout.trackHeaderWidth);
+  const snapSpec = useUi((s) => s.snapSpec);
+  const setSnapSpec = useUi((s) => s.setSnapSpec);
+  const snapshot = useTransport((s) => s.snapshot);
+  const follow = useTransport((s) => s.follow);
+  const mediaStates = useTransport((s) => s.media);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lanesRef = useRef<HTMLDivElement>(null);
   const vp = useViewport(scrollRef);
   const [regionDrag, setRegionDrag] = useState<RegionDrag | null>(null);
+  const [trimDrag, setTrimDrag] = useState<TrimDrag | null>(null);
   const [trackDrag, setTrackDrag] = useState<TrackDrag | null>(null);
+  const [menu, setMenu] = useState<{ at: { x: number; y: number }; entries: MenuEntry[] } | null>(null);
+  const [dropRow, setDropRow] = useState<number | null>(null);
+
+  const map = useMemo(() => (project ? TempoMap.fromTransport(project.transport) : null), [project]);
+  const rolling = isRolling(snapshot);
+  const playhead = rolling && snapshot ? snapshot.ticks : cursorTicks;
+
+  const snap = useCallback(
+    (t: number) => {
+      if (!project || !map) return Math.round(t);
+      const ts = map.timeSignatureAt(Math.max(0, t));
+      const spec = snapSpec ?? autoSpec(gridFor(ts, useUi.getState().pxPerQuarter).snapTicks, ticksPerBar(ts), ticksPerBeat(ts));
+      return snapTick(map, t, spec);
+    },
+    [project, map, snapSpec],
+  );
 
   // Ctrl/⌘ + wheel zooms around the pointer; native scrolling otherwise.
   useEffect(() => {
@@ -139,16 +192,8 @@ export function Timeline() {
       e.preventDefault();
       const ui = useUi.getState();
       const rect = el.getBoundingClientRect();
-      const anchor = Math.max(
-        0,
-        e.clientX - rect.left - ui.layout.trackHeaderWidth,
-      );
-      const next = zoomAround(
-        ui.pxPerQuarter,
-        Math.exp(-e.deltaY * 0.0025),
-        el.scrollLeft,
-        anchor,
-      );
+      const anchor = Math.max(0, e.clientX - rect.left - ui.layout.trackHeaderWidth);
+      const next = zoomAround(ui.pxPerQuarter, Math.exp(-e.deltaY * 0.0025), el.scrollLeft, anchor);
       ui.setZoom(next.pxPerQuarter);
       requestAnimationFrame(() => {
         el.scrollLeft = next.scrollLeft;
@@ -158,31 +203,58 @@ export function Timeline() {
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
-  const trackOrder = useMemo(
-    () => project?.tracks.map((t) => t.id) ?? [],
-    [project],
-  );
-  const regionIndex = useMemo(
-    () => (project ? regionTrackIndex(project) : new Map<string, number>()),
-    [project],
-  );
+  // Follow the engine playhead: page the view when it leaves the screen.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !rolling || !follow) return;
+    const x = ticksToPx(playhead, pxPerQuarter);
+    const laneWidth = el.clientWidth - headerWidth;
+    if (x < el.scrollLeft || x > el.scrollLeft + laneWidth - 24) el.scrollLeft = Math.max(0, x - 24);
+  }, [playhead, rolling, follow, pxPerQuarter, headerWidth]);
+
+  // Files dropped from the OS: import onto the audio track under the pointer
+  // (sequentially), or onto new tracks.
+  useEffect(() => {
+    if (!inTauri) return;
+    const target = (pos: { x: number; y: number }) => {
+      const lanes = lanesRef.current;
+      const p = useProject.getState().view?.project;
+      if (!lanes || !p) return null;
+      const ratio = window.devicePixelRatio || 1;
+      const rect = lanes.getBoundingClientRect();
+      const x = pos.x / ratio - rect.left;
+      const y = pos.y / ratio - rect.top;
+      if (x < 0 || y < 0 || x > rect.width) return null;
+      const row = Math.floor(y / TRACK_HEIGHT);
+      return { row, track: p.tracks[row], tick: pxToTicks(x, useUi.getState().pxPerQuarter) };
+    };
+    const unlisten = getCurrentWebview().onDragDropEvent((e) => {
+      const ev = e.payload;
+      if (ev.type === "over" || ev.type === "enter") {
+        const t = target(ev.position);
+        setDropRow(t ? t.row : null);
+      } else if (ev.type === "leave") {
+        setDropRow(null);
+      } else if (ev.type === "drop") {
+        setDropRow(null);
+        const t = target(ev.position);
+        const start = t ? snap(t.tick) : useUi.getState().cursorTicks;
+        const onAudio = t?.track?.kind === "audio" ? t.track : null;
+        void importAudioFiles(ev.paths, onAudio?.id ?? null, start, onAudio ? "sequential" : "newTracks");
+      }
+    });
+    return () => void unlisten.then((f) => f());
+  }, [snap]);
+
+  const trackOrder = useMemo(() => project?.tracks.map((t) => t.id) ?? [], [project]);
+  const regionIndex = useMemo(() => (project ? regionTrackIndex(project) : new Map<string, number>()), [project]);
+  const mediaById = useMemo(() => new Map((project?.media ?? []).map((m) => [m.id, m])), [project]);
 
   const onSelectTrack = useCallback(
     (id: string, e: React.MouseEvent | React.PointerEvent) => {
       const ui = useUi.getState();
-      const mode = e.shiftKey
-        ? "range"
-        : hasPrimaryModifier(e)
-          ? "toggle"
-          : "single";
-      if (
-        mode === "single" &&
-        ui.selection.trackIds.includes(id) &&
-        ui.selection.trackIds.length > 1 &&
-        e.type === "contextmenu"
-      ) {
-        return;
-      }
+      const mode = e.shiftKey ? "range" : hasPrimaryModifier(e) ? "toggle" : "single";
+      if (mode === "single" && ui.selection.trackIds.includes(id) && ui.selection.trackIds.length > 1 && e.type === "contextmenu") return;
       const next = nextTrackSelection(trackOrder, ui.selection, id, mode);
       ui.selectTracks(next.ids, next.anchor);
     },
@@ -191,115 +263,147 @@ export function Timeline() {
 
   // No pointer capture here: it would retarget the double-click that starts
   // renaming. Moves and release are tracked on `window` instead.
-  const onReorderStart = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>, id: string) => {
-      if (e.shiftKey || hasPrimaryModifier(e)) return;
-      setTrackDrag({ id, startY: e.clientY, moved: false, target: -1 });
+  const onReorderStart = useCallback((e: ReactPointerEvent<HTMLDivElement>, id: string) => {
+    if (e.shiftKey || hasPrimaryModifier(e)) return;
+    setTrackDrag({ id, startY: e.clientY, moved: false, target: -1 });
+  }, []);
+
+  const selectRegion = useCallback(
+    (region: Region, additive: boolean) => {
+      const ui = useUi.getState();
+      const trackIdx = regionIndex.get(region.id);
+      const trackId = trackIdx !== undefined && project ? project.tracks[trackIdx]!.id : null;
+      let ids = ui.selection.regionIds;
+      if (additive) {
+        ids = ids.includes(region.id) ? ids.filter((r) => r !== region.id) : [...ids, region.id];
+        ui.selectRegions(ids);
+      } else if (!ids.includes(region.id)) {
+        ids = [region.id];
+        ui.selectRegions(ids, trackId ? [trackId] : []);
+      }
+      return ids;
     },
-    [],
+    [project, regionIndex],
   );
 
   const onRegionPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>, region: Region) => {
       if (e.button !== 0 || !project) return;
       e.stopPropagation();
-      const ui = useUi.getState();
-      const trackIdx = regionIndex.get(region.id);
-      const trackId =
-        trackIdx !== undefined ? project.tracks[trackIdx]!.id : null;
-      let ids = ui.selection.regionIds;
-      if (e.shiftKey || hasPrimaryModifier(e)) {
-        ids = ids.includes(region.id)
-          ? ids.filter((r) => r !== region.id)
-          : [...ids, region.id];
-        ui.selectRegions(ids);
-        if (!ids.includes(region.id)) return;
-      } else if (!ids.includes(region.id)) {
-        ids = [region.id];
-        ui.selectRegions(ids, trackId ? [trackId] : []);
-      }
-      setRegionDrag({
-        ids,
-        primary: region,
-        startX: e.clientX,
-        startY: e.clientY,
-        moved: false,
-        dTicks: 0,
-        dTracks: 0,
-        valid: true,
-      });
+      const ids = selectRegion(region, e.shiftKey || hasPrimaryModifier(e));
+      if (!ids.includes(region.id)) return;
+      setRegionDrag({ ids, primary: region, startX: e.clientX, startY: e.clientY, moved: false, dTicks: 0, dTracks: 0, valid: true });
     },
-    [project, regionIndex],
+    [project, selectRegion],
+  );
+
+  const onTrimStart = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>, region: Region, edge: "start" | "end") => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      selectRegion(region, false);
+      setTrimDrag({ region, edge, startX: e.clientX, start: region.start, end: region.start + region.length, moved: false });
+    },
+    [selectRegion],
+  );
+
+  const onRegionContextMenu = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>, region: Region) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const ids = useUi.getState().selection.regionIds.includes(region.id) ? useUi.getState().selection.regionIds : selectRegion(region, false);
+      const audio = region.content.type === "audio" ? region.content : null;
+      const entries: MenuEntry[] = [
+        { heading: ids.length > 1 ? `${ids.length} regions` : region.name },
+        { id: "split", label: "Split at playhead", icon: "split", onSelect: () => void splitSelectedAtPlayhead() },
+        { id: "dup", label: "Duplicate", icon: "duplicate", onSelect: () => void duplicateSelectedRegions() },
+        "separator",
+        { id: "cut", label: "Cut", onSelect: () => void cutSelectedRegions() },
+        { id: "copy", label: "Copy", onSelect: () => void copySelectedRegions() },
+        { id: "paste", label: "Paste at playhead", icon: "paste", disabled: clipboardSize() === 0, onSelect: () => void pasteRegions() },
+        "separator",
+        { id: "mute", label: region.muted ? "Unmute" : "Mute", icon: "muteRegion", onSelect: () => void setSelectedRegionsMuted(!region.muted) },
+      ];
+      if (audio?.media) {
+        entries.push({
+          id: "loop",
+          label: audio.looped ? "Stop looping" : "Loop the file",
+          icon: "loop",
+          onSelect: () =>
+            void apply({ type: "setAudioRegion", id: region.id, gainDb: audio.gainDb, fadeIn: audio.fadeIn, fadeOut: audio.fadeOut, looped: !audio.looped }),
+        });
+      }
+      entries.push("separator", {
+        id: "delete",
+        label: "Delete",
+        icon: "trash",
+        danger: true,
+        onSelect: () => void apply({ type: "removeRegions", ids }),
+      });
+      setMenu({ at: { x: e.clientX, y: e.clientY }, entries });
+    },
+    [apply, selectRegion],
   );
 
   // Pointer moves/ups for drags are tracked on window so they keep working
   // when the pointer leaves the element that captured it.
   useEffect(() => {
-    if (!regionDrag && !trackDrag) return;
+    if (!regionDrag && !trackDrag && !trimDrag) return;
     const onMove = (e: PointerEvent) => {
       if (!project) return;
-      if (regionDrag) {
+      const zoom = useUi.getState().pxPerQuarter;
+      if (trimDrag) {
+        const dx = e.clientX - trimDrag.startX;
+        if (!trimDrag.moved && Math.abs(dx) < 3) return;
+        const raw = (trimDrag.edge === "start" ? trimDrag.region.start : trimDrag.region.start + trimDrag.region.length) + pxToTicks(dx, zoom);
+        const t = Math.max(0, e.altKey ? Math.round(raw) : snap(raw));
+        const end0 = trimDrag.region.start + trimDrag.region.length;
+        setTrimDrag({
+          ...trimDrag,
+          moved: true,
+          start: trimDrag.edge === "start" ? Math.min(t, end0 - 1) : trimDrag.region.start,
+          end: trimDrag.edge === "end" ? Math.max(t, trimDrag.region.start + 1) : end0,
+        });
+      } else if (regionDrag) {
         const dx = e.clientX - regionDrag.startX;
         const dy = e.clientY - regionDrag.startY;
         if (!regionDrag.moved && Math.hypot(dx, dy) < 4) return;
-        const g = gridFor(
-          project.transport.timeSignature,
-          useUi.getState().pxPerQuarter,
-        );
-        const raw = pxToTicks(dx, useUi.getState().pxPerQuarter);
-        const fine = e.altKey ? PPQ / 16 : g.snapTicks;
-        const dTicks = Math.max(
-          -regionDrag.primary.start,
-          snap(regionDrag.primary.start + raw, fine) - regionDrag.primary.start,
-        );
+        const raw = regionDrag.primary.start + pxToTicks(dx, zoom);
+        const target = e.altKey ? Math.round(raw) : snap(raw);
+        const dTicks = Math.max(-regionDrag.primary.start, target - regionDrag.primary.start);
         const dTracks = Math.round(dy / TRACK_HEIGHT);
-        setRegionDrag({
-          ...regionDrag,
-          moved: true,
-          dTicks,
-          dTracks,
-          valid: canMove(project, regionDrag.ids, regionIndex, dTracks),
-        });
+        setRegionDrag({ ...regionDrag, moved: true, dTicks, dTracks, valid: canMove(project, regionDrag.ids, regionIndex, dTracks) });
       } else if (trackDrag) {
         const dy = e.clientY - trackDrag.startY;
         if (!trackDrag.moved && Math.abs(dy) < 5) return;
         const from = project.tracks.findIndex((t) => t.id === trackDrag.id);
-        const target = Math.max(
-          0,
-          Math.min(
-            project.tracks.length,
-            from + Math.round(dy / TRACK_HEIGHT) + (dy > 0 ? 1 : 0),
-          ),
-        );
+        const target = Math.max(0, Math.min(project.tracks.length, from + Math.round(dy / TRACK_HEIGHT) + (dy > 0 ? 1 : 0)));
         setTrackDrag({ ...trackDrag, moved: true, target });
       }
     };
     const onUp = () => {
+      if (trimDrag?.moved) {
+        const r = trimDrag.region;
+        if (trimDrag.start !== r.start || trimDrag.end !== r.start + r.length) {
+          void apply({ type: "trimRegion", id: r.id, start: trimDrag.start, end: trimDrag.end });
+        }
+      }
       if (regionDrag?.moved && project) {
         if (!regionDrag.valid) {
-          notify(
-            "warning",
-            "Regions can only move onto tracks of a matching type (audio ↔ audio, MIDI ↔ instrument/MIDI).",
-          );
+          notify("warning", "Regions can only move onto tracks of a matching type (audio ↔ audio, MIDI ↔ instrument/MIDI).");
         } else if (regionDrag.dTicks !== 0 || regionDrag.dTracks !== 0) {
           // Earliest region in the group clamps at zero in the core as well.
-          void apply({
-            type: "moveRegions",
-            ids: regionDrag.ids,
-            deltaTicks: regionDrag.dTicks,
-            trackOffset: regionDrag.dTracks,
-          });
+          void apply({ type: "moveRegions", ids: regionDrag.ids, deltaTicks: regionDrag.dTicks, trackOffset: regionDrag.dTracks });
         }
       }
       if (trackDrag?.moved && project && trackDrag.target >= 0) {
         const from = project.tracks.findIndex((t) => t.id === trackDrag.id);
-        const to =
-          trackDrag.target > from ? trackDrag.target - 1 : trackDrag.target;
-        if (to !== from)
-          void apply({ type: "moveTrack", id: trackDrag.id, toIndex: to });
+        const to = trackDrag.target > from ? trackDrag.target - 1 : trackDrag.target;
+        if (to !== from) void apply({ type: "moveTrack", id: trackDrag.id, toIndex: to });
       }
       setRegionDrag(null);
       setTrackDrag(null);
+      setTrimDrag(null);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -309,42 +413,59 @@ export function Timeline() {
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [regionDrag, trackDrag, project, regionIndex, apply]);
+  }, [regionDrag, trackDrag, trimDrag, project, regionIndex, apply, snap]);
 
-  if (!project) return <div className="timeline" />;
+  if (!project || !map) return <div className="timeline" />;
 
   const ts = project.transport.timeSignature;
   const grid = gridFor(ts, pxPerQuarter);
-  const barTicks = ticksPerBar(ts);
-  const contentTicks = Math.max(
-    project.lengthBars * barTicks,
-    pxToTicks(vp.width, pxPerQuarter),
-  );
+  const lastBar = map.barStart(project.lengthBars);
+  const contentTicks = Math.max(lastBar, pxToTicks(vp.width, pxPerQuarter));
   const contentWidth = Math.ceil(ticksToPx(contentTicks, pxPerQuarter)) + 200;
-  const lanesHeight = Math.max(
-    project.tracks.length * TRACK_HEIGHT,
-    vp.height - RULER_HEIGHT,
-  );
+  const lanesHeight = Math.max(project.tracks.length * TRACK_HEIGHT, vp.height - RULER_HEIGHT);
   const laneLeft = vp.left - headerWidth;
   const range = visibleTicks(Math.max(0, laneLeft), vp.width, pxPerQuarter);
   const anySolo = project.tracks.some((t) => t.soloed);
   const selectedTracks = new Set(selection.trackIds);
   const selectedRegions = new Set(selection.regionIds);
   const dragIds = regionDrag?.moved ? new Set(regionDrag.ids) : null;
-  const dragOffset = regionDrag?.moved
-    ? {
-        x: ticksToPx(regionDrag.dTicks, pxPerQuarter),
-        y: regionDrag.dTracks * TRACK_HEIGHT,
-      }
-    : null;
+  const dragOffset = regionDrag?.moved ? { x: ticksToPx(regionDrag.dTicks, pxPerQuarter), y: regionDrag.dTracks * TRACK_HEIGHT } : null;
   const loop = project.transport.loopRange;
+  const effectiveSpec = snapSpec ?? autoSpec(grid.snapTicks, ticksPerBar(ts), ticksPerBeat(ts));
 
-  const gridStyle = gridBackground([
-    { axis: "x", every: grid.barPx, color: "var(--grid-bar)" },
-    { axis: "x", every: grid.beatPx, color: "var(--grid-beat)" },
-    { axis: "x", every: grid.subPx, color: "var(--grid-sub)" },
-    { axis: "y", every: TRACK_HEIGHT, color: "var(--grid-row)" },
-  ]);
+  const audioDisplay = (r: Region, left: number, width: number): AudioDisplay | undefined => {
+    if (r.content.type !== "audio" || !r.content.media) return undefined;
+    const c = r.content;
+    const asset = mediaById.get(c.media!);
+    const state = mediaStates[c.media!];
+    const status: AudioDisplay["status"] =
+      state?.state === "ready" ? "ready" : state?.state === "failed" ? "failed" : asset ? "loading" : "failed";
+    const rate = asset?.info?.sampleRate ?? project.sampleRate;
+    const s0 = map.secondsAt(r.start);
+    const fadeInTick = map.tickAtSeconds(s0 + c.fadeIn / rate);
+    const fadeOutTick = map.tickAtSeconds(Math.max(s0, map.secondsAt(r.start + r.length) - c.fadeOut / rate));
+    const visFrom = Math.max(r.start, range.start);
+    const visTo = Math.min(r.start + r.length, range.end);
+    return {
+      status,
+      message:
+        state?.state === "failed"
+          ? state.code === "missing"
+            ? `Missing file: ${asset?.path ?? ""}`
+            : state.message
+          : !asset
+            ? "File not in the media pool"
+            : undefined,
+      fadeInPx: Math.min(width, ticksToPx(fadeInTick, pxPerQuarter) - left),
+      fadeOutPx: Math.max(0, ticksToPx(fadeOutTick, pxPerQuarter) - left),
+      visibleLeftPx: ticksToPx(visFrom, pxPerQuarter) - left,
+      visibleWidthPx: visTo > visFrom ? ticksToPx(visTo - visFrom, pxPerQuarter) : 0,
+      fromTick: visFrom,
+      toTick: visTo,
+      revision: `${c.media}|${r.start}|${r.length}|${c.offset}|${c.gainDb}|${c.looped}|${project.transport.tempo}|${project.transport.tempoChanges.length}|${state?.state === "ready" ? (state.changed ? "c" : "r") : "x"}`,
+      looped: c.looped,
+    };
+  };
 
   const onLanePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -353,12 +474,7 @@ export function Timeline() {
     const track = project.tracks[row];
     const ui = useUi.getState();
     if (track) {
-      const next = nextTrackSelection(
-        trackOrder,
-        ui.selection,
-        track.id,
-        e.shiftKey ? "range" : hasPrimaryModifier(e) ? "toggle" : "single",
-      );
+      const next = nextTrackSelection(trackOrder, ui.selection, track.id, e.shiftKey ? "range" : hasPrimaryModifier(e) ? "toggle" : "single");
       ui.selectTracks(next.ids, next.anchor);
     } else {
       ui.clearSelection();
@@ -367,56 +483,44 @@ export function Timeline() {
 
   const onLaneDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const track =
-      project.tracks[Math.floor((e.clientY - rect.top) / TRACK_HEIGHT)];
+    const track = project.tracks[Math.floor((e.clientY - rect.top) / TRACK_HEIGHT)];
     if (!track) return;
+    const t = pxToTicks(e.clientX - rect.left, pxPerQuarter);
     if (track.kind === "audio") {
-      notify(
-        "info",
-        "Audio regions come from recording or importing files, which arrive with the audio engine (Phase 2).",
-      );
+      useUi.getState().setCursor(snap(t));
+      useUi.getState().selectTracks([track.id], track.id);
+      void importAudioDialog();
       return;
     }
-    const t = pxToTicks(e.clientX - rect.left, pxPerQuarter);
-    const start = Math.floor(t / barTicks) * barTicks;
-    void apply({
-      type: "createMidiRegion",
-      trackId: track.id,
-      start,
-      length: barTicks,
-    }).then((o) => {
+    const bar = map.barAt(t);
+    void apply({ type: "createMidiRegion", trackId: track.id, start: bar.start, length: ticksPerBar(bar.ts) }).then((o) => {
       const id = o?.createdRegions[0];
       if (id) useUi.getState().selectRegions([id], [track.id]);
     });
   };
 
-  const dropLineTop =
-    trackDrag?.moved && trackDrag.target >= 0
-      ? trackDrag.target * TRACK_HEIGHT
-      : null;
+  const dropLineTop = trackDrag?.moved && trackDrag.target >= 0 ? trackDrag.target * TRACK_HEIGHT : null;
 
   return (
     <section className="timeline" aria-label="Arrangement">
       <div className="timeline__toolbar">
         <ArrangementMenus />
         <div className="timeline__toolbar-right">
-          <span
-            className="hint"
-            title="Grid resolution used for snapping. Hold Alt while dragging for fine positioning."
-          >
-            Snap:{" "}
-            {grid.snapTicks >= barTicks
-              ? "1 bar"
-              : grid.snapTicks >= ticksPerBeat(ts)
-                ? `1/${ts.denominator}`
-                : `1/${Math.round((PPQ * 4) / grid.snapTicks)}`}
-          </span>
-          <IconButton
-            icon="zoomOut"
-            label="Zoom out"
-            onClick={() => setZoom(pxPerQuarter / 1.25)}
-            size={14}
-          />
+          <label className="hint" title="Snap grid for moving, trimming and the cursor. Hold Alt while dragging for no snapping.">
+            Snap{" "}
+            <select
+              aria-label="Snap grid"
+              value={SNAP_CHOICES.findIndex((c) => JSON.stringify(c) === JSON.stringify(snapSpec))}
+              onChange={(e) => setSnapSpec(SNAP_CHOICES[Number(e.target.value)] ?? null)}
+            >
+              {SNAP_CHOICES.map((c, i) => (
+                <option key={i} value={i}>
+                  {c ? specLabel(c) : `Auto (${specLabel(effectiveSpec)})`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <IconButton icon="zoomOut" label="Zoom out" onClick={() => setZoom(pxPerQuarter / 1.25)} size={14} />
           <input
             className="zoom-slider"
             type="range"
@@ -427,20 +531,12 @@ export function Timeline() {
             value={Math.log(pxPerQuarter)}
             onChange={(e) => setZoom(Math.exp(Number(e.target.value)))}
           />
-          <IconButton
-            icon="zoomIn"
-            label="Zoom in"
-            onClick={() => setZoom(pxPerQuarter * 1.25)}
-            size={14}
-          />
+          <IconButton icon="zoomIn" label="Zoom in" onClick={() => setZoom(pxPerQuarter * 1.25)} size={14} />
         </div>
       </div>
 
       <div className="timeline__scroll" ref={scrollRef}>
-        <div
-          className="timeline__content"
-          style={{ width: headerWidth + contentWidth }}
-        >
+        <div className="timeline__content" style={{ width: headerWidth + contentWidth }}>
           <div className="timeline__top" style={{ height: RULER_HEIGHT }}>
             <div className="timeline__corner" style={{ width: headerWidth }}>
               <AddTrackButton />
@@ -451,29 +547,23 @@ export function Timeline() {
                 disabled={selectedTracks.size === 0}
                 onClick={() => void duplicateSelectedTracks()}
               />
-              <span className="timeline__track-count">
-                {project.tracks.length} tracks
-              </span>
+              <span className="timeline__track-count">{project.tracks.length} tracks</span>
             </div>
             <Ruler
               transport={project.transport}
+              markers={project.markers}
+              map={map}
               width={contentWidth}
-              lengthBars={Math.ceil(contentTicks / barTicks)}
               pxPerQuarter={pxPerQuarter}
-              grid={grid}
               viewLeft={Math.max(0, laneLeft)}
               viewWidth={vp.width}
-              cursorTicks={cursorTicks}
+              cursorTicks={playhead}
+              snap={snap}
             />
           </div>
 
           <div className="timeline__body" style={{ height: lanesHeight }}>
-            <div
-              className="track-headers"
-              style={{ width: headerWidth, height: lanesHeight }}
-              role="grid"
-              aria-label="Tracks"
-            >
+            <div className="track-headers" style={{ width: headerWidth, height: lanesHeight }} role="grid" aria-label="Tracks">
               {project.tracks.map((t, i) => (
                 <TrackHeader
                   key={t.id}
@@ -488,22 +578,37 @@ export function Timeline() {
                   onReorderStart={onReorderStart}
                 />
               ))}
-              {dropLineTop !== null && (
-                <div className="drop-line" style={{ top: dropLineTop }} />
-              )}
+              {dropLineTop !== null && <div className="drop-line" style={{ top: dropLineTop }} />}
             </div>
 
             <div
+              ref={lanesRef}
               className="lanes"
-              style={{ width: contentWidth, height: lanesHeight, ...gridStyle }}
+              style={{
+                width: contentWidth,
+                height: lanesHeight,
+                ...gridBackground([{ axis: "y", every: TRACK_HEIGHT, color: "var(--grid-row)" }]),
+              }}
               onPointerDown={onLanePointerDown}
               onDoubleClick={onLaneDoubleClick}
+              data-testid="lanes"
             >
+              <MeterGrid
+                map={map}
+                pxPerQuarter={pxPerQuarter}
+                width={contentWidth}
+                className="lanes__grid"
+                layers={(g) => [
+                  { axis: "x", every: g.barPx, color: "var(--grid-bar)" },
+                  { axis: "x", every: g.beatPx, color: "var(--grid-beat)" },
+                  { axis: "x", every: g.subPx, color: "var(--grid-sub)" },
+                ]}
+              />
               {project.tracks.map((t, i) =>
-                selectedTracks.has(t.id) ? (
+                selectedTracks.has(t.id) || dropRow === i ? (
                   <div
                     key={t.id}
-                    className="lane-highlight"
+                    className={`lane-highlight${dropRow === i ? " is-drop" : ""}`}
                     style={{ top: i * TRACK_HEIGHT, height: TRACK_HEIGHT }}
                   />
                 ) : null,
@@ -511,56 +616,59 @@ export function Timeline() {
               {loop.enabled && (
                 <div
                   className="loop-shade"
-                  style={{
-                    left: ticksToPx(loop.start, pxPerQuarter),
-                    width: ticksToPx(loop.end - loop.start, pxPerQuarter),
-                  }}
+                  style={{ left: ticksToPx(loop.start, pxPerQuarter), width: ticksToPx(loop.end - loop.start, pxPerQuarter) }}
                 />
               )}
               {project.tracks.map((t, i) => {
                 const silent = t.muted || (anySolo && !t.soloed);
                 return t.regions.map((r) => {
-                  const end = r.start + r.length;
+                  const trimming = trimDrag?.moved && trimDrag.region.id === r.id ? trimDrag : null;
+                  const start = trimming ? trimming.start : r.start;
+                  const end = trimming ? trimming.end : r.start + r.length;
                   const dragging = dragIds?.has(r.id) ?? false;
-                  if (!dragging && (end < range.start || r.start > range.end))
-                    return null;
+                  if (!dragging && (end < range.start || start > range.end)) return null;
+                  const left = ticksToPx(start, pxPerQuarter);
+                  const width = ticksToPx(end - start, pxPerQuarter);
                   return (
                     <RegionView
                       key={r.id}
                       region={r}
                       color={t.color}
-                      left={ticksToPx(r.start, pxPerQuarter)}
-                      width={ticksToPx(r.length, pxPerQuarter)}
+                      left={left}
+                      width={width}
                       top={i * TRACK_HEIGHT + 2}
                       height={TRACK_HEIGHT - 4}
                       selected={selectedRegions.has(r.id)}
-                      dimmed={silent}
+                      dimmed={silent || r.muted}
                       demo={demo}
                       offset={dragging ? dragOffset : null}
-                      invalid={
-                        dragging && regionDrag !== null && !regionDrag.valid
-                      }
+                      invalid={dragging && regionDrag !== null && !regionDrag.valid}
+                      audio={trimming ? undefined : audioDisplay(r, left, width)}
                       onPointerDown={onRegionPointerDown}
+                      onTrimStart={onTrimStart}
+                      onContextMenu={onRegionContextMenu}
                     />
                   );
                 });
               })}
+              {project.markers.map((m) => (
+                <div key={m.id} className="marker-line" style={{ left: ticksToPx(m.tick, pxPerQuarter) }} />
+              ))}
               <div
-                className="cursor-line"
-                style={{ left: ticksToPx(cursorTicks, pxPerQuarter) }}
+                className={`cursor-line${rolling ? " is-playing" : ""}`}
+                style={{ transform: `translateX(${ticksToPx(playhead, pxPerQuarter)}px)` }}
+                data-testid="playhead"
               />
             </div>
           </div>
         </div>
       </div>
       {project.tracks.length === 0 && (
-        <div
-          className="timeline-empty"
-          style={{ left: headerWidth, top: 34 + RULER_HEIGHT }}
-        >
+        <div className="timeline-empty" style={{ left: headerWidth, top: 34 + RULER_HEIGHT }}>
           <EmptyProject />
         </div>
       )}
+      {menu && <Menu at={menu.at} entries={menu.entries} onClose={() => setMenu(null)} />}
     </section>
   );
 }

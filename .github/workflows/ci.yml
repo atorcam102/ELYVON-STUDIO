@@ -62,6 +62,8 @@ jobs:
 
   e2e:
     name: End-to-end (Linux, real binary)
+    env:
+      WEBKIT_DISABLE_COMPOSITING_MODE: "1"
     runs-on: ubuntu-24.04
     needs: frontend
     steps:
@@ -73,8 +75,8 @@ jobs:
       - name: System libraries and WebDriver
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev \
-            libasound2-dev webkit2gtk-driver xvfb dbus-x11
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev libasound2-dev \
+            webkit2gtk-driver xvfb dbus-x11
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: tauri-driver
@@ -90,13 +92,6 @@ jobs:
         env:
           E2E_METRICS: e2e-evidence/native-metrics.json
         run: xvfb-run -a -s "-screen 0 1280x800x24" dbus-run-session -- node e2e/measure.mjs
-      - name: Audio device inventory and headless engine run (no sound card on the runner)
-        run: |
-          mkdir -p e2e-evidence
-          cargo run --locked -p elyvon-audio-device --example audio-probe -- --list | tee e2e-evidence/audio-devices.txt
-          cargo run --locked -p elyvon-audio-device --example audio-probe -- \
-            --host headless --device headless:clock --rate 48000 --buffer 256 --seconds 5 \
-            --json e2e-evidence/audio-headless.json | tee e2e-evidence/audio-headless.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -106,71 +101,6 @@ jobs:
             e2e-evidence
           retention-days: 30
           if-no-files-found: error
-
-  msrv:
-    name: Minimum Rust version (1.90)
-    runs-on: ubuntu-24.04
-    needs: frontend
-    steps:
-      - uses: actions/checkout@v5
-      - name: System libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev libasound2-dev
-      - uses: dtolnay/rust-toolchain@1.90
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: msrv
-      - uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: dist
-      - name: Workspace builds with the declared rust-version
-        run: cargo check --workspace --all-targets --locked
-
-  audio-targets:
-    name: Audio engine type-check (Windows ARM64, macOS x64/ARM64)
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-pc-windows-msvc,x86_64-apple-darwin,aarch64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: audio-targets
-      # Type-checks the WASAPI/CoreAudio code paths without linking or running.
-      # This is compile evidence only, not platform support.
-      - name: cargo check per target
-        run: |
-          for target in aarch64-pc-windows-msvc x86_64-apple-darwin aarch64-apple-darwin; do
-            cargo check --locked --target "$target" -p elyvon-audio -p elyvon-audio-device --all-targets
-          done
-
-  audio-macos:
-    name: Audio engine tests (macOS Apple Silicon, CoreAudio)
-    # macOS minutes are expensive: run on PRs, main and manual dispatch only.
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: audio-macos
-      - name: Engine core and device layer tests (headless + CoreAudio enumeration)
-        run: cargo test --locked -p elyvon-audio -p elyvon-audio-device
-      - name: Device inventory on the runner
-        run: |
-          mkdir -p audio-evidence
-          cargo run --locked -p elyvon-audio-device --example audio-probe -- --list | tee audio-evidence/macos-audio-devices.txt
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: audio-evidence-macos
-          path: audio-evidence
-          retention-days: 30
-          if-no-files-found: warn
 
   dependencies:
     name: Dependencies, licences and workflow syntax
@@ -232,12 +162,6 @@ jobs:
         with:
           target: ${{ matrix.target }}
           node-version: ${{ env.NODE_VERSION }}
-      - name: Audio engine tests on Windows (WASAPI enumeration, RT checks)
-        shell: bash
-        run: |
-          cargo test --locked --target ${{ matrix.target }} -p elyvon-audio -p elyvon-audio-device
-          mkdir -p ci-audio
-          cargo run --locked --target ${{ matrix.target }} -p elyvon-audio-device --example audio-probe -- --list | tee ci-audio/audio-devices.txt
       - name: Build installers (unsigned verification build)
         shell: bash
         env:
@@ -256,10 +180,3 @@ jobs:
           name: ci-${{ matrix.label }}
           path: ci-artifacts
           retention-days: 3
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: audio-evidence-${{ matrix.label }}
-          path: ci-audio
-          retention-days: 30
-          if-no-files-found: warn

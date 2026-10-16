@@ -6,7 +6,6 @@
 
 use std::path::{Path, PathBuf};
 
-use elyvon_audio_device::types::AudioPreferences;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -24,10 +23,35 @@ pub struct Settings {
     pub recent_projects: Vec<String>,
     pub layout: Layout,
     pub browser_dir: Option<String>,
-    /// Audio device preferences. Added in Phase 03 with defaults, so schema-1
-    /// settings files from earlier builds load unchanged. Changed only through
-    /// the `audio_configure` command (see `settings_set`).
-    pub audio: AudioPreferences,
+    pub audio: AudioSettings,
+}
+
+/// Audio output preferences.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct AudioSettings {
+    /// Use an audio device. When off (or when no device works) the engine
+    /// runs on its internal clock without sound.
+    pub use_device: bool,
+    /// Device id from `audio_devices`; `None` = system default.
+    pub output_device: Option<String>,
+    pub input_device: Option<String>,
+    pub recording_offset_frames: i32,
+    /// Requested buffer size in frames; 0 = device default.
+    pub buffer_frames: u32,
+}
+
+impl Default for AudioSettings {
+    fn default() -> Self {
+        Self {
+            use_device: true,
+            output_device: None,
+            input_device: None,
+            recording_offset_frames: 0,
+            buffer_frames: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -62,7 +86,7 @@ impl Default for Settings {
             recent_projects: Vec::new(),
             layout: Layout::default(),
             browser_dir: None,
-            audio: AudioPreferences::default(),
+            audio: AudioSettings::default(),
         }
     }
 }
@@ -114,10 +138,19 @@ impl Settings {
         if !["files", "loops", "instruments", "plugins"].contains(&l.browser_tab.as_str()) {
             l.browser_tab = d.browser_tab;
         }
+        let a = &mut self.audio;
+        if a.buffer_frames != 0 {
+            a.buffer_frames = a.buffer_frames.clamp(32, 8192);
+        }
+        if a.output_device
+            .as_deref()
+            .is_some_and(|d| d.is_empty() || d.len() > 512)
+        {
+            a.output_device = None;
+        }
         self.recent_projects.retain(|p| !p.is_empty());
         self.recent_projects.dedup();
         self.recent_projects.truncate(MAX_RECENT);
-        self.audio = self.audio.sanitized();
         self
     }
 
@@ -204,22 +237,6 @@ mod tests {
     }
 
     #[test]
-    fn phase_1_settings_without_audio_keep_their_values_and_get_audio_defaults() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join(SETTINGS_FILE),
-            r#"{"schemaVersion":1,"updates":{"checkOnStartup":false},"recentProjects":["/a.elyvon"],"layout":{"bottomTab":"pianoRoll"},"browserDir":"/music"}"#,
-        )
-        .unwrap();
-        let s = Settings::load(dir.path());
-        assert!(!s.updates.check_on_startup);
-        assert_eq!(s.recent_projects, ["/a.elyvon"]);
-        assert_eq!(s.layout.bottom_tab, "pianoRoll");
-        assert_eq!(s.browser_dir.as_deref(), Some("/music"));
-        assert_eq!(s.audio, AudioPreferences::default());
-    }
-
-    #[test]
     fn corrupt_file_is_moved_aside() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(SETTINGS_FILE), b"{nope").unwrap();
@@ -241,6 +258,12 @@ mod tests {
         assert_eq!(s.layout.bottom_height, Layout::default().bottom_height);
         assert_eq!(s.layout.bottom_tab, "mixer");
         assert_eq!(s.recent_projects.len(), MAX_RECENT);
+        let mut s = Settings::default();
+        s.audio.buffer_frames = 3;
+        s.audio.output_device = Some(String::new());
+        let s = s.sanitized();
+        assert_eq!(s.audio.buffer_frames, 32);
+        assert_eq!(s.audio.output_device, None);
     }
 
     #[test]

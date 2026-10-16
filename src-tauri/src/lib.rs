@@ -5,9 +5,12 @@
 //! logging, preferences, crash recovery and updates. Musical logic lives in
 //! the core crates; the webview is purely a presentation layer.
 
+pub mod audio;
 pub mod commands;
 pub mod error;
 pub mod menu;
+pub mod midi;
+pub mod recording;
 pub mod settings;
 pub mod state;
 pub mod updater;
@@ -16,9 +19,6 @@ use std::sync::atomic::Ordering;
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
-
-use elyvon_audio_device::SystemBackend;
-use elyvon_audio_device::manager::{AudioManager, ManagerOptions};
 
 use crate::settings::Settings;
 use crate::state::{AppPaths, AppState};
@@ -65,10 +65,11 @@ fn request_close(app: &tauri::AppHandle) -> bool {
     if state.exit_confirmed.load(Ordering::SeqCst) {
         return false;
     }
-    if state.is_dirty() {
+    if state.is_dirty() || state.capture.is_active() || state.midi.is_recording() {
         let _ = app.emit(CLOSE_REQUESTED_EVENT, ());
         true
     } else {
+        state.midi.shutdown();
         state.clear_recovery();
         false
     }
@@ -95,21 +96,22 @@ pub fn run() {
                 std::env::consts::ARCH
             );
             let settings = Settings::load(&paths.config_dir);
-            // The device manager opens the audio device on its own thread, so
-            // a slow or missing device never delays the window.
-            let handle = app.handle().clone();
-            let audio = AudioManager::start(
-                Box::new(SystemBackend::default()),
-                settings.audio.clone(),
-                ManagerOptions::default(),
-                Some(Box::new(move |status| {
-                    if let Err(e) = handle.emit(commands::audio::AUDIO_STATUS_EVENT, status) {
-                        log::warn!("could not forward audio status: {e}");
-                    }
-                })),
-            );
-            app.manage(AppState::new(paths, settings, Some(audio)));
+            let audio_settings = settings.audio.clone();
+            app.manage(AppState::new(paths, settings));
+            app.state::<AppState>()
+                .midi
+                .start_worker(app.handle().clone());
             app.set_menu(menu::build(app.handle())?)?;
+            // Opening a device can take a moment: never block the window.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let rate = handle.state::<AppState>().session().project().sample_rate;
+                handle
+                    .state::<AppState>()
+                    .audio
+                    .start(&handle, &audio_settings, rate);
+            });
+            audio::spawn_publisher(app.handle().clone());
             Ok(())
         })
         .on_menu_event(|app, event| {
@@ -135,6 +137,21 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            commands::midi::midi_status,
+            commands::midi::midi_refresh,
+            commands::midi::midi_panic,
+            commands::midi::midi_send,
+            commands::midi::midi_record_start,
+            commands::midi::midi_record_stop,
+            commands::midi::midi_import,
+            commands::midi::midi_export,
+            commands::recording::recording_measure_latency,
+            commands::recording::recording_devices,
+            commands::recording::recording_status,
+            commands::recording::recording_start,
+            commands::recording::recording_stop,
+            commands::recording::recording_recoverable,
+            commands::recording::recording_recover,
             commands::project::project_get,
             commands::project::project_new,
             commands::project::project_open,
@@ -151,15 +168,18 @@ pub fn run() {
             commands::browser::browser_places,
             commands::system::app_info,
             commands::system::app_contracts,
-            commands::audio::audio_status,
+            commands::system::audio_status,
             commands::audio::audio_devices,
-            commands::audio::audio_configure,
-            commands::audio::audio_reconnect,
-            commands::audio::audio_telemetry,
-            commands::audio::audio_play,
-            commands::audio::audio_stop,
-            commands::audio::audio_locate,
-            commands::audio::audio_test_tone,
+            commands::audio::audio_restart,
+            commands::audio::transport_command,
+            commands::audio::transport_state,
+            commands::audio::transport_tap,
+            commands::audio::media_formats,
+            commands::audio::media_status,
+            commands::audio::media_import,
+            commands::audio::media_relink,
+            commands::audio::media_region_peaks,
+            commands::audio::project_render,
             commands::system::settings_get,
             commands::system::settings_set,
             commands::system::app_quit,
@@ -180,13 +200,14 @@ pub fn run() {
         }
     };
 
-    app.run(|app, event| match event {
+    app.run(|app, event| {
         // Dock "Quit", logout, Cmd+Q from the system: same unsaved-changes guard.
-        RunEvent::ExitRequested {
+        if let RunEvent::ExitRequested {
             code: None, api, ..
-        } if request_close(app) => api.prevent_exit(),
-        // Close the audio streams cleanly before the process ends.
-        RunEvent::Exit => app.state::<AppState>().shutdown_audio(),
-        _ => {}
+        } = event
+            && request_close(app)
+        {
+            api.prevent_exit();
+        }
     });
 }

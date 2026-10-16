@@ -15,7 +15,7 @@ export interface Selection {
 export interface UiPresentationV1 {
   layout: Layout;
   pxPerQuarter: number;
-  /** Edit cursor position in ticks (there is no playback yet). */
+  /** Edit cursor in ticks; while playing, the playhead comes from the engine. */
   cursorTicks: number;
   selection: Selection;
   settingsOpen: SettingsSection | null;

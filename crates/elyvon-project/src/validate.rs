@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use elyvon_core::Ticks;
 
 use crate::error::ValidationError;
-use crate::model::{Project, RegionContent, Track};
+use crate::model::{MediaId, Project, RegionContent, Track, Transport};
 
 /// Hard limits that keep memory use and file sizes bounded.
 pub mod limits {
@@ -21,6 +21,11 @@ pub mod limits {
     pub const MAX_PATH_CHARS: usize = 4096;
     /// ~2^40 ticks: hours of music at any tempo, far from overflow.
     pub const MAX_TICKS: u64 = 1 << 40;
+    pub const MAX_MARKERS: usize = 1000;
+    pub const MAX_MEDIA: usize = 4096;
+    pub const MAX_MEDIA_CHANNELS: u16 = 32;
+    pub const MIN_MEDIA_RATE: u32 = 1000;
+    pub const MAX_MEDIA_RATE: u32 = 768_000;
 }
 
 use limits::*;
@@ -72,6 +77,56 @@ pub fn validate(project: &Project) -> Result<(), ValidationError> {
             "start must be before end",
         ));
     }
+    let punch = &t.punch;
+    check_ticks("transport.punch.end", punch.end)?;
+    if punch.start >= punch.end {
+        return Err(ValidationError::new(
+            "transport.punch",
+            "start must be before end",
+        ));
+    }
+    for (i, c) in t.tempo_changes.iter().enumerate() {
+        check_ticks(&format!("transport.tempoChanges[{i}].tick"), c.tick)?;
+    }
+    t.tempo_map()
+        .map_err(|e| ValidationError::new("transport.tempoChanges", e.to_string()))?;
+    let m = &t.metronome;
+    if !(Track::MIN_VOLUME_DB..=Track::MAX_VOLUME_DB).contains(&m.volume_db) {
+        return Err(ValidationError::new(
+            "transport.metronome.volumeDb",
+            "must be between -96 and 6 dB",
+        ));
+    }
+    if t.count_in_bars > Transport::MAX_COUNT_IN_BARS {
+        return Err(ValidationError::new("transport.countInBars", "must be 0–4"));
+    }
+    if t.pre_roll_bars > Transport::MAX_PRE_ROLL_BARS {
+        return Err(ValidationError::new("transport.preRollBars", "must be 0–4"));
+    }
+    if !Project::SAMPLE_RATES.contains(&project.sample_rate) {
+        return Err(ValidationError::new(
+            "sampleRate",
+            "must be 44100, 48000, 88200, 96000, 176400 or 192000",
+        ));
+    }
+    if project.markers.len() > MAX_MARKERS {
+        return Err(ValidationError::new(
+            "markers",
+            format!("more than {MAX_MARKERS} markers"),
+        ));
+    }
+    let mut marker_ids = HashSet::with_capacity(project.markers.len());
+    for (i, marker) in project.markers.iter().enumerate() {
+        validate_name(&format!("markers[{i}].name"), &marker.name)?;
+        check_ticks(&format!("markers[{i}].tick"), marker.tick)?;
+        if !marker_ids.insert(marker.id) {
+            return Err(ValidationError::new(
+                format!("markers[{i}].id"),
+                "duplicate marker id",
+            ));
+        }
+    }
+    let media = validate_media(project)?;
     if project.length_bars == 0 || project.length_bars > MAX_LENGTH_BARS {
         return Err(ValidationError::new(
             "lengthBars",
@@ -95,7 +150,7 @@ pub fn validate(project: &Project) -> Result<(), ValidationError> {
                 "duplicate track id",
             ));
         }
-        validate_track(&tp, track)?;
+        validate_track(&tp, track, &media)?;
         for (ri, region) in track.regions.iter().enumerate() {
             if !region_ids.insert(region.id) {
                 return Err(ValidationError::new(
@@ -108,7 +163,63 @@ pub fn validate(project: &Project) -> Result<(), ValidationError> {
     Ok(())
 }
 
-fn validate_track(tp: &str, track: &Track) -> Result<(), ValidationError> {
+/// Validates the media pool and returns its ids.
+fn validate_media(project: &Project) -> Result<HashSet<MediaId>, ValidationError> {
+    if project.media.len() > MAX_MEDIA {
+        return Err(ValidationError::new(
+            "media",
+            format!("more than {MAX_MEDIA} files"),
+        ));
+    }
+    let mut ids = HashSet::with_capacity(project.media.len());
+    for (i, asset) in project.media.iter().enumerate() {
+        let mp = format!("media[{i}]");
+        if !ids.insert(asset.id) {
+            return Err(ValidationError::new(
+                format!("{mp}.id"),
+                "duplicate media id",
+            ));
+        }
+        validate_name(&format!("{mp}.name"), &asset.name)?;
+        if asset.path.is_empty() || asset.path.chars().count() > MAX_PATH_CHARS {
+            return Err(ValidationError::new(
+                format!("{mp}.path"),
+                "is empty or too long",
+            ));
+        }
+        if let Some(info) = &asset.info {
+            if !(MIN_MEDIA_RATE..=MAX_MEDIA_RATE).contains(&info.sample_rate) {
+                return Err(ValidationError::new(
+                    format!("{mp}.info.sampleRate"),
+                    "is out of range",
+                ));
+            }
+            if info.channels == 0 || info.channels > MAX_MEDIA_CHANNELS {
+                return Err(ValidationError::new(
+                    format!("{mp}.info.channels"),
+                    "must be 1–32",
+                ));
+            }
+            if info.frames > MAX_TICKS || info.format.len() > 16 || info.fingerprint.len() > 32 {
+                return Err(ValidationError::new(
+                    format!("{mp}.info"),
+                    "is out of range",
+                ));
+            }
+        }
+    }
+    Ok(ids)
+}
+
+fn validate_track(
+    tp: &str,
+    track: &Track,
+    media: &HashSet<MediaId>,
+) -> Result<(), ValidationError> {
+    track
+        .io
+        .validate()
+        .map_err(|e| ValidationError::new(format!("{tp}.io"), e))?;
     validate_name(&format!("{tp}.name"), &track.name)?;
     if !(Track::MIN_VOLUME_DB..=Track::MAX_VOLUME_DB).contains(&track.volume_db) {
         return Err(ValidationError::new(
@@ -134,6 +245,31 @@ fn validate_track(tp: &str, track: &Track) -> Result<(), ValidationError> {
     }
     for (ri, region) in track.regions.iter().enumerate() {
         let rp = format!("{tp}.regions[{ri}]");
+        if region.midi_events.len() > MAX_NOTES_PER_REGION
+            || region
+                .midi_events
+                .iter()
+                .any(|e| e.tick > region.length || !crate::io::validate_midi_bytes(&e.bytes))
+            || region.midi_events.windows(2).any(|w| w[0].tick > w[1].tick)
+        {
+            return Err(ValidationError::new(
+                format!("{rp}.midiEvents"),
+                "invalid, unordered or excessive MIDI events",
+            ));
+        }
+        if !region.midi_events.is_empty() && !matches!(region.content, RegionContent::Midi { .. }) {
+            return Err(ValidationError::new(
+                format!("{rp}.midiEvents"),
+                "MIDI events require a MIDI region",
+            ));
+        }
+        if region.capture.as_ref().is_some_and(|c| c.take == 0) {
+            return Err(ValidationError::new(
+                format!("{rp}.capture"),
+                "take numbers start at one",
+            ));
+        }
+
         validate_name(&format!("{rp}.name"), &region.name)?;
         check_ticks(&format!("{rp}.start"), region.start)?;
         check_ticks(&format!("{rp}.length"), region.length)?;
@@ -150,14 +286,34 @@ fn validate_track(tp: &str, track: &Track) -> Result<(), ValidationError> {
             ));
         }
         match &region.content {
-            RegionContent::Audio { source } => {
-                if let Some(src) = source
-                    && (src.path.is_empty() || src.path.chars().count() > MAX_PATH_CHARS)
+            RegionContent::Audio {
+                media: id,
+                offset,
+                gain_db,
+                fade_in,
+                fade_out,
+                ..
+            } => {
+                if let Some(id) = id
+                    && !media.contains(id)
                 {
                     return Err(ValidationError::new(
-                        format!("{rp}.content.source.path"),
-                        "is empty or too long",
+                        format!("{rp}.content.media"),
+                        "refers to a file that is not in the media pool",
                     ));
+                }
+                if !(RegionContent::MIN_GAIN_DB..=RegionContent::MAX_GAIN_DB).contains(gain_db) {
+                    return Err(ValidationError::new(
+                        format!("{rp}.content.gainDb"),
+                        "must be between -96 and 24 dB",
+                    ));
+                }
+                for (name, v) in [
+                    ("offset", offset),
+                    ("fadeIn", fade_in),
+                    ("fadeOut", fade_out),
+                ] {
+                    check_ticks(&format!("{rp}.content.{name}"), *v)?;
                 }
             }
             RegionContent::Midi { notes } => {
@@ -244,11 +400,14 @@ mod tests {
     fn rejects_region_on_incompatible_track() {
         let mut p = project_with_track();
         p.tracks[0].regions.push(Region {
+            capture: None,
+            midi_events: Vec::new(),
             id: RegionId::new(),
             name: "Clip".into(),
             start: 0,
             length: 960,
-            content: RegionContent::Audio { source: None },
+            muted: false,
+            content: RegionContent::audio(None),
         });
         assert!(validate(&p).unwrap_err().message.contains("not allowed"));
     }
@@ -257,10 +416,13 @@ mod tests {
     fn rejects_invalid_notes() {
         let mut p = project_with_track();
         p.tracks[0].regions.push(Region {
+            capture: None,
+            midi_events: Vec::new(),
             id: RegionId::new(),
             name: "Notes".into(),
             start: 0,
             length: 960,
+            muted: false,
             content: RegionContent::Midi {
                 notes: vec![MidiNote {
                     pitch: 200,

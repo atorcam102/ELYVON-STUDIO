@@ -4,4 +4,4 @@
  * MIDI 1.0 channel messages; channels are zero-based, data bytes are 0..=127.
  * SysEx, MIDI 2.0 and device routing are outside this version.
  */
-export type MidiMessage = { "type": "noteOn", channel: number, pitch: number, velocity: number, } | { "type": "noteOff", channel: number, pitch: number, velocity: number, } | { "type": "controlChange", channel: number, controller: number, value: number, };
+export type MidiMessage = { "type": "programChange", channel: number, program: number, } | { "type": "pitchBend", channel: number, value: number, } | { "type": "channelPressure", channel: number, pressure: number, } | { "type": "polyPressure", channel: number, pitch: number, pressure: number, } | { "type": "noteOn", channel: number, pitch: number, velocity: number, } | { "type": "noteOff", channel: number, pitch: number, velocity: number, } | { "type": "controlChange", channel: number, controller: number, value: number, };

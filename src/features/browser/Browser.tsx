@@ -9,9 +9,10 @@ import { Tabs } from "../../components/Tabs";
 import { fileName, formatBytes } from "../../lib/format";
 import { ipc, toIpcError, type IpcError } from "../../lib/ipc";
 import { notify } from "../../state/notifications";
-import { useProject } from "../../state/project";
+import { currentProject, useProject } from "../../state/project";
 import { useUi, type BrowserTab } from "../../state/ui";
 import { openProject } from "../project/projectActions";
+import { AUDIO_EXTENSIONS, importAudioFiles, isAudioPath } from "../project/regionActions";
 
 const ENTRY_ICON: Record<EntryKind, IconName> = {
   directory: "folder",
@@ -60,11 +61,16 @@ function FileBrowser() {
   const activate = (entry: DirEntry) => {
     if (entry.kind === "directory") void load(entry.path);
     else if (entry.kind === "project") void openProject(entry.path);
-    else if (entry.kind === "audio" || entry.kind === "midi")
-      notify(
-        "info",
-        `Importing ${entry.kind === "audio" ? "audio" : "MIDI"} files arrives in a later phase.`,
-      );
+    else if (entry.kind === "audio") {
+      if (!isAudioPath(entry.path)) {
+        notify("info", `This audio format is not supported yet. Supported: ${AUDIO_EXTENSIONS.join(", ")}.`);
+        return;
+      }
+      const project = currentProject();
+      const ui = useUi.getState();
+      const track = project?.tracks.find((t) => ui.selection.trackIds.includes(t.id) && t.kind === "audio");
+      void importAudioFiles([entry.path], track?.id ?? null, ui.cursorTicks, track ? "sequential" : "newTracks");
+    } else if (entry.kind === "midi") notify("info", "Importing MIDI files arrives in a later phase.");
   };
 
   return (
@@ -134,7 +140,9 @@ function FileBrowser() {
                   ? "Double-click to open"
                   : e.kind === "directory"
                     ? "Double-click to open folder"
-                    : e.name
+                    : e.kind === "audio"
+                      ? "Double-click to import at the cursor (selected audio track or a new track)"
+                      : e.name
               }
             >
               <Icon name={ENTRY_ICON[e.kind]} size={14} />

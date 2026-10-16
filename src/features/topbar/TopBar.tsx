@@ -1,3 +1,7 @@
+import { useMidi } from "../../state/midi";
+import { MidiDialog } from "../midi/MidiDialog";
+import { useCapture } from "../../state/capture";
+import { RecordingDialog } from "../recording/RecordingDialog";
 import { useState } from "react";
 import type { KeyMode } from "../../bindings/KeyMode";
 import type { PitchClass } from "../../bindings/PitchClass";
@@ -8,16 +12,19 @@ import { Menu, type MenuEntry } from "../../components/Popover";
 import { useMenu } from "../../components/useMenu";
 import {
   DENOMINATORS,
-  formatClock,
   positionFromTicks,
   PITCH_CLASSES,
 } from "../../lib/music";
 import { shortcutLabel } from "../../lib/platform";
-import { engineRunning, useAudio } from "../../state/audio";
+import { engineAvailable, useApp } from "../../state/app";
 import { useProject } from "../../state/project";
 import { useUi } from "../../state/ui";
 import { hasUpdateBadge, useUpdates } from "../../state/updates";
 import { redo, toggleLoop, undo } from "../project/editActions";
+import { formatClockSeconds, TempoMap } from "../../lib/tempoMap";
+import { isRolling, useTransport } from "../../state/transport";
+import { locate, pause, play, stop, tapTempo, toggleCountIn, toggleMetronome } from "../transport/transportActions";
+import { TimelineSettingsDialog } from "./TimelineSettingsDialog";
 import {
   newProject,
   openProject,
@@ -156,62 +163,55 @@ function FileButtons() {
   );
 }
 
-function engineReason(status: ReturnType<typeof useAudio.getState>["status"]): string {
-  return status?.message ?? "The audio engine is starting.";
-}
-
 function Transport() {
-  const status = useAudio((s) => s.status);
-  const playing = useAudio((s) => s.transportIntent === "playing");
-  const play = useAudio((s) => s.play);
-  const stop = useAudio((s) => s.stop);
-  const setCursor = useUi((s) => s.setCursor);
-  const available = engineRunning(status);
-  const label = (what: string, shortcut?: string) =>
-    available
-      ? `${what}${shortcut ? ` (${shortcut})` : ""}`
-      : `${what} — unavailable: ${engineReason(status)}`;
+  const [inputOpen,setInputOpen]=useState(false);
+  const [midiOpen,setMidiOpen]=useState(false);
+  const capture=useCapture();
+  const midiRecording=useMidi(s=>!!s.status?.recording);
+  const recording=!!capture.status?.active&&!capture.status.monitoring||midiRecording;
+  const engine = useApp((s) => s.engine);
+  const snapshot = useTransport((s) => s.snapshot);
+  const available = engineAvailable(engine);
+  const reason = engine?.state === "unavailable" ? engine.reason : "";
+  const label = (what: string) => (available ? what : `${what} — unavailable: ${reason}`);
+  const rolling = isRolling(snapshot);
   return (
     <div className="cb-transport" role="group" aria-label="Transport">
-      <CbButton
-        icon="toStart"
-        label="Go to beginning"
-        onClick={() => setCursor(0)}
-      />
-      <CbButton
-        icon="stop"
-        label={label("Stop", "Space")}
-        disabled={!available}
-        onClick={() => void stop()}
-      />
-      <CbButton
-        icon="play"
-        tone="play"
-        label={label("Play", "Space")}
-        disabled={!available}
-        active={playing}
-        size={17}
-        onClick={() => void play()}
-      />
-      <CbButton
-        icon="record"
-        tone="record"
-        label="Record — not available yet: recording arrives in a later phase"
-        disabled
-      />
+      <CbButton icon="toStart" label="Go to beginning (Home)" onClick={() => locate(0)} />
+      <CbButton icon="stop" label={label("Stop")} disabled={!available} onClick={stop} active={snapshot?.state === "stopped" ? undefined : false} />
+      {rolling ? (
+        <CbButton icon="pause" tone="play" label={label("Pause (Space stops)")} disabled={!available||recording} onClick={pause} active size={17} />
+      ) : (
+        <CbButton icon="play" tone="play" label={label("Play (Space)")} disabled={!available} onClick={play} size={17} />
+      )}
+      <CbButton icon="record" tone="record" label={capture.status?.active?(capture.status.monitoring?"Stop input monitoring":"Stop recording"):"Record armed audio tracks"} active={capture.status?.active&&!capture.status.monitoring} disabled={!available||capture.pending||midiRecording} onClick={()=>void(capture.status?.active?capture.stop():capture.start())}/>
+      <button type="button" className="cb-btn" aria-label="Audio recording settings" onClick={()=>setInputOpen(true)}>Input</button>
+      <RecordingDialog open={inputOpen} onClose={()=>setInputOpen(false)}/>
+      <button type="button" className="cb-btn" aria-label="MIDI devices and monitor" onClick={()=>setMidiOpen(true)}>MIDI</button>
+      <MidiDialog open={midiOpen} onClose={()=>setMidiOpen(false)}/>
     </div>
   );
 }
 
 function Lcd() {
-  const cursor = useUi((s) => s.cursorTicks);
+  const cursorTicks = useUi((s) => s.cursorTicks);
+  const snapshot = useTransport((s) => s.snapshot);
+  const rolling = isRolling(snapshot);
+  const cursor = rolling && snapshot ? Math.floor(snapshot.ticks) : cursorTicks;
   const transport = useProject((s) => s.view?.project.transport);
+  const [mapOpen, setMapOpen] = useState(false);
   const apply = useProject((s) => s.apply);
   const sigMenu = useMenu();
   const keyMenu = useMenu();
   if (!transport) return <div className="lcd" />;
   const ts = transport.timeSignature;
-  const p = positionFromTicks(cursor, ts);
+  const map = TempoMap.fromTransport(transport);
+  const bar = map.barAt(cursor);
+  const p = positionFromTicks(cursor - bar.start, bar.ts);
+  p.bar = bar.bar + 1;
+  const seconds = rolling && snapshot ? snapshot.seconds : map.secondsAt(cursor);
+  const countIn = snapshot?.state === "countIn" ? snapshot.countInRemaining : 0;
+  const bpmNow = map.bpmAt(cursor);
 
   const sigEntries: MenuEntry[] = [
     { heading: "Time signature" },
@@ -312,9 +312,10 @@ function Lcd() {
     <div className="lcd" role="group" aria-label="Display">
       <div
         className="lcd__cell lcd__position"
-        title={`Cursor position · ${formatClock(cursor, transport.tempo)}`}
+        title={rolling ? "Playhead position reported by the audio engine" : "Cursor position"}
+        data-testid="lcd-position"
       >
-        <div className="lcd__clock">{formatClock(cursor, transport.tempo)}</div>
+        <div className="lcd__clock">{countIn > 0 ? `Count-in ${countIn.toFixed(1)} s` : formatClockSeconds(seconds)}</div>
         <div className="lcd__digits">
           <span className="lcd__big">{p.bar}</span>
           <span className="lcd__big">{p.beat}</span>
@@ -333,7 +334,10 @@ function Lcd() {
           className="lcd__number"
         />
         <div className="lcd__labels">
-          <span>KEEP TEMPO</span>
+          <button type="button" className="lcd__tap" title="Tap tempo (native clock; applies from the third tap)" onClick={() => void tapTempo()}>
+            TAP
+          </button>
+          <span title="Tempo at the playhead">{transport.tempoChanges.length > 0 ? `now ${Number(bpmNow.toFixed(2))}` : "BPM"}</span>
         </div>
       </div>
       <div className="lcd__cell lcd__meta">
@@ -343,7 +347,7 @@ function Lcd() {
           title="Time signature"
           onClick={(e) => sigMenu.openBelow(e.currentTarget)}
         >
-          {`${ts.numerator}/${ts.denominator}`}
+          {`${bar.ts.numerator}/${bar.ts.denominator}`}
         </button>
         <button
           type="button"
@@ -353,7 +357,16 @@ function Lcd() {
         >
           {`${transport.key.tonic}${transport.key.mode === "major" ? "maj" : "min"}`}
         </button>
+        <button
+          type="button"
+          className="lcd__btn lcd__btn--sub"
+          title="Tempo, metre, markers, cycle/punch, count-in and metronome"
+          onClick={() => setMapOpen(true)}
+        >
+          Map…
+        </button>
       </div>
+      <TimelineSettingsDialog open={mapOpen} onClose={() => setMapOpen(false)} />
       {sigMenu.at && (
         <Menu at={sigMenu.at} entries={sigEntries} onClose={sigMenu.close} />
       )}
@@ -366,17 +379,32 @@ function Lcd() {
 
 function Modes() {
   const view = useProject((s) => s.view);
-  const loop = view?.project.transport.loopRange.enabled ?? false;
+  const follow = useTransport((s) => s.follow);
+  const setFollow = useTransport((s) => s.setFollow);
+  const t = view?.project.transport;
+  const loop = t?.loopRange.enabled ?? false;
   return (
     <div className="cb-group" role="group" aria-label="Modes">
+      <CbButton icon="loop" tone="cycle" label={loop ? "Cycle on (L)" : "Cycle off (L)"} active={loop} onClick={toggleLoop} disabled={!view} />
       <CbButton
-        icon="loop"
+        icon="metronome"
         tone="cycle"
-        label={loop ? "Cycle on (L)" : "Cycle off (L)"}
-        active={loop}
-        onClick={toggleLoop}
+        label={t?.metronome.enabled ? "Metronome on (K)" : "Metronome off (K)"}
+        active={t?.metronome.enabled ?? false}
+        onClick={toggleMetronome}
         disabled={!view}
       />
+      <button
+        type="button"
+        className={`cb-btn cb-btn--cycle cb-text${(t?.countInBars ?? 0) > 0 ? " is-active" : ""}`}
+        aria-pressed={(t?.countInBars ?? 0) > 0}
+        title={(t?.countInBars ?? 0) > 0 ? `Count-in: ${t?.countInBars} bar(s) before playback` : "Count-in off"}
+        onClick={toggleCountIn}
+        disabled={!view}
+      >
+        1234
+      </button>
+      <CbButton icon="follow" tone="view" label={follow ? "Follow playhead on" : "Follow playhead off"} active={follow} onClick={() => setFollow(!follow)} />
     </div>
   );
 }
@@ -415,43 +443,11 @@ function ProjectTitle() {
   );
 }
 
-function statusText(status: ReturnType<typeof useAudio.getState>["status"]): string {
-  if (!status) return "Engine";
-  switch (status.state) {
-    case "running": {
-      const o = status.output;
-      if (!o) return "Engine";
-      const rate = `${(o.sampleRate / 1000).toFixed(o.sampleRate % 1000 ? 1 : 0)} kHz`;
-      return o.headless ? `Headless · ${rate}` : `Engine · ${rate}`;
-    }
-    case "starting":
-      return "Engine starting";
-    case "disabled":
-      return "Engine off";
-    case "noDevice":
-      return "No audio device";
-    case "deviceLost":
-      return "Device lost";
-    case "error":
-      return "Audio error";
-  }
-}
-
 function StatusIndicator() {
-  const status = useAudio((s) => s.status);
+  const engine = useApp((s) => s.engine);
   const pending = useProject((s) => s.pending);
   const updates = useUpdates((s) => s.state);
   const setUpdateOpen = useUi((s) => s.setUpdateOpen);
-  const openSettings = useUi((s) => s.openSettings);
-  const running = engineRunning(status);
-  const warn = running && (status?.notices.length ?? 0) > 0;
-  const title = running
-    ? [
-        `${status?.output?.deviceName} (${status?.output?.host})`,
-        ...(status?.notices.map((n) => n.message) ?? []),
-        "Click to open Settings › Audio.",
-      ].join("\n")
-    : `${engineReason(status)}\nClick to open Settings › Audio.`;
   return (
     <div className="status">
       {pending > 0 && <span className="status__busy" aria-label="Working" />}
@@ -466,16 +462,20 @@ function StatusIndicator() {
           <span>Update</span>
         </button>
       )}
-      <button
-        type="button"
-        className={`status__pill ${running ? (warn ? "is-warn" : "is-ok") : "is-offline"}`}
-        title={title}
-        aria-label={`Audio engine: ${statusText(status)}`}
-        onClick={() => openSettings("audio")}
+      <div
+        className={`status__pill ${engine?.state !== "running" ? "is-offline" : engine.output === "device" ? "is-ok" : "is-warn"}`}
+        title={
+          engine?.state === "running"
+            ? `${engine.device} · ${engine.config.sampleRate} Hz${engine.config.bufferFrames ? ` · ${engine.config.bufferFrames} frames` : ""}`
+            : (engine?.reason ?? "Audio engine starting")
+        }
+        data-testid="engine-status"
       >
         <span className="status__dot" />
-        <span className="status__text">{statusText(status)}</span>
-      </button>
+        <span className="status__text">
+          {engine?.state !== "running" ? "Engine offline" : engine.output === "device" ? `${engine.config.sampleRate / 1000} kHz` : "No audio output"}
+        </span>
+      </div>
     </div>
   );
 }

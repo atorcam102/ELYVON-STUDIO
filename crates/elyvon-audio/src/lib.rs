@@ -1,37 +1,37 @@
-//! Elyvon Studio audio engine core — driver-free and deterministic.
+//! The Elyvon Studio audio engine.
 //!
-//! This crate contains everything the real-time audio callback executes, but
-//! no device code: devices live in `elyvon-audio-device`, which moves an
-//! [`render::EngineCore`] into its callback. Because the core has no driver,
-//! CI renders it headlessly ([`offline`]) with bit-identical results.
-//!
-//! * [`render`] — the real-time core: transport, sample clock, silence,
-//!   opt-in test tone, meters, format conversion.
-//! * [`command`] — wait-free SPSC command queue (control → audio thread).
-//! * [`telemetry`] — lock-free meters, clocks and xrun/dropout counters
-//!   (audio thread → control thread).
-//! * [`format`] — planar/interleaved and sample-format conversion with clipping.
-//! * [`status`] — engine status reported to the UI.
-//! * [`offline`] — headless renderer and signal analysis for tests.
-//! * [`engine`], [`contracts`], [`gain`], [`rt`] — processor/graph/MIDI
-//!   contracts and primitives for later phases.
+//! * [`media`] — decoding (WAV/AIFF/FLAC/MP3/Ogg Vorbis), sample-rate
+//!   conversion and waveform peaks, on worker threads.
+//! * [`plan`] — an immutable playback plan built from a project on the control
+//!   thread: sample-accurate clip segments, MIDI notes, tempo map, metronome.
+//! * [`engine`] — engine status, the real-time [`engine::Engine`] and its
+//!   lock-free control handle.
+//! * [`transport`] — transport commands and the state shared with the UI.
+//! * [`render`] — offline (faster than real time) rendering and WAV export
+//!   through the same engine code path.
+//! * [`device`] — audio-device output (feature `device`) and an internal clock.
+//! * [`rt`], [`gain`], [`contracts`] — primitives and versioned contracts.
 //!
 //! # Real-time rules
 //!
 //! Code reachable from the audio callback must never allocate or free memory,
 //! take a lock that a non-real-time thread can hold, perform file or network
-//! IO, log, or call into the UI. Parameters reach the callback through the
-//! command queue or atomics; telemetry leaves it through atomics only.
-//! `tests/realtime.rs` verifies the no-allocation rule. See
-//! `docs/AUDIO_ENGINE.md`.
+//! IO, log, or call into the UI. Plans and commands reach the callback through
+//! pre-allocated lock-free SPSC queues (`rtrb`); replaced plans travel back to
+//! the control thread to be freed there. See `docs/ARCHITECTURE.md`.
 
-pub mod command;
 pub mod contracts;
+pub mod device;
 pub mod engine;
-pub mod format;
 pub mod gain;
-pub mod offline;
+#[cfg(feature = "device")]
+pub mod input;
+pub mod latency;
+pub mod media;
+pub mod midi;
+pub mod plan;
+pub mod recording;
 pub mod render;
 pub mod rt;
-pub mod status;
-pub mod telemetry;
+pub mod transport;
+pub mod waveform;

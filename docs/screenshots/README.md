@@ -7,12 +7,6 @@ Screenshots of the main frontend at commit [`fbc4566`](https://github.com/atorca
 | `01-arrangement-mixer.png` | Demo-session arrangement and mixer. |
 | `02-library-inspector.png` | Library and inspector with Keys selected. |
 | `03-piano-roll.png` | Read-only preview of the notes in Chords. |
-| `04-engine-headless-playing.png` | Phase 03: real desktop binary playing the demo on the headless clock with the test tone; output strip reads −18.0 dBFS. |
-| `05-settings-audio.png` | Phase 03: Settings › Audio showing the open stream and device selection. |
-
-Images 04–05 are WebDriver screenshots of the real native binary (WebKitWebDriver, Xvfb
-1280 × 800) taken by `e2e/app.e2e.mjs`, not mock captures. The headless clock produces no sound;
-they do not demonstrate audible output on hardware.
 
 ## Capture method
 
@@ -27,3 +21,13 @@ they do not demonstrate audible output on hardware.
 These are actual captures of the rendered frontend, not generated images or composites. They do not demonstrate execution of the Windows installer or working audio playback, recording or processing.
 
 When updating the images, keep the filenames and capture the same main entry point. Also review the features and limitations described in the root README.
+
+## Phases 04–05 (real native binary)
+
+| File | View |
+| --- | --- |
+| `04-imported-audio-waveform.png` | A 2-second 440 Hz WAV imported through `media_import`; the waveform is drawn from native peak columns of the decoded file. |
+| `05-engine-playback.png` | During playback: the LCD (00:00.320) and the playhead come from engine events; the status pill says "No audio output" because the CI/virtual display has no sound card and the engine runs on its internal clock. |
+
+Captured by `e2e/app.e2e.mjs` (WebKitWebDriver + tauri-driver, debug build, Xvfb 1280 × 800) on
+Ubuntu 24.04 x64 in the development container. No audio device was present; nothing was heard.

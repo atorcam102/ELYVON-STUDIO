@@ -7,35 +7,29 @@ is not device verification. Platform evidence and outstanding acceptance are in 
 | Area | State | Actual behaviour | Evidence / missing part |
 | --- | --- | --- | --- |
 | Session, tracks, regions, timeline data | Implemented | Rust model, stable IDs, integer PPQ 960, validated edits, musical settings | project/model.rs, edit.rs, validate.rs; Rust tests and generated bindings |
-| Save/open/save-as, undo/redo | Implemented | Atomic .elyvon schema-1 files, dirty tracking, two-phase save | tests/persistence.rs; native e2e/app.e2e.mjs |
+| Save/open/save-as, undo/redo | Implemented | Atomic .elyvon schema-3 files (schema 1/2 migrated on open), dirty tracking, two-phase save; every timeline/audio edit is one undo step | tests/persistence.rs (v1 + v2 fixtures), tests/io.rs; native e2e/app.e2e.mjs |
 | Recovery and unsaved guards | Implemented | Recovery snapshots, backend refuses destructive operations without explicit discard | recovery/session tests; native E2E |
 | GUI process restart + reload saved file | Implemented automated check | Stops native process, starts another, opens saved project and compares model | Native E2E; file dialogs are bypassed via real native IPC |
-| Arrangement | Partial | Region move, snap, zoom, MIDI region creation, cursor/cycle editing | src/features/timeline; native E2E; no audio import/waveform editing |
+| Arrangement | Implemented (Phase 05 scope) | Move, trim (non-destructive), split, duplicate, cut/copy/paste, region mute, gain, fades, loop; metre-aware ruler/grid; snap with triplets/swing; markers; engine-driven playhead with follow | timeline_edit.rs tests; src/lib/tempoMap.test.ts golden vectors; native E2E. No comping/flex/sample editor |
 | Piano roll | Partial | Read-only note display | src/features/editors; native screenshot E2E; editing absent |
-| Mixer | Partial | Saved fader/pan/mute/solo project parameters | Rust edit tests, frontend store and native UI E2E; no audio processing |
-| Audio waveforms in demo | Simulated | Labelled static illustration for demo audio with source:null | DemoWaveform.tsx; no decoder or audio file |
-| Audio engine core (RT callback) | Implemented, headless-verified | EngineCore: silence, transport, monotonic clock, test tone, peak meters, clamping, format conversion; no allocation in callback | audio/tests/realtime.rs (64–512 frames × 44.1/48/96 kHz, allocation counter); [AUDIO_ENGINE](AUDIO_ENGINE.md) |
-| Transport play/stop/locate | Partial | Real engine transport from the UI (Space, buttons), playhead follows engine clock | native E2E on headless clock; tracks are **not rendered** (silence + optional tone) |
-| Device enumeration/selection | Partial | Hosts, inputs/outputs, ranges, rates, buffers, formats, bit depth, defaults; Settings › Audio selection | CPAL backend; listing tested here (ALSA) and in Windows/macOS CI jobs; no physical-device validation |
-| Test tone + output meters | Implemented, no hardware check | Opt-in sine (≤ −6 dBFS, ramped), real output meters in mixer and Settings | realtime.rs, E2E reads −18 dBFS; audible output on real speakers untested |
-| Track meters | Simulated | Explicit opt-in simulation, off by default; tracks produce no signal yet | src/features/mixer |
-| Input metering | Partial | Optional input stream for level meters only | manager tests (fake backend); no capture/recording; untested on hardware |
-| Device preferences/fallback | Implemented, no hardware check | Per-device rate/buffer profiles in settings.json; fallback to default with actionable notice; switch-back | types.rs + manager.rs tests; settings migration test |
-| Hot-unplug / missing / busy device | Partial | Fault → deviceLost → reconnect; noDevice retry; busy error; project untouched | manager tests with scripted backend; **no physical unplug test** |
-| Xrun/dropout statistics | Implemented | Backend xruns, late callbacks, timing gaps, errors, clipping, load; logged off the callback | telemetry tests; container probe evidence |
-| Headless clock | Implemented | Explicit "no sound output" device for CI and machines without hardware | manager + E2E tests |
-| Recording | Absent | Record button disabled with explanation | No capture-to-disk implementation |
-| MIDI event contract | Partial | Version-1 MIDI 1.0 event types and validation of channel/data/block offsets | audio/tests/contracts.rs + midi-v1.json; no port/scheduler/MIDI 2.0/SysEx |
-| Audio graph contract | Partial | Versioned acyclic channel-routing proposal, bounds and cycle checks | graph-v1.json and Rust tests; no compiled graph/latency compensation/execution |
-| AudioProcessor/AtomicF32/gain-pan | Partial | Thread contract, atomic scalar and mathematical laws | audio Rust tests; graph executor/graph swap not implemented |
+| Mixer | Partial | Volume (dB), constant-power pan (mono)/balance (stereo), mute/solo applied by the engine; real post-fader peak meters | playback.rs tests; no sends, buses, inserts, automation or master fader processing |
+| Waveforms | Implemented | Real min/max columns from a peak pyramid of the decoded file, through tempo map/offset/loop; LRU cache, only the visible part is requested. Demo placeholders keep their labelled illustration | media/peaks.rs, waveform.rs, session.rs (zoom test, 20-min file); RegionWaveform.tsx |
+| Meters | Implemented (peak) | Track peaks from the callback via atomics, ~30 Hz events; simulation only offered when the engine is offline | transport.rs, Mixer.tsx; no RMS/LUFS/master meter |
+| Audio engine and transport | Implemented, hardware unverified | Lock-free RT engine; play/stop/pause/locate, cycle, count-in, pre-roll, metronome, tap tempo; tempo/metre map; cpal device output with internal-clock fallback | timing.rs, playback.rs, rt_alloc.rs, device.rs tests; native E2E plays under Xvfb on the internal clock. **No physical device test** |
+| Audio files (import, decode, resample) | Implemented, bounded RAM/disk cache | WAV/AIFF/FLAC/MP3/Ogg Vorbis via Symphonia, any rate resampled (rubato FFT); dialog, OS drag-and-drop, browser; missing/changed files reported; relink | media.rs, session.rs tests; native E2E import. Large files decode/resample into a temporary PCM disk cache; bounded worker-read pages feed playback. Cache misses are counted and failed exports are rejected. |
+| Offline render / diagnostic export | Implemented | Same engine path, 32-bit float WAV + JSON report (levels per channel/track, checksum) | session.rs (12 clips, export decode-back), timing.rs (10-min render); native E2E |
+| Recording, punch recording, input monitoring | Partial; native implementation, hardware unverified | CPAL input, per-track arming/channels, software monitor, multitrack WAV/BWF worker, count-in/pre-roll/punch/cycle, take groups/selection, checkpoint and recovery journals | recording.rs/input.rs and recording integration/RT tests; no physical voice/guitar/loopback test, concurrent multiple-input-device clock domains or live input SRC |
+| MIDI scheduling, ports and recording | Partial; native implementation, hardware unverified | Sample-accurate note/channel/SysEx events handed to a native MIDI worker; filtering, persisted routing, input monitor, virtual keyboard, sequence recording, SMF 0/1 import/type-1 export, panic and explicit missing-port handling | midi.rs tests and native E2E; OS/device sends have measured jitter, not guaranteed sample accuracy. No internal instrument, UMP, physical-device validation or playback note chase |
+| Audio graph contract and latency planning | Partial | Validated DAG plus per-edge delay planning and RT-safe delay lines; file-based loopback correlation | latency.rs tests; no hosted plug-in processing graph/executor, so plug-in delay compensation is not claimed as an active feature |
+| AudioProcessor/AtomicF32/gain-pan | Partial | Laws used by the engine; plan swap via SPSC queues | No processor graph/plug-in hosting yet |
 | Background jobs contract | Partial | Versioned snapshots/errors/progress/cancellation states | core/tests/jobs.rs + jobs-v1.json; no job scheduler or worker |
 | UI state | Implemented | Typed presentation state, layout persisted through Rust settings; selection not saved in project | uiContract.ts, ui.ts; settings/store tests |
-| File browser | Partial | Folder navigation and project open | browser.rs; no playable loop/instrument library |
-| Instruments, plug-ins, FX, bounce/export | Absent | Unavailable controls/disabled slots | No native implementation |
+| File browser | Partial | Folder navigation, project open, double-click audio import | browser.rs; no preview playback or loop library |
+| Instruments, plug-ins, FX, final mixdown formats | Absent | Unavailable controls/disabled slots | Only the diagnostic float WAV render exists |
 | Live Loops, step sequencer, chord popup | Simulated | Separate static reference.html | src/reference; not native production features |
 | Update policy/signature validation | Partial | Platform/installer/SemVer rules, signature fixtures, unsaved guard | update crate tests + updater.rs; production signed installation not tested |
 | Stable/beta channels | Partial | Stable rejects prereleases | version.rs; no independent beta endpoint or channel preference |
-| Windows x64/x86 distribution | Partial | Separate unsigned EXE/MSI + hashes in an actual Release | Release preview 3 (current) and preview 2; no physical host install/launch test |
+| Windows x64/x86 distribution | Partial | Separate unsigned EXE/MSI + hashes in an actual Release | Release preview 2; no physical host install/launch test |
 | Other five distribution targets | Absent verification | Target naming and legacy workflow configuration only | STATUS support table; no support claim |
 | Quality/dependency checks | Implemented with explicit debt | Shared local/CI commands, bindings, npm audit, cargo deny, actionlint, inventories | ci.yml; B-01 maintenance exception and licence obligations remain |
 | Native performance baseline | Partial | Reproducible launch/RSS/demo timeline measurement runner | e2e/measure.mjs; diagnostic debug/Xvfb, no audio or hardware budget claim |

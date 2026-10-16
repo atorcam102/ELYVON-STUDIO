@@ -3,6 +3,25 @@
 Este documento explica cómo se compilan, firman y publican las versiones de
 Elyvon Studio, y qué credenciales hay que configurar.
 
+## Preview 0.2.0 de audio y MIDI
+
+El tag `v0.2.0-windows-preview.1` identifica la aplicación 0.2.0 con las fases
+04–07 integradas. El workflow `Publish Windows preview` espera a que **CI** termine
+con éxito en `main`, comprueba que el tag apunta exactamente al SHA de ese run y
+verifica sus seis jobs. Descarga los cuatro instaladores x64/x86 de ese mismo run,
+valida nombres, cabeceras EXE/MSI y hashes, crea un borrador y lo publica después
+de descargar y verificar sus cinco archivos adjuntos. No recompila ni reutiliza
+binarios de versiones anteriores. Un CI de otro commit no modifica el release.
+
+Es una preview sin firma de updater ni Authenticode y no publica `latest.json`.
+No incluye instaladores de macOS/Linux. Se conserva el flujo SemVer general para
+otros lanzamientos; los pushes de tags `-windows-preview.*` siguen excluidos de
+su matriz heredada de siete plataformas. Para reintentar la publicación se puede
+ejecutar `Publish Windows preview` con el ID del CI correcto en `source_run`.
+
+La consolidación de los dos motores que divergieron en main/gallant está
+documentada en [ADR 0006](ADR/0006-converge-phase03-and-arrangement-engines.md).
+
 ## Estado auditado y alcance actual (2026-10-15)
 
 La distribución autorizada actualmente es **Windows x64 y x86**. El workflow CI
