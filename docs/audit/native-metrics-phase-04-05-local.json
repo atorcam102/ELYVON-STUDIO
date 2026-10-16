@@ -1,0 +1,230 @@
+{
+  "schemaVersion": 1,
+  "timestamp": "2026-10-16T06:53:12.433Z",
+  "commit": null,
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "logicalCpus": 4,
+    "totalMemoryBytes": 16874930176,
+    "binary": "/home/user/ELYVON-STUDIO/target/debug/elyvon-studio",
+    "build": "debug",
+    "display": "Xvfb (virtual display)"
+  },
+  "limitations": [
+    "Startup includes tauri-driver startup, WebDriver session creation and IPC readiness; not executable-only launch time.",
+    "RSS sums native app and observed WebKit descendants; shared pages can be counted multiple times. One-second idle, meters off.",
+    "Frame intervals under Xvfb are diagnostic, not hardware FPS, audio latency or a release-build performance guarantee.",
+    "Three sequential warm-cache launches; no cold-cache claim."
+  ],
+  "launches": [
+    {
+      "launchToReadyMs": 664.47047,
+      "idleMemory": {
+        "processes": [
+          {
+            "pid": 9347,
+            "name": "elyvon-studio",
+            "rssKiB": 195292
+          },
+          {
+            "pid": 9393,
+            "name": "WebKitNetworkPr",
+            "rssKiB": 48156
+          },
+          {
+            "pid": 9420,
+            "name": "WebKitWebProces",
+            "rssKiB": 374684
+          }
+        ],
+        "aggregateRssKiB": 618132
+      }
+    },
+    {
+      "launchToReadyMs": 730.363227,
+      "idleMemory": {
+        "processes": [
+          {
+            "pid": 9483,
+            "name": "elyvon-studio",
+            "rssKiB": 189296
+          },
+          {
+            "pid": 9495,
+            "name": "WebKitNetworkPr",
+            "rssKiB": 48148
+          },
+          {
+            "pid": 9525,
+            "name": "WebKitWebProces",
+            "rssKiB": 360596
+          }
+        ],
+        "aggregateRssKiB": 598040
+      }
+    },
+    {
+      "launchToReadyMs": 693.7221849999996,
+      "idleMemory": {
+        "processes": [
+          {
+            "pid": 9583,
+            "name": "elyvon-studio",
+            "rssKiB": 189892
+          },
+          {
+            "pid": 9595,
+            "name": "WebKitNetworkPr",
+            "rssKiB": 48036
+          },
+          {
+            "pid": 9625,
+            "name": "WebKitWebProces",
+            "rssKiB": 353428
+          }
+        ],
+        "aggregateRssKiB": 591356
+      }
+    }
+  ],
+  "timeline": {
+    "maxScrollLeft": 3226,
+    "p95Ms": 34,
+    "frameIntervalsMs": [
+      209,
+      13,
+      18,
+      19,
+      15,
+      14,
+      18,
+      17,
+      16,
+      18,
+      14,
+      17,
+      18,
+      16,
+      16,
+      20,
+      13,
+      20,
+      15,
+      16,
+      188,
+      23,
+      15,
+      36,
+      16,
+      18,
+      11,
+      15,
+      18,
+      13,
+      15,
+      17,
+      20,
+      14,
+      16,
+      16,
+      18,
+      15,
+      16,
+      20,
+      40,
+      16,
+      11,
+      22,
+      22,
+      18,
+      19,
+      15,
+      20,
+      17,
+      44,
+      13,
+      17,
+      17,
+      21,
+      16,
+      19,
+      18,
+      18,
+      16,
+      14,
+      20,
+      16,
+      16,
+      15,
+      20,
+      17,
+      15,
+      16,
+      17,
+      18,
+      16,
+      15,
+      20,
+      15,
+      13,
+      18,
+      25,
+      17,
+      14,
+      11,
+      16,
+      18,
+      18,
+      34,
+      16,
+      17,
+      16,
+      19,
+      16,
+      17,
+      18,
+      15,
+      15,
+      17,
+      16,
+      15,
+      22,
+      12,
+      17,
+      45,
+      11,
+      12,
+      18,
+      14,
+      15,
+      18,
+      17,
+      16,
+      15,
+      17,
+      18,
+      15,
+      17,
+      16,
+      19,
+      18,
+      19,
+      11,
+      17
+    ],
+    "medianMs": 17,
+    "viewport": {
+      "height": 775,
+      "width": 1280
+    },
+    "dataset": {
+      "name": "Rust demo_project",
+      "tracks": 6,
+      "regions": 9,
+      "lengthBars": 32
+    }
+  },
+  "status": "measured"
+}

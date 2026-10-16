@@ -21,3 +21,13 @@ Screenshots of the main frontend at commit [`fbc4566`](https://github.com/atorca
 These are actual captures of the rendered frontend, not generated images or composites. They do not demonstrate execution of the Windows installer or working audio playback, recording or processing.
 
 When updating the images, keep the filenames and capture the same main entry point. Also review the features and limitations described in the root README.
+
+## Phases 04–05 (real native binary)
+
+| File | View |
+| --- | --- |
+| `04-imported-audio-waveform.png` | A 2-second 440 Hz WAV imported through `media_import`; the waveform is drawn from native peak columns of the decoded file. |
+| `05-engine-playback.png` | During playback: the LCD (00:00.320) and the playhead come from engine events; the status pill says "No audio output" because the CI/virtual display has no sound card and the engine runs on its internal clock. |
+
+Captured by `e2e/app.e2e.mjs` (WebKitWebDriver + tauri-driver, debug build, Xvfb 1280 × 800) on
+Ubuntu 24.04 x64 in the development container. No audio device was present; nothing was heard.
