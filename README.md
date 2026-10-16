@@ -35,7 +35,7 @@ A desktop digital audio workstation in development, built with **Rust, Tauri 2, 
 ### Still to come
 
 - Physical-device validation across the intended operating systems; multi-device input clock drift and live input sample-rate conversion.
-- Audio file import and editing; export and bounce.
+- Advanced audio editing, final mixdown formats and bounce; import, region editing and diagnostic WAV export are implemented.
 - Piano-roll note editing, playback note chase and internal instruments; MIDI 2.0/UMP.
 - Built-in instruments, sampler, effects, buses and plug-in hosting.
 - Loop library with audio previews.

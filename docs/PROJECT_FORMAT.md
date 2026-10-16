@@ -1,4 +1,4 @@
-# Formato de proyecto `.elyvon` (esquema 2)
+# Formato de proyecto `.elyvon` (esquema 3)
 
 Un proyecto de Elyvon Studio es un único archivo JSON UTF-8 con extensión
 `.elyvon`. Describe la canción (pistas, regiones, ajustes) y **referencia** los
@@ -10,7 +10,7 @@ terceros.
 ```json
 {
   "format": "elyvon-studio-project",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "savedWith": "0.1.0",
   "project": { … }
 }
@@ -50,7 +50,7 @@ Reglas de compatibilidad (`elyvon_project::format`):
     "metronome": { "enabled": false, "volumeDb": -6, "accent": true },
     "countInBars": 0,                 // 0–4
     "preRollBars": 0,                 // 0–4
-    "punch": { "enabled": false, "start": 0, "end": 15360 } // se guarda y muestra; la grabación aún no existe
+    "punch": { "enabled": false, "start": 0, "end": 15360 } // limita la ventana de grabación
   },
   "tracks": [ /* Track, en orden de visualización (máx. 512) */ ],
   "media": [ /* MediaAsset (máx. 4096) */ ],
