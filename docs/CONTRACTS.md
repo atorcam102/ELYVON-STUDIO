@@ -1,8 +1,10 @@
-# Technical contracts — version 1
+# Technical contracts
 
-These boundaries describe current model behaviour and explicitly future interfaces. They do not
-provide audio/MIDI/job capabilities. `app_contracts` (read-only Tauri IPC) returns
-`{ ipc: 1, project: 1, audio: 1, jobs: 1 }`; the typed client is `ipc.app.contracts()`.
+`app_contracts` (read-only Tauri IPC) returns `{ ipc: 2, project: 2, audio: 1, jobs: 1 }`; the
+typed client is `ipc.app.contracts()`. IPC 2 (Phases 04–05) adds the engine status shape, transport,
+media and render commands and the `audio://*`/`media://status` events. Project schema 2 adds the
+tempo/metre map, markers, metronome, count-in, pre-roll, punch, sample rate, media pool and audio
+region parameters (migration from 1 is automatic). The MIDI/graph contract stays at version 1.
 Breaking a wire contract requires a version bump, fixtures and migration/negotiation decisions.
 Application SemVer, project schema and control-contract versions are independent.
 
@@ -15,7 +17,12 @@ Application SemVer, project schema and control-contract versions are independent
 | Graph | AudioGraphPlan, GraphNode, GraphConnection | u32 node ids, u16 zero-based channels; explicit contractVersion | Not part of project schema; graph-v1.json; no executor |
 | Background work | core/jobs.rs: JobSnapshot, JobState | Process-scoped opaque id; completed/total u32 work units, None = unknown | Not persisted; jobs-v1.json. DownloadEvent remains the implemented updater progress contract |
 | UI presentation | src/state/uiContract.ts: UiPresentationV1, Selection | UI_CONTRACT_VERSION=1; cursorTicks is an editing cursor, not playback | Only Layout persisted via Settings.schemaVersion=1; selection/zoom/dialogs ephemeral |
-| Errors | src-tauri/error.rs: IpcError/ErrorCode | Stable codes, human-readable message | Existing real native commands; contract validators return static Rust errors, not pretend worker events |
+| Errors | src-tauri/error.rs: IpcError/ErrorCode | Stable codes (adds `audioUnavailable`, `media`), human-readable message | Existing real native commands |
+| Tempo/metre map | core/tempo.rs: TempoMap, TempoChange, MeterChange; core/grid.rs: GridSpec | Tempo steps at ticks; metre changes at zero-based bars; frames = round-half-up of exact seconds × rate | Saved in schema 2; golden vectors `core/tests/fixtures/grid_golden.json` shared with `src/lib/tempoMap.ts` |
+| Transport | audio/transport.rs: TransportCommand, TransportSnapshot, PlayState, Meters, EngineStats | Commands applied at the next block; snapshot = engine frame, fractional ticks through the engine's map, seconds | `transport_command`, `transport_state`, `transport_tap`; events `audio://position` (~30 Hz on change), `audio://meters`, `audio://status` |
+| Engine status/devices | audio/engine.rs: EngineStatus{running: config, device, output}, OutputKind; device.rs: DeviceInfo | `output` = `device` or `internalClock` (silent) | `audio_status`, `audio_devices`, `audio_restart`; preferences `Settings.audio` |
+| Media | audio/media: MediaStatus/MediaState; project MediaAsset/MediaInfo | Offsets/fades in source frames at the file's own rate; fingerprint FNV-1a 64 | `media_import`, `media_relink`, `media_status`, `media_formats`; `media_region_peaks` binary: u32 LE columns + i16 LE [minL,maxL,minR,maxR] per column |
+| Render | audio/render.rs: RenderReport | Engine rate, whole song or tick range | `project_render` → 32-bit float WAV + `<file>.json` |
 
 ## Validation and RT boundary
 
@@ -26,14 +33,15 @@ and cycles. Parallel channel connections are legal; fan-in is descriptive and ha
 summing implementation. Empty plans are valid descriptions, not running engines. Version 1
 has no feedback/delay nodes or latency compensation.
 
-MIDI NoteOn velocity zero is valid MIDI 1.0 and means note-off to a future consumer. The separate
-persisted MidiNote model requires nonzero note velocity. Event ordering and tick/sample conversion
-belong to a future Rust scheduler, not React. AudioBlock's borrowed slices and AudioProcessor's
-prepare/process/reset contract already exist; no callback is installed by this phase.
+MIDI NoteOn velocity zero is valid MIDI 1.0 and means note-off to a consumer. The separate
+persisted MidiNote model requires nonzero note velocity. The Rust scheduler (`engine.rs`) converts
+ticks to frames through the plan's tempo map and emits ordered `MidiEvent`s per block to a
+`MidiSink`; no instrument or port consumes them yet.
 
-Graphs and job messages allocate on the control thread. They must **never** be built, cloned,
-validated or serialised in `process`/`reset`. Future RT code must use preallocated buffers and
-queues, atomics, and off-thread reclamation; AtomicF32 alone does not implement a safe graph swap.
+Graphs, plans and job messages allocate on the control thread. They must **never** be built,
+cloned, validated or serialised in `process`/`reset`. Plans reach the callback through a
+pre-allocated SPSC queue and replaced plans are freed on the control thread
+(`tests/rt_alloc.rs` asserts zero allocations/frees inside `Engine::process`).
 
 Jobs do not claim success from `completed == total`; only Completed signals completion.
 Cancelled is a worker acknowledgement, not proof that a cancellation request was received.

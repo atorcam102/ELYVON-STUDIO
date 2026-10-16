@@ -7,9 +7,9 @@
    actualizaciones viven en Rust. La interfaz web es solo presentación.
 2. **La interfaz nunca muta el modelo.** Envía órdenes (`EditCommand`) y pinta
    la vista (`SessionView`) que devuelve el núcleo.
-3. **El hilo de audio será sagrado.** Nada de asignaciones, bloqueos, E/S ni
-   logging en el callback de audio (ver más abajo). La Fase 1 ya separa los
-   contratos para que el motor no obligue a reestructurar.
+3. **El hilo de audio es sagrado.** Nada de asignaciones, liberaciones,
+   bloqueos, E/S ni logging en el callback de audio (verificado por
+   `crates/elyvon-audio/tests/rt_alloc.rs`).
 4. **Honestidad funcional.** Lo que no existe se muestra deshabilitado y
    explicado; los datos de demostración solo los crea `elyvon_project::demo`.
 5. **Pocas dependencias.** Sin servidores, sin servicios en la nube, sin
@@ -30,9 +30,10 @@
 └──────▲─────────────────────▲────────────────────────▲────────────────────────┘
        │                     │                        │
 ┌──────┴───────┐   ┌─────────┴──────────┐   ┌─────────┴──────────┐   ┌──────────────┐
-│ elyvon-core  │◄──│  elyvon-project    │   │  elyvon-update     │   │ elyvon-audio │
-│ tiempo, color│   │ modelo, formato,   │   │ SemVer, plataformas│   │ contratos RT │
-│ E/S atómica  │   │ ediciones, undo,   │   │ manifiesto, CLI    │   │ (sin motor)  │
+│ elyvon-core  │◄──│  elyvon-project    │◄──────────────────────────│ elyvon-audio │
+│ tiempo, mapa │   │ modelo, formato,   │   │  elyvon-update     │   │ motor RT,    │
+│ de tempo, E/S│   │ ediciones, undo,   │   │ SemVer, plataformas│   │ medios, plan,│
+│ atómica      │   │                    │   │ manifiesto, CLI    │   │ render, cpal │
 └──────────────┘   │ recuperación, demo │   └────────────────────┘   └──────────────┘
                    └────────────────────┘
 ```
@@ -43,7 +44,7 @@
 | --- | --- | --- |
 | `elyvon-core` | Tiempo musical exacto en ticks (PPQ 960), tempo/compás/tonalidad validados, colores `#RRGGBB`, escritura atómica y lectura con límite de tamaño | Sí (color, E/S) |
 | `elyvon-project` | `Project`/`Track`/`Region`, validación semántica, formato `.elyvon` con migraciones, `EditCommand` atómicos, historial por instantáneas, `ProjectSession` (dirty/undo/redo/guardado en dos fases), recuperación, sesión demo | No (específico de Studio) |
-| `elyvon-audio` | `EngineStatus`, `AudioConfig`, trait `AudioProcessor` (prepare/process/reset), `AtomicF32`, leyes de ganancia y panorama | Parcial |
+| `elyvon-audio` | Motor de tiempo real (`engine`), plan inmutable (`plan`), transporte y atómicos compartidos (`transport`), decodificación/remuestreo/picos (`media`), waveforms por región (`waveform`), render offline y export WAV (`render`), salida cpal y reloj interno (`device`), contratos MIDI/grafo | Parcial |
 | `elyvon-update` | Decisión SemVer, matriz OS/arquitectura/instalador, nombres de artefactos, validación estricta de `latest.json`, verificación minisign, CLI `elyvon-release` | Sí (cada app se actualiza por separado) |
 | `src-tauri` | Proceso de escritorio: comandos, menús, ventana, logs, ajustes, cierre seguro, actualizador | No |
 
@@ -79,17 +80,28 @@ se confirman una sola vez al soltar: un paso de deshacer por gesto.
   fases (`begin_save` bajo el mutex → escritura sin el mutex → `complete_save`),
   así una escritura lenta no bloquea otras órdenes. Las ediciones hechas durante
   el guardado mantienen el proyecto como modificado.
-- **Futuro hilo de audio:** tendrá prioridad de tiempo real, recibirá
-  parámetros mediante atómicos (`AtomicF32`) y colas lock-free preasignadas, y
-  nunca tomará el mutex de la sesión. El grafo se construirá en un hilo de
-  control y se publicará al hilo de audio con intercambio atómico. La carga de
-  archivos y el streaming de disco irán en hilos de trabajo separados.
+- **Hilo de audio** (callback de cpal o reloj interno): ejecuta
+  `Engine::process`. Recibe órdenes de transporte y planes nuevos por colas SPSC
+  preasignadas (`rtrb`) y devuelve los planes sustituidos por otra cola para
+  liberarlos en el hilo de control. Publica posición, estado y picos con
+  atómicos. Nunca toma el mutex de la sesión.
+- **Hilo de control** (`src-tauri/src/audio.rs`): tras cada edición, deshacer o
+  apertura reconstruye el `PlaybackPlan` (mapa de tempo → frames, segmentos de
+  clip sin solapes con crossfades, notas MIDI, ciclo, metrónomo) y lo publica.
+  Orden de bloqueo: sesión → motor → medios → carga.
+- **Hilo de medios**: decodifica (Symphonia), remuestrea (rubato) y calcula la
+  pirámide de picos; luego re-sincroniza el plan y emite `media://status`.
+- **Publicador** (~30 Hz): emite `audio://position` solo cuando cambia y
+  `audio://meters` mientras suena. La UI dibuja el playhead con esos eventos;
+  no usa temporizadores propios para avanzar el tiempo.
 - **Timeline:** un único contenedor de scroll nativo; regla y cabeceras
   `position: sticky`; cuadrícula dibujada con fondos CSS teselados (sin DOM por
   línea); solo se renderizan las regiones visibles; las notas MIDI de cada
   región se dibujan en un SVG memorizado.
-- **Reposo:** sin temporizadores periódicos. La única animación continua es la
-  simulación opcional de medidores (desactivada por defecto). La comprobación de
+- **Waveforms:** cada región pide al núcleo solo las columnas visibles
+  (`media_region_peaks`, binario); React nunca recibe muestras. Caché LRU en la UI.
+- **Reposo:** sin temporizadores periódicos en la UI. El publicador nativo no
+  emite nada mientras el transporte está parado y sin cambios. La comprobación de
   actualizaciones es una sola petición al arrancar, opcional.
 
 ## Persistencia y recuperación
@@ -171,3 +183,17 @@ grafo/MIDI/jobs no implementan un motor ni se guardan en el esquema 1. Las decis
 en [ADR](ADR/README.md). La distribución actual sigue limitada a Windows x86/x64; los otros
 targets configurados no equivalen a soporte probado. La Fase 02 queda parcial mientras haya
 criterios sin evidencia de hardware, firma de producción o atribuciones de distribución.
+
+## Motor temporal y clips (Fases 04–05)
+
+Ver [ADR 0005](ADR/0005-lock-free-plan-engine-and-in-memory-media.md) y la
+evidencia en [audit/PHASE-04-05.md](audit/PHASE-04-05.md). Resumen:
+
+- Tiempo musical en ticks; tiempo de audio en frames; `TempoMap` convierte
+  ticks ↔ segundos ↔ frames con cambios de tempo y de compás, sin acumulación.
+- La salida del motor es función pura de la posición: renders idénticos con
+  cualquier tamaño de bloque, ciclo sample-accurate en límites de bloque.
+- Solapes en una pista: gana la región que empieza más tarde; con fade-in hay
+  crossfade de igual potencia con la región cubierta.
+- Los archivos fuente son inmutables; el audio decodificado vive en memoria
+  (presupuesto 4 GiB / 512 MiB en 32 bits). El streaming desde disco no existe aún.

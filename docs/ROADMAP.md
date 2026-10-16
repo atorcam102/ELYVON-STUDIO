@@ -17,11 +17,20 @@ boundaries, compatibility fixtures, shared quality commands, dependency/licence 
 measurement runner. No audio engine or new production UI functionality is claimed. Hardware,
 production-key upgrade, complete packaged notices and release-mode performance work remain pending.
 
-## Next functional phase — Native audio backend and transport
+## Phases 04–05 — Tempo, transport, audio clips (partial)
 
-Device negotiation, sample-clock transport, preallocated RT graph/queues and real meters; then
-media decoding/import, streaming and recording with latency compensation. Require device tests,
-callback allocation/locking checks and measured deadlines before enabling playback/recording UI.
+Tempo/metre map, block scheduler, transport (cycle, count-in, pre-roll, metronome, tap tempo,
+locators/markers, punch storage), lock-free engine with cpal output or internal clock, MIDI note
+scheduling with stuck-note protection; decoding (WAV/AIFF/FLAC/MP3/Vorbis), resampling, media pool,
+real waveforms, non-destructive region editing, crossfades, loops, offline render/export. Evidence:
+[audit/PHASE-04-05.md](audit/PHASE-04-05.md). **Partial**: no physical-device validation, no
+disk streaming (in-memory budget), no recording.
+
+## Next functional phase — Recording, latency and streaming
+
+Input streams and recording into the media pool (punch in/out already stored), latency
+measurement/compensation, incremental disk streaming for long sessions, device tests on each
+target with measured callback deadlines and xruns.
 
 ## Later — MIDI, instruments and editing
 

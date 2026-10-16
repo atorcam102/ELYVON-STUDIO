@@ -15,6 +15,24 @@ an identifier in a CI policy does not discharge those obligations. No commercial
 Apple instrument, private project format or proprietary DSP is included in the new test fixtures.
 The origin/licensing of historical brand assets is not established by this technical audit.
 
+## Audio engine dependencies (Phases 04–05)
+
+Versions are pinned in Cargo.lock; `cargo deny --locked check` reports licences ok.
+
+| Crate | Licence | Use | Notes |
+| --- | --- | --- | --- |
+| symphonia 0.6.1 (+ symphonia-core, -common, -metadata, -format-riff, -format-ogg, -bundle-flac, -bundle-mp3, -codec-pcm, -codec-vorbis) | MPL-2.0 | Decoding WAV/AIFF/FLAC/MP3/Ogg Vorbis | Used **unmodified** from crates.io. MPL-2.0 is file-level copyleft: distributions must keep the notice and make the Source Code Form of these files available (https://github.com/pdeljanov/Symphonia). No Elyvon file is MPL-licensed. |
+| rubato 5.0.1, audioadapter 5.x, realfft, rustfft | MIT OR Apache-2.0 | Sample-rate conversion (FFT) | |
+| cpal 0.18.2 | Apache-2.0 | Audio device output (WASAPI, CoreAudio, ALSA) | Linux builds link the system ALSA library (libasound, LGPL-2.1, dynamically linked). |
+| rtrb 0.4.0 | MIT OR Apache-2.0 | Lock-free SPSC queues to the audio thread | |
+
+Codec notes: MP3 patents have expired; FLAC and Vorbis are royalty-free open formats. No
+proprietary codec (AAC, ALAC, Atmos) is enabled.
+
+The test signals `crates/elyvon-audio/tests/fixtures/tone.{flac,mp3,ogg}` and every WAV/AIFF written
+by the tests are synthetic sines created for this repository (see the fixtures README). The
+metronome click is synthesised in code. No third-party audio is included.
+
 ## Phosphor Icons React
 
 The interface uses @phosphor-icons/react 2.1.10 (MIT), from

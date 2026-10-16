@@ -1,4 +1,4 @@
-# Formato de proyecto `.elyvon` (esquema 1)
+# Formato de proyecto `.elyvon` (esquema 2)
 
 Un proyecto de Elyvon Studio es un único archivo JSON UTF-8 con extensión
 `.elyvon`. Describe la canción (pistas, regiones, ajustes) y **referencia** los
@@ -10,7 +10,7 @@ terceros.
 ```json
 {
   "format": "elyvon-studio-project",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "savedWith": "0.1.0",
   "project": { … }
 }
@@ -38,14 +38,23 @@ Reglas de compatibilidad (`elyvon_project::format`):
 {
   "id": "uuid",                       // identidad estable del proyecto
   "name": "My Song",                  // 1–128 caracteres, sin caracteres de control
+  "sampleRate": 48000,                // 44100, 48000, 88200, 96000, 176400, 192000
   "lengthBars": 64,                   // 1–9999; crece al mover/crear regiones al final
   "transport": {
     "tempo": 120,                     // BPM, 20–999
     "timeSignature": { "numerator": 4, "denominator": 4 },  // 1–32 / 1,2,4,8,16,32
     "key": { "tonic": "A", "mode": "minor" },               // C, C#, D … B · major|minor
-    "loopRange": { "enabled": false, "start": 0, "end": 15360 }  // ticks, start < end
+    "loopRange": { "enabled": false, "start": 0, "end": 15360 },  // ticks, start < end
+    "tempoChanges": [ { "tick": 7680, "bpm": 140 } ],        // escalones, tick > 0 y creciente
+    "meterChanges": [ { "bar": 4, "timeSignature": { "numerator": 7, "denominator": 8 } } ], // compás 5 (índice 0)
+    "metronome": { "enabled": false, "volumeDb": -6, "accent": true },
+    "countInBars": 0,                 // 0–4
+    "preRollBars": 0,                 // 0–4
+    "punch": { "enabled": false, "start": 0, "end": 15360 } // se guarda y muestra; la grabación aún no existe
   },
-  "tracks": [ /* Track, en orden de visualización (máx. 512) */ ]
+  "tracks": [ /* Track, en orden de visualización (máx. 512) */ ],
+  "media": [ /* MediaAsset (máx. 4096) */ ],
+  "markers": [ { "id": "uuid", "name": "Chorus", "tick": 30720 } ]  // máx. 1000
 }
 ```
 
@@ -77,8 +86,9 @@ suenan las pistas en solo (y no en mute). La lógica está en
   "name": "Chorus",
   "start": 30720,            // ticks desde el inicio de la canción
   "length": 15360,           // ticks, > 0
+  "muted": false,
   "content": { "type": "midi", "notes": [ { "pitch": 60, "velocity": 100, "start": 0, "length": 480 } ] }
-  // o: { "type": "audio", "source": { "path": "Audio/take1.wav" } }   (source puede ser null)
+  // o: { "type": "audio", "media": "uuid" | null, "offset": 0, "gainDb": 0, "fadeIn": 0, "fadeOut": 0, "looped": false }
 }
 ```
 
@@ -86,15 +96,48 @@ suenan las pistas en solo (y no en mute). La lógica está en
   pistas `instrument` o `midi`.
 - Notas: `pitch` 0–127, `velocity` 1–127, `start` relativo al inicio de la
   región, `length` > 0. Máximo 100 000 notas por región.
-- `source.path` es relativo al archivo del proyecto cuando sea posible. En la
-  Fase 1 no hay importación de audio: las regiones de audio de la sesión demo
-  tienen `source: null` y la UI las identifica como marcadores sin archivo.
+- Audio: `media` referencia una entrada del pool por id (debe existir); `offset`,
+  `fadeIn` y `fadeOut` están en frames **del archivo fuente** (a su propia tasa),
+  así no dependen del tempo. `gainDb` −96…+24. `looped` repite el archivo de
+  fin a inicio hasta el final de la región. `media: null` = marcador silencioso
+  (sesión demo).
+- Edición no destructiva: recortar el inicio avanza `offset`; dividir calcula el
+  `offset` de la segunda mitad con el mapa de tempo. El archivo nunca se escribe.
+
+### MediaAsset
+
+```jsonc
+{
+  "id": "uuid",
+  "name": "take1.wav",
+  "path": "/ruta/absoluta/take1.wav",      // o relativa al directorio del proyecto
+  "info": {                                // null si nunca se decodificó (migrado de v1)
+    "sampleRate": 44100, "channels": 2, "frames": 88200,
+    "format": "wave", "sizeBytes": 352844, "fingerprint": "8f3c2a1b4d5e6f70"  // FNV-1a 64
+  }
+}
+```
+
+Al abrir, cada archivo se decodifica en segundo plano. Si falta, sus regiones
+quedan en silencio y la UI lo indica (con «Locate file…»); si la huella difiere,
+se avisa de que el archivo cambió.
 
 ## Tiempo
 
 Todas las posiciones y duraciones son enteros en **ticks**, con 960 ticks por
 negra (PPQ). Un compás de 4/4 son 3840 ticks. Usar enteros evita errores de
-redondeo acumulados al mover regiones.
+redondeo acumulados al mover regiones. El motor convierte ticks a frames con el
+mapa de tempo (`elyvon_core::tempo`) desde el inicio de cada segmento:
+`frame = floor(segundos × tasa + 0,5)`.
+
+## Migración 1 → 2
+
+Automática al abrir (`format::v1_to_v2`): añade `sampleRate` 48000, mapas vacíos,
+metrónomo apagado, count-in/pre-roll 0, punch desactivado, `markers` y `media`;
+cada `source.path` distinto pasa al pool (`info: null`) y la región lo referencia
+con offset 0, ganancia 0 dB, sin fades ni loop. Ninguna ruta se pierde
+(fixture `tests/fixtures/v1-basic.elyvon`). Guardar escribe esquema 2; versiones
+antiguas de la aplicación lo rechazan con "versión más nueva".
 
 ## Validación
 
