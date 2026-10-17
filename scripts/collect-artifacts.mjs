@@ -10,6 +10,7 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
@@ -20,7 +21,8 @@ function arg(name) {
 const target = arg("target");
 const version = arg("version").replace(/^v/, "");
 const out = resolve(arg("out"));
-const root = resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+// fileURLToPath decodes %20 etc., so checkouts in paths with spaces work.
+const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const bundle = join(root, "target", target, "release", "bundle");
 const tool = join(root, "target", "release", process.platform === "win32" ? "elyvon-release.exe" : "elyvon-release");
 

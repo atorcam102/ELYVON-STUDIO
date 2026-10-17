@@ -45,7 +45,6 @@ import {
 
 const KEYS_W = 52;
 const RULER_H = 22;
-const LANE_H = 96;
 const DIVISIONS: GridSpec["division"][] = ["bar", "quarter", "eighth", "sixteenth", "thirtySecond"];
 type Tool = "pointer" | "pencil" | "eraser";
 
@@ -124,6 +123,9 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
   const [keyH, setKeyH] = useState(13);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [scroll, setScroll] = useState({ x: 0, y: 0, w: 600, h: 300 });
+  const rootRef = useRef<HTMLDivElement>(null);
+  // The lane shrinks on short editor panels so the notes keep most of the height.
+  const [laneH, setLaneH] = useState(96);
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const laneRef = useRef<HTMLCanvasElement>(null);
@@ -163,6 +165,15 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
   const sync = useCallback(() => {
     const el = scrollRef.current;
     if (el) setScroll({ x: el.scrollLeft, y: el.scrollTop, w: el.clientWidth, h: el.clientHeight });
+  }, []);
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const fit = () => setLaneH(Math.max(36, Math.min(96, Math.round(el.clientHeight * 0.22))));
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
   useLayoutEffect(() => {
     sync();
@@ -401,23 +412,23 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
     const W = Math.max(0, scroll.w - KEYS_W);
-    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(LANE_H * dpr)) {
+    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(laneH * dpr)) {
       canvas.width = Math.round(W * dpr);
-      canvas.height = Math.round(LANE_H * dpr);
+      canvas.height = Math.round(laneH * dpr);
       canvas.style.width = `${W}px`;
-      canvas.style.height = `${LANE_H}px`;
+      canvas.style.height = `${laneH}px`;
     }
     const g = canvas.getContext("2d");
     if (!g) return;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.fillStyle = "#262626";
-    g.fillRect(0, 0, W, LANE_H);
+    g.fillRect(0, 0, W, laneH);
     const v = view;
     const t0 = xToTick(v, 0);
     const t1 = xToTick(v, W);
     g.fillStyle = "rgba(255,255,255,0.08)";
-    for (const s of map.segments(Math.floor(t0), Math.ceil(t1) + 1)) g.fillRect(Math.round(tickToX(v, s.start)), 0, 1, LANE_H);
-    const yOf = (value: number, max: number) => LANE_H - 4 - (value / max) * (LANE_H - 8);
+    for (const s of map.segments(Math.floor(t0), Math.ceil(t1) + 1)) g.fillRect(Math.round(tickToX(v, s.start)), 0, 1, laneH);
+    const yOf = (value: number, max: number) => laneH - 4 - (value / max) * (laneH - 8);
     if (lane === "velocity") {
       const [i0, i1] = visibleRange(roll, t0, t1);
       for (let i = i0; i < i1; i++) {
@@ -427,7 +438,7 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
         const y = yOf(val, 127);
         const sel = selection.has(n.key);
         g.fillStyle = n.note.muted ? "#777" : sel ? "#ffffff" : n.region.color;
-        g.fillRect(x, y, 1.5, LANE_H - 4 - y);
+        g.fillRect(x, y, 1.5, laneH - 4 - y);
         g.beginPath();
         g.arc(x + 0.75, y, sel ? 3 : 2.2, 0, Math.PI * 2);
         g.fill();
@@ -471,7 +482,7 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
       g.beginPath();
       l.points.forEach((p, i) => {
         const x = tickToX(v, p.tick);
-        const y = l.erase ? LANE_H / 2 : yOf(p.value, max);
+        const y = l.erase ? laneH / 2 : yOf(p.value, max);
         if (i === 0) g.moveTo(x, y);
         else g.lineTo(x, y);
       });
@@ -764,7 +775,7 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
     const y = e.clientY - r.top;
     e.currentTarget.setPointerCapture(e.pointerId);
     const max = LANES.find((l) => l.kind === lane)!.max;
-    const value = Math.round(Math.max(0, Math.min(1, (LANE_H - 4 - y) / (LANE_H - 8))) * max);
+    const value = Math.round(Math.max(0, Math.min(1, (laneH - 4 - y) / (laneH - 8))) * max);
     if (lane === "velocity") {
       const tick = xToTick(view, x);
       const [i0, i1] = visibleRange(roll, tick - 6 / view.pxPerTick, tick + 6 / view.pxPerTick);
@@ -799,10 +810,10 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
     const y = e.clientY - r.top;
     const max = LANES.find((k) => k.kind === lane)!.max;
     if (l.kind === "velocity") {
-      l.value = Math.round(Math.max(1, Math.min(127, l.startValue + ((l.y - y) / (LANE_H - 8)) * 127)));
+      l.value = Math.round(Math.max(1, Math.min(127, l.startValue + ((l.y - y) / (laneH - 8)) * 127)));
     } else {
       const tick = snapTo(xToTick(view, x), e.shiftKey);
-      const value = Math.round(Math.max(0, Math.min(1, (LANE_H - 4 - y) / (LANE_H - 8))) * max);
+      const value = Math.round(Math.max(0, Math.min(1, (laneH - 4 - y) / (laneH - 8))) * max);
       const last = l.points[l.points.length - 1];
       if (last && last.tick === tick) last.value = value;
       else l.points.push({ tick, value });
@@ -873,7 +884,7 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
   ];
 
   return (
-    <div className="pr" data-testid="piano-roll">
+    <div className="pr" data-testid="piano-roll" ref={rootRef}>
       <div className="pr__bar">
         <span className="panel-title" title={roll.regions.length > 1 ? "Editing several regions" : primary.id}>
           {roll.regions.length > 1 ? `${roll.regions.length} regions` : primaryTrack?.name ?? "MIDI"}
@@ -971,7 +982,7 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
           />
         </div>
       </div>
-      <div className="pr__lane">
+      <div className="pr__lane" style={{ height: laneH }}>
         <div className="pr__lane-head">
           <select className="pr__select" aria-label="Controller lane" value={lane} onChange={(e) => setLane(e.target.value as LaneKind)}>
             {LANES.map((l) => (

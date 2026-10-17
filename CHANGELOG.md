@@ -25,6 +25,8 @@ section of each version into the GitHub release and into the update dialog.
 ### Fixed
 
 - Windows: the grid golden-vector test compared CRLF-checked-out fixtures byte for byte.
+- Piano roll keeps a usable note area on short editor panels (the controller lane shrinks).
+- `collect-artifacts.mjs` failed for checkouts in paths with spaces.
 
 ## [0.2.1] - 2026-10-16
 
