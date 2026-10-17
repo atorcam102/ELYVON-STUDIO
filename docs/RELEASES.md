@@ -3,6 +3,31 @@
 Este documento explica cómo se compilan, firman y publican las versiones de
 Elyvon Studio, y qué credenciales hay que configurar.
 
+## Preview 0.4.0 (Windows x64, compilación local)
+
+[`v0.4.0-windows-preview.1`](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.4.0-windows-preview.1)
+apunta al commit `b47b730` e incluye las fases 10–11 (automatización, comping, edición no
+destructiva) y el rediseño de la interfaz. Siguiendo la política del repositorio (CLAUDE.md), se
+compiló y verificó **en el portátil Windows 11 x64 del mantenedor**, sin GitHub Actions:
+
+1. Worktree limpio en el commit exacto (sin cambios locales de otras sesiones); `npm ci`,
+   `npm run check`, `npm run check:rust` (402 tests) y E2E nativo 17/17 sobre el binario debug.
+2. `npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis msi --config
+   '{"bundle":{"createUpdaterArtifacts":false}}'` (sin clave de updater).
+3. E2E nativo 17/17 contra `target/x86_64-pc-windows-msvc/release/elyvon-studio.exe`, el binario
+   que empaquetan los instaladores (`ELYVON_APP=… npm run test:e2e`).
+4. Renombrado canónico, cabeceras PE (`MZ`) y MSI (OLE), versión 0.4.0 en el ejecutable y
+   `SHA256SUMS.txt`; `gh release create --prerelease` con esos tres archivos; descarga y
+   `sha256sum -c` de lo publicado. Ningún workflow se ejecutó (push con `[skip ci]`; la etiqueta
+   se crea con la release, no con `git push`).
+
+```
+9e0491acd7180e113b899494abcb1214eebf619f06741463cc9b67bae5b7d745  Elyvon-Studio-v0.4.0-windows-x64-setup.exe
+3b3c20cc12b53255477f92740c2261ed0b12fed6f8287c0e11483a9dc2cfd0b3  Elyvon-Studio-v0.4.0-windows-x64.msi
+```
+
+Sin Authenticode ni firma de updater; no se instaló el paquete en esta verificación. Solo Windows x64.
+
 ## Preview 0.2.0 de audio y MIDI
 
 El tag `v0.2.0-windows-preview.1` identifica la aplicación 0.2.0 con las fases

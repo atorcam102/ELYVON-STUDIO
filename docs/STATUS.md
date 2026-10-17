@@ -1,5 +1,9 @@
 # Status
 
+**Current release: [0.4.0 Windows x64 preview](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.4.0-windows-preview.1)**
+(commit `b47b730`, built and verified locally on Windows 11 x64; unsigned; see
+[RELEASES](RELEASES.md#preview-040-windows-x64-compilación-local)).
+
 **Phases 10–11 (2026-10-17, schema 5): PARTIAL.** Sample-accurate mix automation (track/region
 lanes for volume, pan, mute, sends and insert parameters; Read/Touch/Latch/Write with lock-free
 capture; linear/step/Bézier curves; offline render bit-identical to live playback) and
