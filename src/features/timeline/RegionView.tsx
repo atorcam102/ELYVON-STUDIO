@@ -35,7 +35,7 @@ const MidiPreview = memo(
     notes: MidiNote[];
     length: number;
   }) {
-    if (notes.length === 0) return <div className="region__empty">Empty</div>;
+    if (notes.length === 0) return null;
     let lo = 127;
     let hi = 0;
     for (const n of notes) {

@@ -4,11 +4,12 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect } from "react";
 import { hasPrimaryModifier, isEditableTarget, isWindows } from "../../lib/platform";
-import { ipc } from "../../lib/ipc";
+import { inTauri, ipc } from "../../lib/ipc";
 import { useApp } from "../../state/app";
 import { useDialogs } from "../../state/dialogs";
 import { useProject } from "../../state/project";
 import { useUi } from "../../state/ui";
+import { useChrome } from "../../state/chrome";
 import { useUpdates } from "../../state/updates";
 import {
   addTrack,
@@ -47,7 +48,7 @@ function toggleLayout(key: "inspectorVisible" | "browserVisible" | "bottomVisibl
 function showMixer() {
   const ui = useUi.getState();
   const showing = ui.layout.bottomVisible && ui.layout.bottomTab === "mixer";
-  ui.setLayout(showing ? { bottomVisible: false } : { bottomVisible: true, bottomTab: "mixer" });
+  ui.setLayout(showing ? { bottomVisible: false } : { bottomVisible: true, bottomTab: "mixer", bottomHeight: window.innerHeight - 180 });
 }
 
 export function runMenuAction(id: string) {
@@ -152,12 +153,20 @@ function onKeyDown(e: KeyboardEvent) {
     case "i":
     case "I":
       return toggleLayout("inspectorVisible");
-    case "b":
-    case "B":
+    case "y":
+    case "Y":
       return toggleLayout("browserVisible");
+    case "b":
+    case "B": {
+      const ui = useUi.getState();
+      return ui.setLayout({ bottomVisible: !(ui.layout.bottomVisible && ui.layout.bottomTab === "smartControls"), bottomTab: "smartControls" });
+    }
+    case "d": case "D": return useChrome.getState().toggleSidePanel("events");
+    case "f": case "F": return useChrome.getState().toggleSidePanel("files");
+    case "o": case "O": return useChrome.getState().toggleSidePanel("loops");
     case "e":
     case "E":
-      return toggleLayout("bottomVisible");
+      { const ui = useUi.getState(); return ui.setLayout({ bottomVisible: !(ui.layout.bottomVisible && ui.layout.bottomTab !== "mixer"), bottomTab: ui.layout.bottomTab === "mixer" ? "pianoRoll" : ui.layout.bottomTab }); }
     case "x":
     case "X":
       return showMixer();
@@ -191,6 +200,7 @@ function onKeyDown(e: KeyboardEvent) {
 export function useAppEvents() {
   // Native menu → UI actions; window close guard.
   useEffect(() => {
+    if (!inTauri) return;
     const unlisten = [
       listen<string>("menu", (e) => runMenuAction(e.payload)),
       listen("app://close-requested", () => void quitApp()),
@@ -206,9 +216,9 @@ export function useAppEvents() {
   }, []);
 
   // Engine events: playhead, meters, engine and media status.
-  useEffect(() => connectTransport(), []);
-  useEffect(() => connectCapture(), []);
-  useEffect(() => connectMidi(), []);
+  useEffect(() => inTauri ? connectTransport() : undefined, []);
+  useEffect(() => inTauri ? connectCapture() : undefined, []);
+  useEffect(() => inTauri ? connectMidi() : undefined, []);
 
   // Cut/copy/paste of regions through the native Edit menu or the keyboard.
   // Text fields keep their normal clipboard behaviour.

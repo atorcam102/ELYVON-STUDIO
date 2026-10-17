@@ -102,6 +102,9 @@ pub fn run() {
                 .midi
                 .start_worker(app.handle().clone());
             app.set_menu(menu::build(app.handle())?)?;
+            // The webview owns the visible desktop menu; keep native accelerators.
+            #[cfg(target_os = "windows")]
+            app.hide_menu()?;
             // Opening a device can take a moment: never block the window.
             let handle = app.handle().clone();
             std::thread::spawn(move || {

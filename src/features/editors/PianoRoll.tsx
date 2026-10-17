@@ -10,7 +10,7 @@ import { NumberField } from "../../components/Fields";
 import { Icon } from "../../components/Icon";
 import { Menu, type MenuEntry } from "../../components/Popover";
 import { ipc } from "../../lib/ipc";
-import { noteName, ticksPerBar } from "../../lib/music";
+import { noteName, ticksPerBar, ticksPerBeat } from "../../lib/music";
 import { GRID_LABELS, gridPoints, gridStep, snapTick, TempoMap } from "../../lib/tempoMap";
 import { notifyError } from "../../state/notifications";
 import { useProject } from "../../state/project";
@@ -44,7 +44,7 @@ import {
 } from "./pianoRollModel";
 
 const KEYS_W = 52;
-const RULER_H = 22;
+const RULER_H = 42;
 const DIVISIONS: GridSpec["division"][] = ["bar", "quarter", "eighth", "sixteenth", "thirtySecond"];
 type Tool = "pointer" | "pencil" | "eraser";
 
@@ -114,13 +114,16 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
   const [grid, setGrid] = useState<GridSpec>({ division: "sixteenth", triplet: false, swing: 0 });
   const [snap, setSnap] = useState(true);
   const [strength, setStrength] = useState(100);
-  const [scale, setScale] = useState(true);
+  const [scale, setScale] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  const [showLane, setShowLane] = useState(false);
+  const [defaultVelocity, setDefaultVelocity] = useState(80);
   const [audition, setAudition] = useState(true);
   const [lane, setLane] = useState<LaneKind>("velocity");
   const [laneChannel, setLaneChannel] = useState(0);
   const [selection, setSelection] = useState<Set<string>>(() => new Set());
-  const [ppt, setPpt] = useState(0.12);
-  const [keyH, setKeyH] = useState(13);
+  const [ppt, setPpt] = useState(() => Math.max(.05, (window.innerWidth - 374) / 3840));
+  const [keyH, setKeyH] = useState(16);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [scroll, setScroll] = useState({ x: 0, y: 0, w: 600, h: 300 });
   const rootRef = useRef<HTMLDivElement>(null);
@@ -157,7 +160,7 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
     if (!el || placed.current === first.id) return;
     placed.current = first.id;
     const pitches = roll.notes.map((n) => n.note.pitch);
-    const centre = pitches.length ? (Math.min(...pitches) + Math.max(...pitches)) / 2 : 60;
+    const centre = pitches.length ? (Math.min(...pitches) + Math.max(...pitches)) / 2 : 51;
     el.scrollLeft = Math.max(0, first.start * ppt - 16);
     el.scrollTop = Math.max(0, (127 - centre) * keyH - el.clientHeight / 2);
   }, [roll, ppt, keyH]);
@@ -359,11 +362,20 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
       g.fillStyle = "rgba(255,255,255,0.75)";
       g.fillText(`${s.bar + 1}${s.ts.numerator !== 4 || s.ts.denominator !== 4 ? ` ${s.ts.numerator}/${s.ts.denominator}` : ""}`, x + 3, 11);
     }
+    g.font = "600 12px Arial, sans-serif";
+    for (const beat of map.beats(Math.floor(t0), Math.ceil(t1) + 1)) {
+      if (beat.downbeat) continue;
+      const bar = map.barAt(beat.tick);
+      if (ticksPerBeat(bar.ts) * v.pxPerTick < 45) continue;
+      const x = gx + tickToX(v, beat.tick);
+      g.fillText(`${bar.bar + 1} ${Math.round((beat.tick - bar.start) / ticksPerBeat(bar.ts)) + 1}`, x + 3, 12);
+    }
     for (const r of roll.regions) {
-      g.fillStyle = r.color;
-      g.globalAlpha = 0.7;
-      g.fillRect(gx + tickToX(v, r.start), gy - 3, r.length * v.pxPerTick, 3);
-      g.globalAlpha = 1;
+      g.fillStyle = "#b9ffc4";
+      g.fillRect(gx + tickToX(v, r.start), gy - 21, r.length * v.pxPerTick, 21);
+      g.fillStyle = "#216b29";
+      g.font = "600 12px Arial, sans-serif";
+      g.fillText(project.tracks.flatMap(t => t.regions).find(region => region.id === r.id)?.name ?? "", gx + tickToX(v, r.start) + 10, gy - 6);
     }
     if (head !== undefined) {
       g.fillStyle = "#ffffff";
@@ -389,8 +401,8 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
       g.fillRect(0, y + v.keyHeight - 1, gx, 1);
       if (p % 12 === 0 && v.keyHeight >= 9) {
         g.fillStyle = "#333";
-        g.font = "9px system-ui, sans-serif";
-        g.fillText(noteName(p), gx - 22, y + v.keyHeight - 3);
+        g.font = "600 11px Arial, sans-serif";
+        g.fillText(noteName(p - 12), gx - 22, y + v.keyHeight - 3);
       }
     }
     g.restore();
@@ -645,7 +657,7 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
         const out = await run({
           type: "addNotes",
           regionId: r.id,
-          notes: [{ pitch: d.pitch, velocity: 100, channel: laneChannel, start: d.tick - r.start, length }],
+          notes: [{ pitch: d.pitch, velocity: defaultVelocity, channel: laneChannel, start: d.tick - r.start, length }],
         });
         if (out) setSelection(new Set(out.createdNotes.map((id) => noteKey(r.id, id))));
         break;
@@ -884,8 +896,10 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
   ];
 
   return (
-    <div className="pr" data-testid="piano-roll" ref={rootRef}>
-      <div className="pr__bar">
+    <div className={`pr reference-piano${showLane ? " has-controller-lane" : ""}${advanced ? " has-advanced-tools" : ""}`} data-testid="piano-roll" ref={rootRef}>
+      <div className="panel-tools piano-tools"><button onClick={() => setAdvanced(!advanced)}>Edición <Icon name="chevronDown" size={10} /></button><button onClick={e => setMenu({ x: e.clientX, y: e.clientY })}>Funciones <Icon name="chevronDown" size={10} /></button><button onClick={() => setShowLane(!showLane)}>Visualización <Icon name="chevronDown" size={10} /></button><button aria-pressed={audition} className={audition ? "is-green" : ""} title="Escuchar notas" onClick={() => setAudition(!audition)}><Icon name="audition" size={18} /></button><button aria-pressed={snap} className={snap ? "is-blue" : ""} title="Ajustar a parrilla" onClick={() => setSnap(!snap)}><Icon name="follow" size={18} /></button><button className="is-gold" title="Enlazar selección" onClick={() => setAdvanced(!advanced)}><Icon name="link" size={17} /></button>{(["pointer", "pencil", "eraser"] as const).map(t => <button key={t} title={t} aria-pressed={tool === t} className={tool === t ? "is-selected" : ""} onClick={() => setTool(t)}><Icon name={t} size={17} /></button>)}<span className="toolbar-space" /><Icon name="horizontal" size={15} /><input aria-label="Zoom del editor de teclado" type="range" min={.03} max={.5} step={.01} value={ppt} onChange={e => setPpt(Number(e.target.value))} /></div>
+      <aside className="piano-inspector"><header><Icon name="instrument" size={30} /><div><strong>{primaryTrack?.name}</strong><small>en la pista {primaryTrack?.name}</small></div></header><section><label>Cuantizar tiempo (clásico)</label><div className="piano-inspector__row"><select aria-label="Cuantizar tiempo" value={grid.division} onChange={e => setGrid({ ...grid, division: e.target.value as GridSpec["division"] })}>{DIVISIONS.map(d => <option key={d} value={d}>{({ bar: "Compás", quarter: "Negra", eighth: "Corchea", sixteenth: "Semicorchea", thirtySecond: "Fusa" } as Record<string, string>)[d]}</option>)}</select><button onClick={quantize}>C</button></div><label>Intensidad <span>{strength}</span></label><input type="range" aria-label="Intensidad de cuantización" min={0} max={100} value={strength} onChange={e => setStrength(Number(e.target.value))} /><label>Swing <span>{grid.swing}</span></label><input type="range" aria-label="Swing" min={0} max={100} value={grid.swing} onChange={e => setGrid({ ...grid, swing: Number(e.target.value) })} /></section><section><label>Cuantizar escala</label><div className="piano-inspector__row"><select aria-label="Activar escala" value={scale ? "Sí" : "No"} onChange={e => setScale(e.target.value === "Sí")}><option>No</option><option>Sí</option></select><span>{project.transport.key.mode === "major" ? "Mayor (Jónico)" : "Menor (Eólico)"}</span><button onClick={() => setScale(!scale)}>C</button></div><label className="piano-inspector__check"><input type="checkbox" checked={scale} onChange={e => setScale(e.target.checked)} /> Ajustar a escala</label></section><section><label>Velocidad <span>{single1?.note.velocity ?? defaultVelocity}</span></label><input aria-label="Velocidad de notas" type="range" min={1} max={127} value={single1?.note.velocity ?? defaultVelocity} onChange={e => { const velocity = Number(e.target.value); setDefaultVelocity(velocity); if (selected.length) editSelected(n => ({ ...n, velocity })); }} /></section></aside>
+      <div className="pr__bar pr__advanced">
         <span className="panel-title" title={roll.regions.length > 1 ? "Editing several regions" : primary.id}>
           {roll.regions.length > 1 ? `${roll.regions.length} regions` : primaryTrack?.name ?? "MIDI"}
         </span>

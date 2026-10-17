@@ -104,13 +104,13 @@ impl Default for Layout {
         Self {
             inspector_visible: true,
             browser_visible: true,
-            bottom_visible: true,
-            inspector_width: 240.0,
-            browser_width: 260.0,
-            bottom_height: 340.0,
-            track_header_width: 220.0,
-            bottom_tab: "mixer".into(),
-            browser_tab: "files".into(),
+            bottom_visible: false,
+            inspector_width: 296.0,
+            browser_width: 404.0,
+            bottom_height: 480.0,
+            track_header_width: 408.0,
+            bottom_tab: "pianoRoll".into(),
+            browser_tab: "instruments".into(),
         }
     }
 }
@@ -130,9 +130,9 @@ impl Settings {
         let d = Layout::default();
         l.inspector_width = clamp(l.inspector_width, 180.0, 480.0, d.inspector_width);
         l.browser_width = clamp(l.browser_width, 180.0, 560.0, d.browser_width);
-        l.bottom_height = clamp(l.bottom_height, 140.0, 720.0, d.bottom_height);
+        l.bottom_height = clamp(l.bottom_height, 180.0, 1600.0, d.bottom_height);
         l.track_header_width = clamp(l.track_header_width, 160.0, 420.0, d.track_header_width);
-        if !["mixer", "pianoRoll", "audioEditor"].contains(&l.bottom_tab.as_str()) {
+        if !["mixer", "pianoRoll", "audioEditor", "score", "smartTempo", "smartControls"].contains(&l.bottom_tab.as_str()) {
             l.bottom_tab = d.bottom_tab;
         }
         if !["files", "loops", "instruments", "plugins"].contains(&l.browser_tab.as_str()) {
@@ -256,7 +256,7 @@ mod tests {
         let s = s.sanitized();
         assert_eq!(s.layout.inspector_width, 480.0);
         assert_eq!(s.layout.bottom_height, Layout::default().bottom_height);
-        assert_eq!(s.layout.bottom_tab, "mixer");
+        assert_eq!(s.layout.bottom_tab, "pianoRoll");
         assert_eq!(s.recent_projects.len(), MAX_RECENT);
         let mut s = Settings::default();
         s.audio.buffer_frames = 3;

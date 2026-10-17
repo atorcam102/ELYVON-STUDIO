@@ -1,4 +1,6 @@
 import { useCapture } from "../../state/capture";
+import { InspectorChannels } from "../mixer/Mixer";
+import { pendingControl } from "../topbar/menuActions";
 import type { Project } from "../../bindings/Project";
 import type { Region } from "../../bindings/Region";
 import type { Track } from "../../bindings/Track";
@@ -226,15 +228,26 @@ export function Inspector() {
   const tracks = project.tracks.filter((t) => selection.trackIds.includes(t.id));
   const lastRegionId = selection.regionIds[selection.regionIds.length - 1];
   const region = lastRegionId ? project.tracks.flatMap((t) => t.regions).find((r) => r.id === lastRegionId) : undefined;
-  const focusTrack = tracks[tracks.length - 1];
+  const focusTrack = tracks[tracks.length - 1] ?? project.tracks[0];
 
   return (
     <aside className="inspector" aria-label="Inspector">
-      <div className="panel-header">
-        <span className="panel-title">Inspector</span>
-      </div>
       <div className="inspector__scroll">
+        <details className="inspector-disclosure">
+          <summary><Icon name="chevronRight" size={15} /><span>Pasaje: <strong>{region?.name ?? "Valores de…por omisión"}</strong></span></summary>
+          <div className="inspector-region-options">
+            <label>Silenciar: <input type="checkbox" checked={region?.muted ?? false} onChange={e => { if (region) void useProject.getState().apply({ type: "setRegionsMuted", ids: [region.id], muted: e.target.checked }); }} /></label>
+            <label>Bucle: <input type="checkbox" onChange={() => pendingControl("Bucle de pasaje MIDI")} /></label>
+            <label>Cuantizar <select aria-label="Cuantizar pasaje" onChange={() => pendingControl("Cuantización de pasaje")}><option>Desactivado</option><option>Semicorchea</option><option>Corchea</option></select></label>
+            <label>Q-Swing: <span>—</span></label>
+            <label>Transponer: <span>—</span></label>
+            <label>Fuente del tono: <span>Desactivado</span></label>
+            <label>Desplaz. de velo… <span>—</span></label>
+          </div>
         {region && <RegionInspector region={region} project={project} />}
+        </details>
+        <details className="inspector-disclosure">
+          <summary><Icon name="chevronRight" size={15} /><span>Pista: <strong>{focusTrack?.name ?? "Sin selección"}</strong></span></summary>
         {tracks.length > 1 ? (
           <Section title={`${tracks.length} tracks selected`}>
             <div className="insp-buttons">
@@ -259,7 +272,9 @@ export function Inspector() {
         ) : (
           <p className="insp-empty">Select a track or region to see its properties.</p>
         )}
-        <ProjectInspector project={project} />
+          <details className="inspector-project"><summary>Proyecto</summary><ProjectInspector project={project} /></details>
+        </details>
+        <InspectorChannels trackId={focusTrack?.id} />
       </div>
     </aside>
   );

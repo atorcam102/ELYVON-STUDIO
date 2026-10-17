@@ -21,6 +21,7 @@ import { notify, notifyError } from "../../state/notifications";
 import { useProject } from "../../state/project";
 import { useTransport } from "../../state/transport";
 import { useUi } from "../../state/ui";
+import { pendingControl } from "../topbar/menuActions";
 
 function Fader({
   value,
@@ -492,8 +493,11 @@ const ChannelStrip = memo(function ChannelStrip({
       onPointerDown={() => onSelect(strip)}
       data-channel={key}
     >
+      <button className="slot strip__setting" type="button" onClick={() => pendingControl("Ajuste de canal")}>{c.type === "track" ? strip.name : "Ajuste"}</button>
+      <button className="strip__eq" type="button" onClick={insertMenu}>Ecualizador</button>
+      <button className="slot strip__midi-fx" type="button" onClick={() => pendingControl("Efectos MIDI")}>Efectos MIDI</button>
       <div className="slot slot--input" title={strip.kindLabel === "Test Tone" ? "Built-in test instrument (sine + harmonic, ADSR); not a production synthesizer" : strip.kindLabel}>
-        {strip.kindLabel}
+        {strip.kindLabel === "Test Tone" ? "Instrumento" : strip.kindLabel === "Master" ? <Icon name="link" size={13} /> : strip.kindLabel}
       </div>
       <div className="strip__fx">
         {strip.inserts.map((slot, i) => (
@@ -510,7 +514,7 @@ const ChannelStrip = memo(function ChannelStrip({
         ))}
         {strip.inserts.length < 8 && (
           <button type="button" className="slot slot--add" title="Add insert" disabled={disabledAudio} onClick={insertMenu}>
-            +
+            Efec. audio
           </button>
         )}
       </div>
@@ -551,14 +555,14 @@ const ChannelStrip = memo(function ChannelStrip({
           ))}
           {routing.sends.length < 8 && (
             <button type="button" className="slot slot--add" title="Add send" disabled={disabledAudio} onClick={sendMenu}>
-              Send +
+              Envíos
             </button>
           )}
         </div>
       )}
       {routing ? (
         <button type="button" className="slot slot--output" title="Output routing" onClick={outputMenu}>
-          {output?.type === "aux" ? auxName(output.id) : "Stereo Out"}
+          {output?.type === "aux" ? auxName(output.id) : "Sal estéreo"}
         </button>
       ) : (
         <div className="slot slot--output" title="Device output">
@@ -567,11 +571,12 @@ const ChannelStrip = memo(function ChannelStrip({
       )}
       {routing ? (
         <button type="button" className="slot slot--group" title={group ? `Group ${group.name}` : "Group: none"} onClick={groupMenu} style={group ? { background: group.color, color: "#fff" } : undefined}>
-          {group?.name ?? "Group"}
+          {group?.name ?? "Grupo"}
         </button>
       ) : (
-        <div className="slot slot--group" aria-hidden />
+        <div className="slot slot--group" aria-hidden>Grupo</div>
       )}
+      <button type="button" className="slot strip__read" onClick={() => pendingControl("Automatización")}>Read</button>
       {routing && (
         <div className="strip__flags">
           <button
@@ -594,7 +599,7 @@ const ChannelStrip = memo(function ChannelStrip({
           </button>
         </div>
       )}
-      {c.type === "master" ? <div className="knob" aria-hidden /> : <PanKnob value={strip.pan} disabled={disabledAudio} onCommit={(pan) => patch({ pan })} />}
+      <PanKnob value={strip.pan} disabled={disabledAudio || c.type === "master"} onCommit={(pan) => patch({ pan })} />
       <div className="strip__db">
         <span className="strip__db-box" title="Fader level">
           {formatDb(strip.volumeDb)}
@@ -646,6 +651,19 @@ const ChannelStrip = memo(function ChannelStrip({
   );
 });
 
+/** The inspector uses the same native channel controls as the full mixer. */
+export function InspectorChannels({ trackId }: { trackId?: string }) {
+  const project = useProject(s => s.view?.project);
+  const [registry] = useState<MeterRegistry>(() => new Map());
+  useEngineMeters(registry, project ?? null);
+  if (!project) return null;
+  const { tracks, master } = stripsOf(project);
+  const focused = tracks.find(t => t.channel.type === "track" && t.channel.id === trackId) ?? tracks[0];
+  return <div className="inspector-channels">
+    {[...(focused ? [focused] : []), master].map(s => <ChannelStrip key={keyOf(s.channel)} strip={s} project={project} selected={false} registry={registry} onSelect={() => undefined} />)}
+  </div>;
+}
+
 const KIND_FILTERS: { kind: TrackKind; label: string }[] = [
   { kind: "audio", label: "Audio" },
   { kind: "instrument", label: "Inst" },
@@ -667,6 +685,7 @@ export function Mixer() {
   const [hidden, setHidden] = useState<TrackKind[]>([]);
   const [latency, setLatency] = useState<MixerStatus | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [scope, setScope] = useState("Pistas");
   useEngineMeters(registry, project);
   useEffect(() => {
     if (!project) return;
@@ -681,7 +700,7 @@ export function Mixer() {
     if (s.channel.type === "track") useUi.getState().selectTracks([s.channel.id], s.channel.id);
   };
   const folders = project.mixer.folders;
-  const visible = tracks.filter((_, i) => !hidden.includes(project.tracks[i]!.kind));
+  const visible = tracks.filter((s, i) => !hidden.includes(project.tracks[i]!.kind) && (scope !== "Sencillo" || (s.channel.type === "track" && selection.trackIds.includes(s.channel.id))));
   const folderOf = (s: StripModel) => (s.channel.type === "track" ? project.tracks.find((t) => t.id === (s.channel as { id: string }).id)?.folder ?? null : null);
   const loose = visible.filter((s) => !folderOf(s));
   const exportStems = async () => {
@@ -712,6 +731,8 @@ export function Mixer() {
   return (
     <div className="mixer">
       <div className="mixer__bar">
+        <button className="arrangement-menu" onClick={() => pendingControl("Edición del mezclador")}>Edición <Icon name="chevronDown" size={11} /></button>
+        <details className="mixer-options"><summary className="arrangement-menu">Opciones <Icon name="chevronDown" size={11} /></summary><div className="mixer-options__content">
         <span className="mixer__heading">Mixer</span>
         {!engineAvailable(engine) && (
           <span className="mixer__notice" title="Routing edits the project; there is no audio signal without the engine.">
@@ -767,9 +788,19 @@ export function Mixer() {
             <Icon name="exportAudio" size={12} /> {exporting ? "Exporting…" : "Export Stems"}
           </button>
         </div>
+        </div></details>
+        <button className="arrangement-menu" onClick={() => pendingControl("Visualización del mezclador")}>Visualización <Icon name="chevronDown" size={11} /></button>
+        <span className="mixer-send-label">Envío los faders:</span>
+        <button className="arrangement-menu" onClick={() => pendingControl("Envíos a faders")}><Icon name="power" size={15} /> Desactivado <Icon name="chevronDown" size={11} /></button>
+        <span className="toolbar-space" />
+        <div className="segmented" role="group" aria-label="Vista del mezclador">{["Sencillo", "Pistas", "Todo"].map(name => <button key={name} className={scope === name ? "is-on" : ""} aria-pressed={scope === name} onClick={() => setScope(name)}>{name}</button>)}</div>
+        <span className="toolbar-space" />
+        <button className="arrangement-menu" title="Componentes del canal" onClick={() => pendingControl("Componentes del canal")}><Icon name="more" size={16} /><Icon name="chevronDown" size={11} /></button>
+        <button className="arrangement-menu is-blue" title="Canales verticales" onClick={() => pendingControl("Disposición de canales")}><Icon name="sliders" size={17} /></button>
       </div>
       <div className="mixer__body">
         <div className="mixer__strips">
+          <div className="mixer-labels" aria-hidden><div className="mixer-labels__stack"><span>Ajuste</span><span className="mixer-labels__eq">Ecualizador</span><span>Efectos MIDI</span><span>Entrada</span><span className="mixer-labels__fx">Efectos de audio</span><span>Envíos</span><span>Salida</span><span>Agrupar</span><span>Automatización</span><span className="mixer-labels__pan">Pan</span><span>dB</span><span className="mixer-labels__fader" /><span className="mixer-labels__footer" /></div></div>
           {project.tracks.length === 0 && auxes.length === 0 && <p className="mixer__empty">Add tracks to see their channel strips.</p>}
           {loose.map(strip)}
           {folders.map((f) => {

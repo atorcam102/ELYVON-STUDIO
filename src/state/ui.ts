@@ -8,7 +8,7 @@ import type { Layout } from "../bindings/Layout";
 import type { Project } from "../bindings/Project";
 import { clampZoom, DEFAULT_PX_PER_QUARTER } from "../lib/geometry";
 
-export type BottomTab = "mixer" | "pianoRoll" | "audioEditor";
+export type BottomTab = "mixer" | "pianoRoll" | "audioEditor" | "score" | "smartTempo" | "smartControls";
 export type BrowserTab = "files" | "loops" | "instruments" | "plugins";
 export type { SettingsSection } from "./uiContract";
 
@@ -37,13 +37,13 @@ interface UiState extends UiPresentationV1 {
 export const DEFAULT_LAYOUT: Layout = {
   inspectorVisible: true,
   browserVisible: true,
-  bottomVisible: true,
-  inspectorWidth: 240,
-  browserWidth: 260,
-  bottomHeight: 340,
-  trackHeaderWidth: 220,
-  bottomTab: "mixer",
-  browserTab: "files",
+  bottomVisible: false,
+  inspectorWidth: 296,
+  browserWidth: 404,
+  bottomHeight: 480,
+  trackHeaderWidth: 408,
+  bottomTab: "pianoRoll",
+  browserTab: "instruments",
 };
 
 const EMPTY_SELECTION: Selection = { trackIds: [], regionIds: [], anchorTrackId: null };

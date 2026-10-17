@@ -1,4 +1,5 @@
 import { Icon } from "../../components/Icon";
+import { pendingControl } from "../topbar/menuActions";
 import { Menu, type MenuEntry } from "../../components/Popover";
 import { useMenu } from "../../components/useMenu";
 import { useProject } from "../../state/project";
@@ -137,13 +138,22 @@ export function ArrangementMenus() {
   ];
   return (
     <div className="arrangement-menus">
-      <ToolbarMenu label="Edit" entries={edit} />
-      <ToolbarMenu label="Functions" entries={functions} />
-      <ToolbarMenu label="View" entries={panels} />
+      <button className="arrangement-menu arrangement-back" title="Volver" onClick={undo} disabled={!view?.undoLabel}><Icon name="undo" size={17} /></button>
+      <ToolbarMenu label="Edición" entries={edit} />
+      <ToolbarMenu label="Funciones" entries={functions} />
+      <ToolbarMenu label="Visualización" entries={panels} />
       <span className="arrangement-menu-divider" />
-      <span className="arrangement-view-selected" title="Tracks">
+      <button className="arrangement-menu" title="Live Loops" onClick={() => pendingControl("Live Loops")}><Icon name="grid" size={16} /></button>
+      <button className="arrangement-view-selected" title="Pistas" aria-pressed="true">
         <Icon name="tracks" size={14} />
-      </span>
+      </button>
+      <div className="arrangement-extra-tools">
+        <button className="arrangement-menu" title="Automatización" onClick={() => pendingControl("Automatización")}><Icon name="automation" size={18} /></button>
+        <button className="arrangement-menu" title="Flex" onClick={() => pendingControl("Flex Pitch/Time")}><Icon name="waveform" size={18} /></button>
+        <button className="arrangement-menu" title="Seguir cursor" onClick={() => pendingControl("Seguir cursor")}><Icon name="follow" size={17} /></button>
+        <button className="arrangement-menu" title="Herramientas" onClick={() => pendingControl("Herramientas")}><Icon name="pointer" size={16} /><Icon name="chevronDown" size={10} /></button>
+        <button className="arrangement-menu" title="Herramienta secundaria" onClick={() => pendingControl("Herramienta secundaria")}><Icon name="plus" size={17} /><Icon name="chevronDown" size={10} /></button>
+      </div>
     </div>
   );
 }

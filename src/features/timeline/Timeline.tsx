@@ -23,7 +23,6 @@ import {
   visibleTicks,
   zoomAround,
 } from "../../lib/geometry";
-import { gridBackground } from "../../lib/gridBackground";
 import { inTauri } from "../../lib/ipc";
 import { PPQ, ticksPerBar, ticksPerBeat } from "../../lib/music";
 import { hasPrimaryModifier } from "../../lib/platform";
@@ -587,7 +586,7 @@ export function Timeline() {
               style={{
                 width: contentWidth,
                 height: lanesHeight,
-                ...gridBackground([{ axis: "y", every: TRACK_HEIGHT, color: "var(--grid-row)" }]),
+                ["--occupied-height" as string]: `${project.tracks.length * TRACK_HEIGHT}px`,
               }}
               onPointerDown={onLanePointerDown}
               onDoubleClick={onLaneDoubleClick}

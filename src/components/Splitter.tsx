@@ -1,4 +1,5 @@
 import { useRef, type PointerEvent } from "react";
+import { panelResize } from "../lib/panelResize";
 
 interface SplitterProps {
   orientation: "vertical" | "horizontal";
@@ -9,15 +10,17 @@ interface SplitterProps {
   /** +1 when dragging right/down grows the panel, −1 when it shrinks it. */
   direction: 1 | -1;
   onChange: (value: number) => void;
+  onCollapse?: () => void;
   label: string;
 }
 
 /** Drag handle that resizes an adjacent panel. Keyboard: arrows (Shift = ×4). */
-export function Splitter({ orientation, value, min, max, direction, onChange, label }: SplitterProps) {
+export function Splitter({ orientation, value, min, max, direction, onChange, onCollapse, label }: SplitterProps) {
   const start = useRef<{ pos: number; value: number } | null>(null);
   const clamp = (v: number) => Math.round(Math.min(max, Math.max(min, v)));
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     start.current = { pos: orientation === "vertical" ? e.clientX : e.clientY, value };
     document.body.classList.add(orientation === "vertical" ? "is-resizing-x" : "is-resizing-y");
@@ -25,7 +28,11 @@ export function Splitter({ orientation, value, min, max, direction, onChange, la
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!start.current) return;
     const pos = orientation === "vertical" ? e.clientX : e.clientY;
-    onChange(clamp(start.current.value + (pos - start.current.pos) * direction));
+    const next = panelResize(start.current.value + (pos - start.current.pos) * direction, min, max, onCollapse ? 48 : undefined);
+    if (next.collapsed) {
+      end();
+      onCollapse?.();
+    } else onChange(next.size);
   };
   const end = () => {
     start.current = null;
@@ -46,6 +53,7 @@ export function Splitter({ orientation, value, min, max, direction, onChange, la
       onPointerMove={onPointerMove}
       onPointerUp={end}
       onPointerCancel={end}
+      onLostPointerCapture={end}
       onKeyDown={(e) => {
         const step = e.shiftKey ? 40 : 10;
         const grow = orientation === "vertical" ? ["ArrowRight"] : ["ArrowDown"];

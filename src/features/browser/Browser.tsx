@@ -22,7 +22,7 @@ const ENTRY_ICON: Record<EntryKind, IconName> = {
   other: "file",
 };
 
-function FileBrowser() {
+export function FileBrowser() {
   const [listing, setListing] = useState<DirListing | null>(null);
   const [places, setPlaces] = useState<Place[]>([]);
   const [error, setError] = useState<IpcError | null>(null);

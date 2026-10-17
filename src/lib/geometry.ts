@@ -6,9 +6,9 @@ import { PPQ, ticksPerBar, ticksPerBeat } from "./music";
 
 export const MIN_PX_PER_QUARTER = 3;
 export const MAX_PX_PER_QUARTER = 320;
-export const DEFAULT_PX_PER_QUARTER = 28;
-export const TRACK_HEIGHT = 44;
-export const RULER_HEIGHT = 30;
+export const DEFAULT_PX_PER_QUARTER = 15;
+export const TRACK_HEIGHT = 62;
+export const RULER_HEIGHT = 38;
 
 export function ticksToPx(ticks: number, pxPerQuarter: number): number {
   return (ticks / PPQ) * pxPerQuarter;

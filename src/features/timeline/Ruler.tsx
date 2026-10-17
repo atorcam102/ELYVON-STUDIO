@@ -23,7 +23,7 @@ interface RulerProps {
 }
 
 const LOOP_STRIP = 13;
-const MIN_LABEL_GAP = 44;
+const MIN_LABEL_GAP = 90;
 
 /**
  * Bar ruler following metre changes. The upper part locates the playhead

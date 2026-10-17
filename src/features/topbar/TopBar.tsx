@@ -1,4 +1,7 @@
 import { useMidi } from "../../state/midi";
+import { AppMenu } from "./AppMenu";
+import { pendingControl } from "./menuActions";
+import { useChrome } from "../../state/chrome";
 import { MidiDialog } from "../midi/MidiDialog";
 import { useCapture } from "../../state/capture";
 import { RecordingDialog } from "../recording/RecordingDialog";
@@ -74,31 +77,29 @@ function ViewButtons() {
   return (
     <div className="cb-group" role="group" aria-label="View">
       <CbButton
-        icon="panelLeft"
+        icon="settings"
         tone="view"
-        label="Inspector (I)"
-        active={layout.inspectorVisible}
-        onClick={() =>
-          setLayout({ inspectorVisible: !layout.inspectorVisible })
-        }
+        label="Smart Controls (B)"
+        active={layout.bottomVisible && layout.bottomTab === "smartControls"}
+        onClick={() => setLayout({ bottomVisible: !(layout.bottomVisible && layout.bottomTab === "smartControls"), bottomTab: "smartControls" })}
       />
       <CbButton
-        icon="mixer"
+        icon="sliders"
         tone="view"
-        label="Mixer (X)"
+        label="Mezclador (X)"
         active={mixerShown}
         onClick={() =>
           setLayout(
             mixerShown
               ? { bottomVisible: false }
-              : { bottomVisible: true, bottomTab: "mixer" },
+              : { bottomVisible: true, bottomTab: "mixer", bottomHeight: window.innerHeight - 180 },
           )
         }
       />
       <CbButton
-        icon="piano"
+        icon="pencil"
         tone="view"
-        label="Editors (E)"
+        label="Editor (E)"
         active={editorShown}
         onClick={() =>
           setLayout(
@@ -106,6 +107,7 @@ function ViewButtons() {
               ? { bottomVisible: false }
               : {
                   bottomVisible: true,
+                  bottomHeight: Math.round(window.innerHeight * .66),
                   bottomTab:
                     layout.bottomTab === "mixer"
                       ? "pianoRoll"
@@ -177,7 +179,7 @@ function Transport() {
   const rolling = isRolling(snapshot);
   return (
     <div className="cb-transport" role="group" aria-label="Transport">
-      <CbButton icon="toStart" label="Go to beginning (Home)" onClick={() => locate(0)} />
+      <span className="transport-secondary"><CbButton icon="toStart" label="Go to beginning (Home)" onClick={() => locate(0)} /></span>
       <CbButton icon="stop" label={label("Stop")} disabled={!available} onClick={stop} active={snapshot?.state === "stopped" ? undefined : false} />
       {rolling ? (
         <CbButton icon="pause" tone="play" label={label("Pause (Space stops)")} disabled={!available||recording} onClick={pause} active size={17} />
@@ -185,9 +187,9 @@ function Transport() {
         <CbButton icon="play" tone="play" label={label("Play (Space)")} disabled={!available} onClick={play} size={17} />
       )}
       <CbButton icon="record" tone="record" label={capture.status?.active?(capture.status.monitoring?"Stop input monitoring":"Stop recording"):"Record armed audio tracks"} active={capture.status?.active&&!capture.status.monitoring} disabled={!available||capture.pending||midiRecording} onClick={()=>void(capture.status?.active?capture.stop():capture.start())}/>
-      <button type="button" className="cb-btn" aria-label="Audio recording settings" onClick={()=>setInputOpen(true)}>Input</button>
+      <button type="button" className="cb-btn transport-secondary" aria-label="Audio recording settings" onClick={()=>setInputOpen(true)}>Input</button>
       <RecordingDialog open={inputOpen} onClose={()=>setInputOpen(false)}/>
-      <button type="button" className="cb-btn" aria-label="MIDI devices and monitor" onClick={()=>setMidiOpen(true)}>MIDI</button>
+      <button type="button" className="cb-btn transport-secondary" aria-label="MIDI devices and monitor" onClick={()=>setMidiOpen(true)}>MIDI</button>
       <MidiDialog open={midiOpen} onClose={()=>setMidiOpen(false)}/>
     </div>
   );
@@ -317,11 +319,12 @@ function Lcd() {
       >
         <div className="lcd__clock">{countIn > 0 ? `Count-in ${countIn.toFixed(1)} s` : formatClockSeconds(seconds)}</div>
         <div className="lcd__digits">
-          <span className="lcd__big">{p.bar}</span>
+          <span className="lcd__big"><span className="lcd__zero">{String(p.bar).padStart(3, "0").slice(0, -String(p.bar).length)}</span>{p.bar}</span>
           <span className="lcd__big">{p.beat}</span>
           <span className="lcd__small">{p.division}</span>
           <span className="lcd__small">{String(p.tick).padStart(3, "0")}</span>
         </div>
+        <div className="lcd__position-labels"><span>COMPÁS</span><span>TIEMPO</span></div>
       </div>
       <div className="lcd__cell lcd__tempo">
         <NumberField
@@ -335,9 +338,9 @@ function Lcd() {
         />
         <div className="lcd__labels">
           <button type="button" className="lcd__tap" title="Tap tempo (native clock; applies from the third tap)" onClick={() => void tapTempo()}>
-            TAP
+            CONSERVAR
           </button>
-          <span title="Tempo at the playhead">{transport.tempoChanges.length > 0 ? `now ${Number(bpmNow.toFixed(2))}` : "BPM"}</span>
+          <span title="Tempo at the playhead">{transport.tempoChanges.length > 0 ? `ahora ${Number(bpmNow.toFixed(2))}` : "TEMPO"}</span>
         </div>
       </div>
       <div className="lcd__cell lcd__meta">
@@ -355,15 +358,15 @@ function Lcd() {
           title="Key"
           onClick={(e) => keyMenu.openBelow(e.currentTarget)}
         >
-          {`${transport.key.tonic}${transport.key.mode === "major" ? "maj" : "min"}`}
+          {`${({ C: "Do", D: "Re", E: "Mi", F: "Fa", G: "Sol", A: "La", B: "Si" } as Record<string, string>)[transport.key.tonic] ?? transport.key.tonic} ${transport.key.mode === "major" ? "may." : "men."}`}
         </button>
         <button
           type="button"
-          className="lcd__btn lcd__btn--sub"
+          className="lcd__btn lcd__map"
           title="Tempo, metre, markers, cycle/punch, count-in and metronome"
           onClick={() => setMapOpen(true)}
         >
-          Map…
+          <Icon name="chevronDown" size={15} />
         </button>
       </div>
       <TimelineSettingsDialog open={mapOpen} onClose={() => setMapOpen(false)} />
@@ -404,7 +407,7 @@ function Modes() {
       >
         1234
       </button>
-      <CbButton icon="follow" tone="view" label={follow ? "Follow playhead on" : "Follow playhead off"} active={follow} onClick={() => setFollow(!follow)} />
+      <CbButton icon="forward" tone="view" label={follow ? "Follow playhead on" : "Follow playhead off"} active={follow} onClick={() => setFollow(!follow)} />
     </div>
   );
 }
@@ -484,37 +487,37 @@ export function TopBar() {
   const layout = useUi((s) => s.layout);
   const setLayout = useUi((s) => s.setLayout);
   const openSettings = useUi((s) => s.openSettings);
+  const chrome = useChrome();
   return (
-    <header className="controlbar">
+    <><AppMenu /><div className="document-titlebar"><ProjectTitle /><span> - Pistas</span></div>
+    {chrome.controlsVisible && <header className="controlbar">
       <div className="controlbar__side">
+        <div className="cb-group" role="group" aria-label="Biblioteca e inspector">
+          <CbButton icon="project" tone="view" label="Biblioteca (Y)" active={layout.browserVisible} onClick={() => setLayout({ browserVisible: !layout.browserVisible })} />
+          <CbButton icon="panelLeft" tone="view" label="Inspector (I)" active={layout.inspectorVisible} onClick={() => setLayout({ inspectorVisible: !layout.inspectorVisible })} />
+          <CbButton icon="help" label="Ayuda rápida" onClick={() => pendingControl("Ayuda rápida")} />
+          <CbButton icon="download" label="Biblioteca de sonidos" onClick={() => setLayout({ browserVisible: true })} />
+        </div>
         <ViewButtons />
-        <FileButtons />
-        <ProjectTitle />
       </div>
       <div className="controlbar__center">
         <Transport />
-        <Modes />
         <Lcd />
+        <Modes />
       </div>
       <div className="controlbar__side controlbar__side--end">
-        <StatusIndicator />
         <div className="cb-group" role="group" aria-label="Panels">
-          <CbButton
-            icon="panelRight"
-            tone="view"
-            label="Library (B)"
-            active={layout.browserVisible}
-            onClick={() =>
-              setLayout({ browserVisible: !layout.browserVisible })
-            }
-          />
-          <CbButton
-            icon="settings"
-            label={`Settings (${shortcutLabel("Mod+,")})`}
-            onClick={() => openSettings()}
-          />
+          <CbButton icon="list" tone="view" label="Editores de lista (D)" active={chrome.sidePanel === "events"} onClick={() => chrome.toggleSidePanel("events")} />
+          <CbButton icon="note" tone="view" label="Bloc de notas" active={chrome.sidePanel === "notes"} onClick={() => chrome.toggleSidePanel("notes")} />
+          <CbButton icon="loops" tone="view" label="Explorador de loops (O)" active={chrome.sidePanel === "loops"} onClick={() => chrome.toggleSidePanel("loops")} />
+          <CbButton icon="importAudio" tone="view" label="Exploradores (F)" active={chrome.sidePanel === "files"} onClick={() => chrome.toggleSidePanel("files")} />
         </div>
       </div>
-    </header>
+      <details className="controlbar__extras"><summary title="Más controles"><Icon name="more" size={16} /></summary><div><FileButtons /><StatusIndicator /><button onClick={() => openSettings()}>Ajustes</button><button onClick={() => chrome.setDialog("recording")}>Ajustes de grabación…</button><button onClick={() => chrome.setDialog("midi")}>Dispositivos MIDI…</button></div></details>
+    </header>}
+    <RecordingDialog open={chrome.dialog === "recording"} onClose={() => chrome.setDialog(null)} />
+    <MidiDialog open={chrome.dialog === "midi"} onClose={() => chrome.setDialog(null)} />
+    <TimelineSettingsDialog open={chrome.dialog === "transport"} onClose={() => chrome.setDialog(null)} />
+    </>
   );
 }

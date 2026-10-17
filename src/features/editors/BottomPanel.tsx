@@ -2,11 +2,12 @@ import { IconButton } from "../../components/Button";
 import { useUi, type BottomTab } from "../../state/ui";
 import { Mixer } from "../mixer/Mixer";
 import { AudioEditor, PianoRoll } from "./PianoRoll";
+import { ScoreEditor, SmartTempoEditor, SmartControls } from "./ReferenceEditors";
 
 const TABS: { id: BottomTab; label: string; note?: string }[] = [
-  { id: "mixer", label: "Mixer" },
-  { id: "pianoRoll", label: "Piano Roll" },
-  { id: "audioEditor", label: "Audio Editor", note: "Phase 2" },
+  { id: "pianoRoll", label: "Editor de teclado" },
+  { id: "score", label: "Partitura" },
+  { id: "smartTempo", label: "Tempo inteligente" },
 ];
 
 export function BottomPanel() {
@@ -17,7 +18,7 @@ export function BottomPanel() {
       className={`bottom-panel${tab === "mixer" ? " bottom-panel--mixer" : ""}`}
       aria-label="Editors"
     >
-      <div className="bottom-panel__bar">
+      {tab !== "mixer" && <div className="bottom-panel__bar">
         <div className="segmented" role="tablist" aria-label="Editors">
           {TABS.map((t) => (
             <button
@@ -39,11 +40,14 @@ export function BottomPanel() {
           size={12}
           onClick={() => setLayout({ bottomVisible: false })}
         />
-      </div>
+      </div>}
       <div className="bottom-panel__content">
         {tab === "mixer" && <Mixer />}
         {tab === "pianoRoll" && <PianoRoll />}
         {tab === "audioEditor" && <AudioEditor />}
+        {tab === "score" && <ScoreEditor />}
+        {tab === "smartTempo" && <SmartTempoEditor />}
+        {tab === "smartControls" && <SmartControls />}
       </div>
     </section>
   );

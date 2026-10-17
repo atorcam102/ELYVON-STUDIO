@@ -34,7 +34,12 @@ export const useApp = create<AppState>((set, get) => ({
   load: async () => {
     const [settings, info, engine] = await Promise.all([ipc.settings.get(), ipc.app.info(), ipc.app.audioStatus()]);
     set({ settings, info, engine });
-    useUi.getState().replaceLayout(settings.layout);
+    // Migrate the old shipped dimensions, preserving custom panel sizes.
+    const layout = { ...settings.layout };
+    if (layout.trackHeaderWidth === 220) layout.trackHeaderWidth = 408;
+    if (layout.browserWidth === 260) layout.browserWidth = 404;
+    if (layout.inspectorWidth === 240) layout.inspectorWidth = 296;
+    useUi.getState().replaceLayout(layout);
   },
   updateSettings: (patch) => {
     const current = get().settings;

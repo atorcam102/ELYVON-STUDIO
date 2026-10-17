@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Splitter } from "./components/Splitter";
 import { Toasts } from "./components/Toasts";
 import { useAppEvents } from "./features/app/useAppEvents";
-import { Browser } from "./features/browser/Browser";
+import { Library } from "./features/browser/Library";
+import { SidePanel } from "./features/browser/SidePanel";
 import {
   AboutDialog,
   PromptHost,
@@ -22,6 +23,14 @@ import { useUi } from "./state/ui";
 function Workspace() {
   const layout = useUi((s) => s.layout);
   const setLayout = useUi((s) => s.setLayout);
+  const [viewportHeight, setViewportHeight] = useState(window.innerHeight);
+  useEffect(() => {
+    const resize = () => setViewportHeight(window.innerHeight);
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+  const bottomMax = Math.max(180, viewportHeight - 180);
+  const bottomHeight = Math.max(180, Math.min(bottomMax, layout.bottomHeight));
   return (
     <div className="workspace">
       <div className="workspace__main">
@@ -31,7 +40,7 @@ function Workspace() {
               className="workspace__browser"
               style={{ width: layout.browserWidth }}
             >
-              <Browser />
+              <Library />
             </div>
             <Splitter
               orientation="vertical"
@@ -66,21 +75,23 @@ function Workspace() {
         <div className="workspace__center">
           <Timeline />
         </div>
+        <SidePanel />
       </div>
       {layout.bottomVisible && (
         <>
           <Splitter
             orientation="horizontal"
             label="Resize editors"
-            value={layout.bottomHeight}
-            min={140}
-            max={720}
+            value={bottomHeight}
+            min={180}
+            max={bottomMax}
             direction={-1}
             onChange={(bottomHeight) => setLayout({ bottomHeight })}
+            onCollapse={() => setLayout({ bottomVisible: false })}
           />
           <div
             className="workspace__bottom"
-            style={{ height: layout.bottomHeight }}
+            style={{ height: bottomHeight }}
           >
             <BottomPanel />
           </div>
@@ -111,6 +122,10 @@ export default function App() {
   useAppEvents();
 
   useEffect(() => {
+    if (import.meta.env.DEV && !inTauri && new URLSearchParams(location.search).has("design-preview")) {
+      void import("./reference/designPreview").then(m => m.initializeDesignPreview());
+      return;
+    }
     Promise.all([
       useApp.getState().load(),
       ipc.project.get().then((v) => useProject.getState().setView(v)),

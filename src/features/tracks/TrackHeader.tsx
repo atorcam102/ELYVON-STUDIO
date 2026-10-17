@@ -116,16 +116,16 @@ export const TrackHeader = memo(function TrackHeader({
           >
             S
           </button>
-          {track.kind === "audio" && (
-            <button type="button" className="ms-btn ms-btn--rec" disabled title="Record enable — unavailable until the audio engine ships">
+            <button type="button" className={`ms-btn ms-btn--rec${track.io.armed ? " is-on" : ""}`} aria-label="Activar grabación" aria-pressed={track.io.armed} onClick={() => void apply({ type: "setTrackIo", id: track.id, io: { ...track.io, armed: !track.io.armed } })}>
               R
             </button>
-          )}
+            <button type="button" className={`ms-btn ms-btn--input${track.io.monitor ? " is-on" : ""}`} aria-label="Monitorización de entrada" aria-pressed={track.io.monitor} onClick={() => void apply({ type: "setTrackIo", id: track.id, io: { ...track.io, monitor: !track.io.monitor } })}>I</button>
           <MiniFader
             value={track.volumeDb}
             label={`${track.name} volume`}
             onCommit={(volumeDb) => void apply({ type: "setTrackVolume", id: track.id, volumeDb })}
           />
+          <input className="track-pan" type="range" aria-label={`${track.name} panorama`} min={-1} max={1} step={.01} value={track.pan} onChange={e => void apply({ type: "setTrackPan", id: track.id, pan: Number(e.target.value) })} onDoubleClick={() => void apply({ type: "setTrackPan", id: track.id, pan: 0 })} />
         </div>
       </div>
       {menu.at && <Menu at={menu.at} entries={entries} onClose={menu.close} />}
