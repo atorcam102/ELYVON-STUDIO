@@ -235,6 +235,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     await d.find(".region", { timeout: 10_000 });
     assert.equal(await trackCount(), 6);
     await d.find(".badge--demo");
+    await hideBottom(); // the reload restores the persisted layout
     await shot("02-demo");
 
     const before = (await d.invoke("project_get")).ok.project;
