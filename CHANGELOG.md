@@ -7,6 +7,8 @@ section of each version into the GitHub release and into the update dialog.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-17
+
 ### Added
 
 - Mix automation: lanes for volume, pan, mute, send levels and insert parameters on tracks, aux channels, the master and regions; Off/Read/Touch/Latch/Write modes; linear, step and Bézier curves; an Automation editor (draw, move, copy, duplicate, curve per point, simplify); mixer faders, pan, mute and sends record automation while playing. Playback is sample-accurate and identical to export.

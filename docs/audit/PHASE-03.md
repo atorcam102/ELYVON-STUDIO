@@ -53,7 +53,7 @@ tone off → preferred device returns → switch back while idle; only device un
 input missing/lost never stops output. Real headless clock: plays, tone meters −18 ± 0.5 dBFS,
 stop holds position, thread joins on drop. All 9 passed in 3 consecutive runs.
 
-### Real CPAL → ALSA stream ([raw JSON](phase03-probe-alsa-null.json))
+### Real CPAL → ALSA stream ([raw JSON](data/phase03-probe-alsa-null.json))
 
 SHA-256 `4cd971a024566aa7c21b7112a9f4c41886ab409070c22b84c8ea2cf4ff758b34`.
 
@@ -64,7 +64,7 @@ clock and consumes samples as fast as possible (≈ 2696 s of audio in 4 s), so 
 backend/callback/conversion path, not real-time pacing or audibility. The system "default" device
 has no backing card here and correctly reports `noDevice` with an actionable message.
 
-### Headless clock ([raw JSON](phase03-probe-headless.json))
+### Headless clock ([raw JSON](data/phase03-probe-headless.json))
 
 SHA-256 `65f39b563b1af18a28ecf578de92b9e567f86bd861347d77be9cdc126b6f5916`.
 
@@ -80,7 +80,7 @@ transport passed 960 ticks, the LCD changed, the test tone read −18 ± 0.5 dBF
 −18.0 in the mixer output strip, a 0 dBFS request was clamped to −6, Stop held the position,
 Settings › Audio showed 48000 Hz and the saved device, the project and dirty flag were unchanged,
 preferences persisted with a 256-frame profile, and a disabled engine refused `audio_play` with
-an actionable `audioUnavailable` error. Screenshots: `docs/screenshots/04-…`, `05-…`.
+an actionable `audioUnavailable` error. Screenshots: [`docs/screenshots/phase-04-05-linux/`](../screenshots/phase-04-05-linux/).
 
 ## Defects found and fixed while validating
 

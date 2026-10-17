@@ -73,7 +73,7 @@ Both Windows x64/x86 installer build, collection and upload steps passed:
 and [x86 artifact](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38765992553/artifacts/11990307033).
 These are verification artifacts (EXE/MSI per target), not hardware installation evidence or a new Release.
 
-[Raw measurements](native-metrics-38765992553.json) were retrieved from the native job's
+[Raw measurements](data/native-metrics-38765992553.json) were retrieved from the native job's
 `Native metrics` check annotation (check-run 116529915591), containing the same report as
 [native-evidence](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38765992553/artifacts/11989571280).
 The durable raw JSON SHA-256 is `1f9ef4a281041de84048a4120ef1d1f5a121db6321caac9d30cc67545d7f66cc`. Runner: Ubuntu 24.04 x64,

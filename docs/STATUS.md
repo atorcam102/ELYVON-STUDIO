@@ -54,10 +54,10 @@ This is a technical audit, not a claim that a playable DAW or every platform is 
   Preview tag pushes are now excluded from that rebuild workflow; explicit dispatch still validates versions.
 - Current phase: [PR #2](https://github.com/atorcam102/ELYVON-STUDIO/pull/2),
   [CI 38765992553](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/38765992553),
-  [native raw measurements](audit/native-metrics-38765992553.json). Frontend, dependencies, native workspace/E2E/measurements and Windows x64/x86
+  [native raw measurements](audit/data/native-metrics-38765992553.json). Frontend, dependencies, native workspace/E2E/measurements and Windows x64/x86
   installer checks passed; exact context and observed 216 ms maximum frame interval are in the validation report.
 - This phase adds frozen wire/signal fixtures, a native process restart regression, a native measurement
-  runner, dependency policy and CI artifacts. See [validation](audit/VALIDATION.md).
+  runner, dependency policy and CI artifacts. See [validation](audit/PHASE-02.md).
 
 Run from the checkout, with Node >=22.12, stable Rust >=1.88 and Tauri native prerequisites:
 

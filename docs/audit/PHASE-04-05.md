@@ -47,7 +47,7 @@ need (lock-free callback engine, device output, internal clock) was built here �
 | `cargo deny --locked check` (0.20.2) | advisories ok, bans ok, licenses ok, sources ok |
 | `actionlint -shellcheck= -pyflakes=` (1.7.12) | Pass |
 | `npx tauri build --debug --no-bundle` + `xvfb-run … node --test e2e/app.e2e.mjs` | 11/11 pass (new: import, play, Space-stop, render) |
-| `xvfb-run … node e2e/measure.mjs` | Launch→ready 664–730 ms, native RSS ~190 MB (debug), timeline median 17 ms / p95 34 ms ([raw](native-metrics-phase-04-05-local.json)) |
+| `xvfb-run … node e2e/measure.mjs` | Launch→ready 664–730 ms, native RSS ~190 MB (debug), timeline median 17 ms / p95 34 ms ([raw](data/native-metrics-phase-04-05-local.json)) |
 
 GitHub Actions results for the pushed commits are recorded in the final report of the PR/merge.
 

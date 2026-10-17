@@ -1,0 +1,24 @@
+# Normalise text to LF in the repository and in checkouts on every OS, so
+# generated files (ts-rs bindings, Cargo.lock) never differ only by line endings.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets.
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.wav binary
+*.flac binary
+*.mid binary
+*.ttf binary
+*.woff2 binary
+
+# Generated code: collapse in diffs.
+src/bindings/** linguist-generated=true
+Cargo.lock linguist-generated=true
+package-lock.json linguist-generated=true

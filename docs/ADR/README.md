@@ -11,5 +11,5 @@
 8. [Sample-accurate automation and non-destructive comping](0008-sample-accurate-automation-and-non-destructive-comping.md)
 
 Implementation/evidence: [STATUS](../STATUS.md), [CONTRACTS](../CONTRACTS.md),
-[FEATURE_MATRIX](../FEATURE_MATRIX.md), [validation](../audit/VALIDATION.md).
+[FEATURE_MATRIX](../FEATURE_MATRIX.md), [validation](../audit/PHASE-02.md).
 These decisions do not declare untested targets or hardware behaviour verified.
