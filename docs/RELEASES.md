@@ -3,6 +3,23 @@
 Este documento explica cómo se compilan, firman y publican las versiones de
 Elyvon Studio, y qué credenciales hay que configurar.
 
+## Preview 0.4.1 (Windows x64, compilación local)
+
+[`v0.4.1-windows-preview.1`](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.4.1-windows-preview.1)
+apunta al commit `1521006`: la 0.4.0 más la segunda pasada visual de la interfaz (iconos, menús
+navegables con teclado, barras de los editores). Mismo procedimiento que la 0.4.0 (abajo): worktree
+limpio, `npm run check` (Vitest 50/50), `npm run check:rust` (402 tests), E2E nativo 17/17 sobre
+el binario debug y de nuevo 17/17 sobre el binario release empaquetado, cabeceras PE/MSI, versión
+0.4.1 en el ejecutable, publicación con `gh release create` y comprobación de lo descargado.
+Ningún workflow se ejecutó.
+
+```
+1e612d036c4c307d3cdb8a7cb7d4029cb0852107337a894b75460bdd47d141bd  Elyvon-Studio-v0.4.1-windows-x64-setup.exe
+6654d577df12ba621f7300cbc583fceba59cb2a0fd0a61214a5166e512c9ae34  Elyvon-Studio-v0.4.1-windows-x64.msi
+```
+
+Sin Authenticode ni firma de updater; no se instaló el paquete en esta verificación. Solo Windows x64.
+
 ## Preview 0.4.0 (Windows x64, compilación local)
 
 [`v0.4.0-windows-preview.1`](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.4.0-windows-preview.1)
