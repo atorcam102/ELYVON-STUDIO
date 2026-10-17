@@ -400,6 +400,27 @@ impl AudioService {
             .is_some_and(|h| h.send_live(message))
     }
 
+    /// Queues a live automation control value for the callback.
+    pub fn send_override(&self, o: elyvon_audio::automation::ParamOverride) -> bool {
+        lock(&self.inner)
+            .handle
+            .as_mut()
+            .is_some_and(|h| h.send_override(o))
+    }
+
+    /// The prepared buffers of every pool entry (offline renders).
+    pub fn buffers(
+        &self,
+        project: &Project,
+    ) -> std::collections::HashMap<MediaId, Arc<MediaBuffer>> {
+        let store = lock(&self.store);
+        project
+            .media
+            .iter()
+            .filter_map(|a| store.ready(a.id).map(|b| (a.id, b)))
+            .collect()
+    }
+
     pub fn reset_clips(&self) {
         if let Some(h) = lock(&self.inner).handle.as_ref() {
             h.shared().reset_clips();
@@ -495,9 +516,11 @@ pub fn spawn_publisher(app: AppHandle) {
             let mut meters_active = false;
             loop {
                 std::thread::sleep(Duration::from_millis(33));
-                app.state::<AppState>()
-                    .audio
-                    .tick(&app, &mut last, &mut meters_active);
+                let state = app.state::<AppState>();
+                state.audio.tick(&app, &mut last, &mut meters_active);
+                if let Some(snap) = state.audio.snapshot() {
+                    state.automation.on_snapshot(&app, &snap);
+                }
             }
         });
     if let Err(e) = spawned {

@@ -1,0 +1,181 @@
+{
+  "format": "elyvon-studio-project",
+  "schemaVersion": 4,
+  "savedWith": "0.3.0",
+  "project": {
+    "id": "0b5b8a7e-6a4c-4b8a-9a55-0000000004a0",
+    "name": "Mixer Fixture",
+    "sampleRate": 48000,
+    "transport": {
+      "tempo": 110.0,
+      "timeSignature": { "numerator": 4, "denominator": 4 },
+      "key": { "tonic": "C", "mode": "major" },
+      "loopRange": { "enabled": true, "start": 0, "end": 7680 },
+      "tempoChanges": [],
+      "meterChanges": [],
+      "metronome": { "enabled": false, "volumeDb": -6.0, "accent": true },
+      "countInBars": 0,
+      "preRollBars": 0,
+      "punch": { "enabled": false, "start": 0, "end": 15360 }
+    },
+    "lengthBars": 16,
+    "tracks": [
+      {
+        "io": {
+          "armed": false,
+          "inputChannel": 0,
+          "inputChannels": 1,
+          "monitor": false,
+          "midiInput": null,
+          "midiOutput": null,
+          "midiChannel": null,
+          "outputChannel": null,
+          "midiMonitor": true
+        },
+        "strip": {
+          "output": { "type": "master" },
+          "sends": [
+            { "target": "0b5b8a7e-6a4c-4b8a-9a55-0000000004f0", "levelDb": -6.0, "preFader": false, "muted": false }
+          ],
+          "inserts": [
+            { "id": "0b5b8a7e-6a4c-4b8a-9a55-0000000004e0", "bypass": false, "processor": { "type": "trim", "gainDb": -3.0 } }
+          ],
+          "soloSafe": false,
+          "group": "0b5b8a7e-6a4c-4b8a-9a55-0000000004d0",
+          "format": "auto"
+        },
+        "folder": null,
+        "id": "0b5b8a7e-6a4c-4b8a-9a55-000000000410",
+        "name": "Vocal",
+        "kind": "audio",
+        "color": "#19A7C0",
+        "muted": false,
+        "soloed": false,
+        "volumeDb": -1.5,
+        "pan": 0.25,
+        "regions": [
+          {
+            "capture": {
+              "folder": "0b5b8a7e-6a4c-4b8a-9a55-0000000004c0",
+              "take": 1,
+              "recordedAt": 1760000000
+            },
+            "midiEvents": [],
+            "id": "0b5b8a7e-6a4c-4b8a-9a55-000000000420",
+            "name": "Take 1",
+            "start": 0,
+            "length": 7680,
+            "muted": false,
+            "content": {
+              "type": "audio",
+              "media": "0b5b8a7e-6a4c-4b8a-9a55-000000000430",
+              "offset": 0,
+              "gainDb": 0.0,
+              "fadeIn": 48,
+              "fadeOut": 480,
+              "looped": false
+            }
+          }
+        ]
+      },
+      {
+        "io": {
+          "armed": false,
+          "inputChannel": 0,
+          "inputChannels": 1,
+          "monitor": false,
+          "midiInput": null,
+          "midiOutput": null,
+          "midiChannel": null,
+          "outputChannel": null,
+          "midiMonitor": true
+        },
+        "strip": {
+          "output": { "type": "aux", "id": "0b5b8a7e-6a4c-4b8a-9a55-0000000004f0" },
+          "sends": [],
+          "inserts": [],
+          "soloSafe": false,
+          "group": "0b5b8a7e-6a4c-4b8a-9a55-0000000004d0",
+          "format": "stereo"
+        },
+        "folder": null,
+        "id": "0b5b8a7e-6a4c-4b8a-9a55-000000000411",
+        "name": "Keys",
+        "kind": "instrument",
+        "color": "#365DCD",
+        "muted": false,
+        "soloed": false,
+        "volumeDb": 0.0,
+        "pan": 0.0,
+        "regions": [
+          {
+            "capture": null,
+            "midiEvents": [],
+            "id": "0b5b8a7e-6a4c-4b8a-9a55-000000000421",
+            "name": "Chords",
+            "start": 0,
+            "length": 3840,
+            "muted": false,
+            "content": {
+              "type": "midi",
+              "notes": [
+                { "id": 1, "pitch": 60, "velocity": 90, "channel": 0, "muted": false, "start": 0, "length": 960, "quantizeOffset": 0 }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "media": [
+      {
+        "id": "0b5b8a7e-6a4c-4b8a-9a55-000000000430",
+        "name": "take1.wav",
+        "path": "Recordings/take1.wav",
+        "info": {
+          "sampleRate": 48000,
+          "channels": 1,
+          "frames": 240000,
+          "format": "wav",
+          "sizeBytes": 480044,
+          "fingerprint": "00000000deadbeef"
+        }
+      }
+    ],
+    "markers": [],
+    "mixer": {
+      "auxes": [
+        {
+          "id": "0b5b8a7e-6a4c-4b8a-9a55-0000000004f0",
+          "name": "Verb",
+          "color": "#6445D5",
+          "volumeDb": -3.0,
+          "pan": 0.0,
+          "muted": false,
+          "soloed": false,
+          "strip": {
+            "output": { "type": "master" },
+            "sends": [],
+            "inserts": [],
+            "soloSafe": false,
+            "group": null,
+            "format": "stereo"
+          }
+        }
+      ],
+      "groups": [
+        {
+          "id": "0b5b8a7e-6a4c-4b8a-9a55-0000000004d0",
+          "name": "Band",
+          "color": "#3FA75A",
+          "linkVolume": true,
+          "linkPan": false,
+          "linkMute": true,
+          "linkSolo": true
+        }
+      ],
+      "folders": [],
+      "master": { "volumeDb": 0.0, "muted": false, "inserts": [] },
+      "panLaw": "constantPower"
+    }
+  }
+}

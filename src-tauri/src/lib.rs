@@ -6,6 +6,7 @@
 //! the core crates; the webview is purely a presentation layer.
 
 pub mod audio;
+pub mod automation;
 pub mod commands;
 pub mod error;
 pub mod menu;
@@ -187,6 +188,16 @@ pub fn run() {
             commands::mixer::mixer_reset_clips,
             commands::mixer::mixer_status,
             commands::mixer::project_export_stems,
+            commands::editing::automation_touch,
+            commands::editing::region_normalize,
+            commands::editing::region_transients,
+            commands::editing::track_freeze,
+            commands::editing::track_bounce,
+            commands::editing::media_repair,
+            commands::editing::media_collect,
+            commands::editing::media_unused,
+            commands::editing::media_backup_unused,
+            commands::editing::media_rescan,
             commands::system::settings_get,
             commands::system::settings_set,
             commands::system::app_quit,

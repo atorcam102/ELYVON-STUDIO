@@ -281,6 +281,16 @@ pub struct Track {
     /// Stereo position, −1 (left) … +1 (right).
     pub pan: f64,
     pub regions: Vec<Region>,
+    /// Mode and lanes of this channel's automation (schema 5).
+    #[serde(default)]
+    pub automation: crate::automation::ChannelAutomation,
+    /// Set while the track plays a pre-rendered file instead of its regions
+    /// and inserts (schema 5).
+    #[serde(default)]
+    pub freeze: Option<crate::comp::TrackFreeze>,
+    /// Comps of recorded take folders (schema 5).
+    #[serde(default)]
+    pub comps: Vec<crate::comp::TakeComp>,
 }
 
 impl Track {
@@ -289,6 +299,9 @@ impl Track {
 
     pub fn new(kind: TrackKind, name: impl Into<String>, color: Color) -> Self {
         Self {
+            automation: crate::automation::ChannelAutomation::default(),
+            freeze: None,
+            comps: Vec::new(),
             io: crate::io::TrackIo::default(),
             strip: crate::mixer::StripRouting::default(),
             folder: None,
@@ -331,11 +344,44 @@ pub struct Region {
     /// A muted region produces no sound or MIDI.
     pub muted: bool,
     pub content: RegionContent,
+    /// Region automation (ticks relative to the region start). Inside the
+    /// region it replaces the track lane of the same parameter (schema 5).
+    #[serde(default)]
+    pub automation: Vec<crate::automation::AutomationLane>,
 }
 
 impl Region {
     pub fn end(&self) -> Ticks {
         self.start.saturating_add(self.length)
+    }
+}
+
+/// Shape of a region's fades, and of the crossfades it makes with the
+/// region it covers. Every shape's fade-out is the time-reversed fade-in, so
+/// the two halves of a crossfade complement each other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum FadeCurve {
+    /// `sin(x·π/2)`: constant power, for uncorrelated material (default).
+    #[default]
+    EqualPower,
+    /// `x`: constant gain, for identical or phase-coherent material.
+    Linear,
+    /// `(1 − cos(x·π))/2`: constant gain with soft edges.
+    SCurve,
+}
+
+impl FadeCurve {
+    /// Gain of the fade at `x` (0 = silent edge, 1 = full level).
+    #[inline]
+    pub fn gain(self, x: f32) -> f32 {
+        let x = x.clamp(0.0, 1.0);
+        match self {
+            Self::EqualPower => (x * std::f32::consts::FRAC_PI_2).sin(),
+            Self::Linear => x,
+            Self::SCurve => 0.5 - 0.5 * (x * std::f32::consts::PI).cos(),
+        }
     }
 }
 
@@ -364,6 +410,14 @@ pub enum RegionContent {
         fade_out: u64,
         /// Repeat the source from `offset` to its end until the region ends.
         looped: bool,
+        /// Plays its source span backwards: the region covers source frames
+        /// `[offset, offset + heard length)` and starts at the last of them.
+        /// Cannot be combined with `looped` (schema 5).
+        #[serde(default)]
+        reversed: bool,
+        /// Shape of the fades and of crossfades this region creates.
+        #[serde(default)]
+        fade_curve: FadeCurve,
     },
     Midi {
         notes: Vec<MidiNote>,
@@ -383,6 +437,8 @@ impl RegionContent {
             fade_in: 0,
             fade_out: 0,
             looped: false,
+            reversed: false,
+            fade_curve: FadeCurve::EqualPower,
         }
     }
 }

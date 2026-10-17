@@ -12,6 +12,7 @@ import {
 import { BottomPanel } from "./features/editors/BottomPanel";
 import { Inspector } from "./features/inspector/Inspector";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
+import { MediaDialog } from "./features/dialogs/MediaDialog";
 import { Timeline } from "./features/timeline/Timeline";
 import { TopBar } from "./features/topbar/TopBar";
 import { UpdateDialog } from "./features/updates/UpdateDialog";
@@ -143,6 +144,7 @@ export default function App() {
       <UpdateDialog />
       <AboutDialog />
       <RecoveryDialog />
+      <MediaDialog />
       <PromptHost />
       <Toasts />
     </div>

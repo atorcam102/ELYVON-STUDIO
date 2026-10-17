@@ -17,6 +17,79 @@ import { relinkMedia } from "../project/regionActions";
 import { deleteSelectedTracks, duplicateSelectedTracks, setMuted, setSoloed } from "../project/editActions";
 
 import { KIND_ICON, KIND_LABEL, TRACK_COLORS } from "../tracks/trackMeta";
+import { useEffect, useState } from "react";
+import type { AutomationMode } from "../../bindings/AutomationMode";
+import type { FadeCurve } from "../../bindings/FadeCurve";
+import { MODES } from "../../lib/automation";
+import { ipc } from "../../lib/ipc";
+import {
+  bounceTrack,
+  crossfadeWithNext,
+  freezeTrack,
+  markersAtTransients,
+  normalizeSelected,
+  sliceAtTransients,
+  unfreezeTrack,
+} from "../project/editingActions";
+
+/** Tracks whose freeze no longer matches their material (from the core). */
+function useStaleFreezes(project: Project): string[] {
+  const [stale, setStale] = useState<string[]>([]);
+  const anyFrozen = project.tracks.some((t) => t.freeze);
+  useEffect(() => {
+    if (!anyFrozen) return;
+    void ipc.mixer
+      .status()
+      .then((s) => setStale(s.staleFreezes))
+      .catch(() => undefined);
+  }, [project, anyFrozen]);
+  return anyFrozen ? stale : [];
+}
+
+function TrackTools({ track, project }: { track: Track; project: Project }) {
+  const apply = useProject((s) => s.apply);
+  const stale = useStaleFreezes(project).includes(track.id);
+  if (track.kind === "midi") return null;
+  return (
+    <>
+      <Row label="Automation">
+        <select
+          aria-label="Automation mode"
+          value={track.automation.mode}
+          onChange={(e) => void apply({ type: "setAutomationMode", channel: { type: "track", id: track.id }, mode: e.target.value as AutomationMode })}
+        >
+          {MODES.map((m) => (
+            <option key={m.mode} value={m.mode} title={m.title}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+        <span className="insp-hint">{track.automation.lanes.filter((l) => l.points.length).length} lane(s)</span>
+      </Row>
+      <div className="insp-buttons">
+        {track.freeze ? (
+          <Button size="sm" onClick={() => void unfreezeTrack(track.id)}>
+            Unfreeze
+          </Button>
+        ) : (
+          <Button size="sm" disabled={!track.regions.length} title="Render the regions through the inserts and play that file instead" onClick={() => void freezeTrack(track.id)}>
+            Freeze
+          </Button>
+        )}
+        <Button size="sm" disabled={!track.regions.length || !!track.freeze} title="Render this track to a new file on a new track (sources are muted, not deleted)" onClick={() => void bounceTrack(track.id)}>
+          Bounce in place
+        </Button>
+      </div>
+      {track.freeze && (
+        <p className={`insp-note${stale ? "" : " insp-note--muted"}`}>
+          {stale
+            ? "The freeze is out of date (tempo, files or material changed): the track plays live. Unfreeze and freeze again."
+            : "Frozen: the track plays its rendered file. Regions and inserts are locked until you unfreeze."}
+        </p>
+      )}
+    </>
+  );
+}
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -36,7 +109,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function TrackInspector({ track, anySolo }: { track: Track; anySolo: boolean }) {
+function TrackInspector({ track, anySolo, project }: { track: Track; anySolo: boolean; project: Project }) {
   const apply = useProject((s) => s.apply);
   const captureActive=useCapture(s=>!!s.status?.active);
   const silencedBySolo = anySolo && !track.soloed && !track.muted;
@@ -115,6 +188,7 @@ function TrackInspector({ track, anySolo }: { track: Track; anySolo: boolean }) 
         </button>
       </div>
       {silencedBySolo && <p className="insp-note">Silenced because another track is soloed.</p>}
+      <TrackTools track={track} project={project} />
       <p className="insp-note insp-note--muted">
         Mute, solo, volume and pan are saved with the project and applied by the native engine.
       </p>
@@ -162,7 +236,37 @@ function AudioRegionFields({ region, project }: { region: Region; project: Proje
       <Row label="Fade out">
         <NumberField label="Fade out" value={ms(c.fadeOut)} min={0} max={60000} step={1} precision={1} suffix="ms" onCommit={(v) => set({ fadeOut: frames(v) })} />
       </Row>
-      <Toggle checked={c.looped} onChange={(looped) => set({ looped })} label="Loop" description="Repeat the file to fill the region" />
+      <Toggle checked={c.looped} disabled={c.reversed} onChange={(looped) => set({ looped })} label="Loop" description="Repeat the file to fill the region" />
+      <Toggle
+        checked={c.reversed}
+        disabled={c.looped}
+        onChange={(reversed) => void apply({ type: "setRegionsReversed", ids: [region.id], reversed })}
+        label="Reverse"
+        description="Play the region's audio backwards"
+      />
+      <Row label="Fade shape">
+        <select aria-label="Fade shape" value={c.fadeCurve} onChange={(e) => void apply({ type: "setFadeCurve", ids: [region.id], curve: e.target.value as FadeCurve })}>
+          <option value="equalPower">Equal power</option>
+          <option value="linear">Linear (equal gain)</option>
+          <option value="sCurve">S-curve</option>
+        </select>
+      </Row>
+      <div className="insp-buttons">
+        <Button size="sm" title="Set the region gain so its peak is −1 dBFS" onClick={() => void normalizeSelected(-1)}>
+          Normalize
+        </Button>
+        <Button size="sm" title="Overlap with the next touching region and crossfade over 20 ms" onClick={() => void crossfadeWithNext(20)}>
+          Crossfade next
+        </Button>
+      </div>
+      <div className="insp-buttons">
+        <Button size="sm" title="Split at detected transients" onClick={() => void sliceAtTransients(0.5)}>
+          Slice at hits
+        </Button>
+        <Button size="sm" title="Add a marker at each detected transient" onClick={() => void markersAtTransients(0.5)}>
+          Mark hits
+        </Button>
+      </div>
       {mediaState?.state === "failed" && (
         <Button size="sm" icon="folder" onClick={() => void relinkMedia(asset.id)}>
           Locate file…
@@ -170,6 +274,45 @@ function AudioRegionFields({ region, project }: { region: Region; project: Proje
       )}
       <p className="insp-note insp-note--muted">Edits are non-destructive: the file on disk is never modified.</p>
     </>
+  );
+}
+
+/** Active take of a take folder, or its comp (edited in Takes & Audio). */
+function TakeFolderRow({ region, project }: { region: Region; project: Project }) {
+  const apply = useProject((s) => s.apply);
+  const folder = region.capture!.folder;
+  const track = project.tracks.find((t) => t.regions.some((r) => r.id === region.id));
+  const takes = (track?.regions ?? []).filter((r) => r.capture?.folder === folder).sort((a, b) => a.capture!.take - b.capture!.take);
+  const comp = track?.comps.find((c) => c.folder === folder);
+  const active = takes.find((r) => !r.muted)?.capture?.take;
+  const value = comp && !comp.flattened ? "comp" : comp?.flattened ? "flat" : String(active ?? "");
+  return (
+    <Row label="Take folder">
+      <select
+        aria-label="Active take"
+        value={value}
+        disabled={comp?.flattened}
+        onChange={(e) => {
+          if (track && /^\d+$/.test(e.target.value)) void apply({ type: "selectTake", trackId: track.id, folder, take: Number(e.target.value) });
+        }}
+      >
+        {comp && !comp.flattened && (
+          <option value="comp" disabled>
+            {`Comp of ${new Set(comp.segments.map((s) => s.take)).size} takes`}
+          </option>
+        )}
+        {comp?.flattened && (
+          <option value="flat" disabled>
+            Flattened comp
+          </option>
+        )}
+        {takes.map((r) => (
+          <option key={r.id} value={r.capture!.take}>
+            {`Take ${r.capture!.take}${!comp && !r.muted ? " · active" : ""}`}
+          </option>
+        ))}
+      </select>
+    </Row>
   );
 }
 
@@ -189,7 +332,7 @@ function RegionInspector({ region, project }: { region: Region; project: Project
         />
       </div>
       <Row label="Type">{region.content.type === "midi" ? "MIDI" : "Audio"}</Row>
-      {region.capture&&<Row label="Take folder"><select aria-label="Active take" value={project.tracks.find(t=>t.regions.some(r=>r.id===region.id))?.regions.find(r=>r.capture?.folder===region.capture?.folder&&!r.muted)?.capture?.take??""} onChange={e=>{const track=project.tracks.find(t=>t.regions.some(r=>r.id===region.id));if(track&&region.capture)void apply({type:"selectTake",trackId:track.id,folder:region.capture.folder,take:Number(e.target.value)});}}>{project.tracks.flatMap(t=>t.regions).filter(r=>r.capture?.folder===region.capture?.folder).map(r=><option key={r.id} value={r.capture!.take}>Take {r.capture!.take}{r.muted?"":" · active"}</option>)}</select></Row>}
+      {region.capture && <TakeFolderRow region={region} project={project} />}
       <Row label="Position">{map.formatPosition(region.start)}</Row>
       <Row label="Length">{`${formatLength(region.length, ts)} · ${(map.secondsAt(region.start + region.length) - map.secondsAt(region.start)).toFixed(3)} s`}</Row>
       <Toggle checked={region.muted} onChange={(muted) => void apply({ type: "setRegionsMuted", ids: [region.id], muted })} label="Mute region" />
@@ -268,7 +411,7 @@ export function Inspector() {
             </div>
           </Section>
         ) : focusTrack ? (
-          <TrackInspector track={focusTrack} anySolo={anySolo} />
+          <TrackInspector track={focusTrack} anySolo={anySolo} project={project} />
         ) : (
           <p className="insp-empty">Select a track or region to see its properties.</p>
         )}

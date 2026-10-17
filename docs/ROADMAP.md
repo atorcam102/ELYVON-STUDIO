@@ -49,6 +49,14 @@ instrument; engine mixer graph with aux buses, sends, native inserts, latency co
 solo/mute/groups/folders, real meters and stems. Evidence: [audit/PHASE-08-09.md](audit/PHASE-08-09.md).
 Pending: on-device listening, MIDI keyboard, other platforms, automation, plug-in hosting.
 
+## Phases 10–11 — Automation, non-destructive editing and comping (partial, schema 5)
+
+Track/region/aux/master automation by stable parameter ids, Read/Touch/Latch/Write, exact
+tick-domain curves compiled per sample, live = offline; comps of take folders, reverse, fade
+shapes, crossfades, slip, ripple, marquee, glue, slices, normalise, freeze, bounce, media
+repair and collect, memory-bounded history. Evidence: [audit/PHASE-10-11.md](audit/PHASE-10-11.md).
+Pending: listening on hardware, a microphone cycle recording, other platforms, control surfaces.
+
 ## Later — Instruments and editing
 
 Playback note chase, a production synth/sampler, MIDI 2.0 per-note expression, step input and
@@ -56,8 +64,8 @@ playable loop browser.
 
 ## Later — Plug-ins and production
 
-Isolated CLAP/VST3 (AU on macOS where supported), FX, buses, automation, audio editing, bounce,
-export and large-session optimisation. Any licensed/certified format requires an explicit decision
+Isolated CLAP/VST3 (AU on macOS where supported), more FX, final export formats and
+large-session optimisation. Any licensed/certified format requires an explicit decision
 and tests; no Atmos or proprietary compatibility is promised.
 
 ## Other platforms and suite

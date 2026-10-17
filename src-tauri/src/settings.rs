@@ -132,7 +132,17 @@ impl Settings {
         l.browser_width = clamp(l.browser_width, 180.0, 560.0, d.browser_width);
         l.bottom_height = clamp(l.bottom_height, 180.0, 1600.0, d.bottom_height);
         l.track_header_width = clamp(l.track_header_width, 160.0, 420.0, d.track_header_width);
-        if !["mixer", "pianoRoll", "audioEditor", "score", "smartTempo", "smartControls"].contains(&l.bottom_tab.as_str()) {
+        if ![
+            "mixer",
+            "pianoRoll",
+            "audioEditor",
+            "automation",
+            "score",
+            "smartTempo",
+            "smartControls",
+        ]
+        .contains(&l.bottom_tab.as_str())
+        {
             l.bottom_tab = d.bottom_tab;
         }
         if !["files", "loops", "instruments", "plugins"].contains(&l.browser_tab.as_str()) {

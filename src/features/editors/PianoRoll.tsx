@@ -4,7 +4,6 @@ import type { GridSpec } from "../../bindings/GridSpec";
 import type { MidiNote } from "../../bindings/MidiNote";
 import type { NoteTransform } from "../../bindings/NoteTransform";
 import type { Project } from "../../bindings/Project";
-import type { Region } from "../../bindings/Region";
 import { Badge, IconButton } from "../../components/Button";
 import { NumberField } from "../../components/Fields";
 import { Icon } from "../../components/Icon";
@@ -47,16 +46,6 @@ const KEYS_W = 52;
 const RULER_H = 42;
 const DIVISIONS: GridSpec["division"][] = ["bar", "quarter", "eighth", "sixteenth", "thirtySecond"];
 type Tool = "pointer" | "pencil" | "eraser";
-
-function selectedRegion(project: Project | undefined, ids: string[], type: "midi" | "audio"): Region | undefined {
-  if (!project) return undefined;
-  const all = project.tracks.flatMap((t) => t.regions);
-  for (let i = ids.length - 1; i >= 0; i--) {
-    const r = all.find((x) => x.id === ids[i]);
-    if (r?.content.type === type) return r;
-  }
-  return undefined;
-}
 
 /** Piano roll of the selected MIDI regions: draw, drag, resize, copy,
  * erase, quantise and edit velocity/controller lanes. Every gesture is one
@@ -1013,30 +1002,6 @@ function PianoRollEditor({ project, roll }: { project: Project; roll: Roll }) {
         <canvas ref={laneRef} className="pr__lane-canvas" onPointerDown={laneDown} onPointerMove={laneMove} onPointerUp={() => void laneUp()} />
       </div>
       {menu && <Menu at={menu} entries={functions} onClose={() => setMenu(null)} />}
-    </div>
-  );
-}
-
-export function AudioEditor() {
-  const project = useProject((s) => s.view?.project);
-  const regionIds = useUi((s) => s.selection.regionIds);
-  const region = selectedRegion(project, regionIds, "audio");
-  return (
-    <div className="editor-empty">
-      <Icon name="waveform" size={22} />
-      {region && region.content.type === "audio" ? (
-        <>
-          <p>
-            {region.name}: {region.content.media ? (project?.media.find((m) => m.id === (region.content as { media: string }).media)?.path ?? "file") : "placeholder region without an audio file"}
-          </p>
-          <span>Waveforms, trimming, fades, gain and looping are edited in the arrangement and inspector. A sample-level audio editor is not available yet.</span>
-        </>
-      ) : (
-        <>
-          <p>Audio editor</p>
-          <span>Select an audio region. Sample-level editing is not available yet; use the arrangement and inspector.</span>
-        </>
-      )}
     </div>
   );
 }

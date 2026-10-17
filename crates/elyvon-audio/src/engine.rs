@@ -20,6 +20,7 @@ use rtrb::{Consumer, Producer, RingBuffer};
 use serde::Serialize;
 use ts_rs::TS;
 
+use crate::automation::{ParamOverride, StripKey};
 use crate::contracts::{MidiEvent, MidiMessage};
 use crate::dsp::Smoothed;
 use crate::plan::{
@@ -27,6 +28,7 @@ use crate::plan::{
     Strip,
 };
 use crate::transport::{EngineShared, PlayState, TransportCommand};
+use elyvon_project::automation::InsertParam;
 
 /// What the audio engine can currently do, as reported to the UI.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -155,7 +157,8 @@ const MAX_EVENTS_PER_TRACK_SPAN: usize = 256;
 const LIVE_CAPACITY: usize = 1024;
 /// Internal processing block. Larger callbacks are split, so bus buffers
 /// stay small whatever the device buffer size.
-const CHUNK: usize = 1024;
+const CHUNK: usize = crate::plan::MAX_CHUNK;
+const OVERRIDE_CAPACITY: usize = 1024;
 
 /// A live MIDI channel message for one track's internal instrument
 /// (virtual keyboard, MIDI input monitor, piano-roll preview).
@@ -199,9 +202,16 @@ pub struct EngineHandle {
     midi_output: Consumer<crate::midi::ScheduledPacket>,
     midi_overflow: Arc<std::sync::atomic::AtomicBool>,
     live: Producer<LiveMidi>,
+    overrides: Producer<ParamOverride>,
 }
 
 impl EngineHandle {
+    /// Queues a live automation control value (Touch/Latch/Write). `false`
+    /// if the queue is full.
+    pub fn send_override(&mut self, o: ParamOverride) -> bool {
+        self.overrides.push(o).is_ok()
+    }
+
     pub fn drain_midi(&mut self) -> (Vec<crate::midi::ScheduledPacket>, bool) {
         let mut packets = Vec::new();
         while let Ok(p) = self.midi_output.pop() {
@@ -322,6 +332,7 @@ pub struct Engine {
     commands: Consumer<TransportCommand>,
     monitor: Consumer<[f32; 2]>,
     live: Consumer<LiveMidi>,
+    overrides: Consumer<ParamOverride>,
     shared: Arc<EngineShared>,
     state: PlayState,
     position: u64,
@@ -377,6 +388,7 @@ pub fn create(sample_rate: u32, max_block: usize, plan: PlaybackPlan) -> (Engine
     let (plan_tx, plan_rx) = RingBuffer::new(PLAN_CAPACITY);
     let (garbage_tx, garbage_rx) = RingBuffer::new(GARBAGE_CAPACITY);
     let (live_tx, live_rx) = RingBuffer::new(LIVE_CAPACITY);
+    let (override_tx, override_rx) = RingBuffer::new(OVERRIDE_CAPACITY);
     let shared = Arc::new(EngineShared::new(sample_rate));
     let (midi_tx, midi_rx) = RingBuffer::new(4096);
     let midi_overflow = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -393,6 +405,7 @@ pub fn create(sample_rate: u32, max_block: usize, plan: PlaybackPlan) -> (Engine
         midi_output: midi_rx,
         midi_overflow: Arc::clone(&midi_overflow),
         live: live_tx,
+        overrides: override_tx,
     };
     let engine = Engine {
         plan: Box::new(plan),
@@ -401,6 +414,7 @@ pub fn create(sample_rate: u32, max_block: usize, plan: PlaybackPlan) -> (Engine
         commands: cmd_rx,
         monitor: monitor_rx,
         live: live_rx,
+        overrides: override_rx,
         shared,
         state: PlayState::Stopped,
         position: 0,
@@ -463,11 +477,24 @@ impl BlockMeter {
 }
 
 /// Adds `src` × ramped `gain` into `dst`, through `delay` when it has length.
+/// With `levels`, each frame is also scaled by its automated level.
 #[inline]
 fn route(
     src: &[f32],
     dst: &mut [f32],
     gain: &mut Smoothed,
+    delay: &mut crate::dsp::StereoDelay,
+    edge: &mut [f32],
+) {
+    route_with(src, dst, gain, None, delay, edge);
+}
+
+#[inline]
+fn route_with(
+    src: &[f32],
+    dst: &mut [f32],
+    gain: &mut Smoothed,
+    levels: Option<&[f32]>,
     delay: &mut crate::dsp::StereoDelay,
     edge: &mut [f32],
 ) {
@@ -487,66 +514,125 @@ fn route(
     } else {
         src
     };
-    if gain.is_steady() {
-        let (gl, gr) = gain.target;
-        for (d, s) in dst
-            .as_chunks_mut::<2>()
-            .0
-            .iter_mut()
-            .zip(input.as_chunks::<2>().0.iter())
-        {
-            d[0] += s[0] * gl;
-            d[1] += s[1] * gr;
+    let frames = dst
+        .as_chunks_mut::<2>()
+        .0
+        .iter_mut()
+        .zip(input.as_chunks::<2>().0.iter());
+    match levels {
+        Some(levels) => {
+            for (i, (d, s)) in frames.enumerate() {
+                let (gl, gr) = gain.at(i, n);
+                let k = levels.get(i).copied().unwrap_or(0.0);
+                d[0] += s[0] * gl * k;
+                d[1] += s[1] * gr * k;
+            }
+            gain.settle();
         }
-    } else {
-        for (i, (d, s)) in dst
-            .as_chunks_mut::<2>()
-            .0
-            .iter_mut()
-            .zip(input.as_chunks::<2>().0.iter())
-            .enumerate()
-        {
-            let (gl, gr) = gain.at(i, n);
-            d[0] += s[0] * gl;
-            d[1] += s[1] * gr;
+        None if gain.is_steady() => {
+            let (gl, gr) = gain.target;
+            for (d, s) in frames {
+                d[0] += s[0] * gl;
+                d[1] += s[1] * gr;
+            }
         }
-        gain.settle();
+        None => {
+            for (i, (d, s)) in frames.enumerate() {
+                let (gl, gr) = gain.at(i, n);
+                d[0] += s[0] * gl;
+                d[1] += s[1] * gr;
+            }
+            gain.settle();
+        }
     }
 }
 
-/// Processes one strip on `buf` (its input, `len` frames) and routes the
-/// result into the aux buses or the master input. Real-time safe.
-#[allow(clippy::too_many_arguments)]
-fn process_strip(
-    strip: &mut Strip,
-    buf: &mut [f32],
-    edge: &mut [f32],
-    bus: &mut [f32],
-    master: &mut [f32],
-    chunk: usize,
-    shared: &EngineShared,
-    stems: Option<&mut Stems>,
-    stem_offset: usize,
-) -> BlockMeter {
+/// Automation sub-block for insert parameters, on an absolute frame grid so
+/// renders do not depend on the callback size.
+const INSERT_STEP: u64 = 32;
+
+/// Runs the inserts of a strip, applying automated parameters.
+fn run_inserts(strip: &mut Strip, buf: &mut [f32], pos: u64, advancing: bool) {
     let len = buf.len() / 2;
-    if strip.mono {
-        for f in buf.as_chunks_mut::<2>().0.iter_mut() {
-            let m = 0.5 * (f[0] + f[1]);
-            f[0] = m;
-            f[1] = m;
+    let Some(auto) = strip.auto.as_mut().filter(|a| a.has_insert_slots()) else {
+        for insert in &mut strip.inserts {
+            insert.process(buf);
         }
-    }
-    for insert in &mut strip.inserts {
-        insert.process(buf);
-    }
-    let bus_slice = |bus: &mut [f32], aux: usize| -> std::ops::Range<usize> {
-        let start = aux * chunk * 2;
-        let _ = bus;
-        start..start + len * 2
+        return;
     };
-    for send in strip.sends.iter_mut().filter(|s| s.pre_fader) {
-        let r = bus_slice(bus, send.aux);
-        route(buf, &mut bus[r], &mut send.gain, &mut send.delay, edge);
+    let mut k = 0usize;
+    while k < len {
+        let n = if advancing {
+            let abs = pos + k as u64;
+            ((INSERT_STEP - abs % INSERT_STEP) as usize).min(len - k)
+        } else {
+            len - k
+        };
+        // Coefficients (cutoff, Q, ceiling, release) step on the absolute
+        // grid; trim gain and bypass are applied per frame.
+        let grid = (pos + k as u64) / INSERT_STEP * INSERT_STEP;
+        for slot in &auto.slots {
+            if let crate::automation::Target::Insert(i, param) = slot.target
+                && !matches!(param, InsertParam::TrimGain | InsertParam::Bypass)
+                && let Some(insert) = strip.inserts.get_mut(i)
+            {
+                let index = k.saturating_sub((pos + k as u64 - grid) as usize);
+                insert.automate(param, slot.value_at(grid, index));
+            }
+        }
+        for (ii, insert) in strip.inserts.iter_mut().enumerate() {
+            let levels = |p: InsertParam| {
+                auto.slots
+                    .iter()
+                    .find(|s| {
+                        s.target == crate::automation::Target::Insert(ii, p) && s.is_dynamic()
+                    })
+                    .map(|s| &s.buf[k..k + n])
+            };
+            insert.process_levels(
+                &mut buf[k * 2..(k + n) * 2],
+                levels(InsertParam::TrimGain),
+                levels(InsertParam::Bypass),
+            );
+        }
+        k += n;
+    }
+}
+
+/// Applies the fader (volume × pan × mute) to `buf`. Per sample when
+/// automated, otherwise the smoothed static gain.
+fn apply_fader(strip: &mut Strip, buf: &mut [f32]) {
+    let len = buf.len() / 2;
+    if let Some(auto) = strip.auto.as_ref().filter(|a| a.fader_dynamic()) {
+        let vol = auto.volume.map(|i| &auto.slots[i]);
+        let pan = auto.pan.map(|i| &auto.slots[i]);
+        let mute = auto.mute.map(|i| &auto.slots[i]);
+        let mut last = (0.0f32, 0.0f32);
+        for (i, f) in buf.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+            let g = vol.map_or(auto.static_gain, |s| {
+                let db = s.buf[i];
+                if db <= -96.0 {
+                    0.0
+                } else {
+                    crate::gain::db_to_gain(f64::from(db)) as f32
+                }
+            });
+            let (pl, pr) = match pan {
+                Some(s) => {
+                    let (l, r) = crate::plan::pan_gains(auto.mono, f64::from(s.buf[i]), auto.law);
+                    (l as f32, r as f32)
+                }
+                None => auto.static_pan,
+            };
+            let m = mute.map_or(1.0, |s| 1.0 - s.buf[i].clamp(0.0, 1.0));
+            let (gl, gr) = (g * pl * m, g * pr * m);
+            f[0] *= gl;
+            f[1] *= gr;
+            last = (gl, gr);
+        }
+        // A later static span ramps from the last automated gain.
+        strip.fader.current = last;
+        return;
     }
     if strip.fader.is_steady() {
         let (gl, gr) = strip.fader.target;
@@ -564,10 +650,74 @@ fn process_strip(
         }
         strip.fader.settle();
     }
-    for send in strip.sends.iter_mut().filter(|s| !s.pre_fader) {
-        let r = bus_slice(bus, send.aux);
-        route(buf, &mut bus[r], &mut send.gain, &mut send.delay, edge);
+}
+
+/// Routes the strip's pre- or post-fader sends.
+fn route_sends(
+    strip: &mut Strip,
+    buf: &[f32],
+    bus: &mut [f32],
+    edge: &mut [f32],
+    chunk: usize,
+    pre: bool,
+) {
+    let len = buf.len() / 2;
+    for (si, send) in strip.sends.iter_mut().enumerate() {
+        if send.pre_fader != pre {
+            continue;
+        }
+        let start = send.aux * chunk * 2;
+        let dst = &mut bus[start..start + len * 2];
+        let levels = if send.automated {
+            strip.auto.as_ref().and_then(|a| {
+                a.sends
+                    .get(si)
+                    .copied()
+                    .flatten()
+                    .map(|i| &a.slots[i].buf[..len])
+            })
+        } else {
+            None
+        };
+        if send.automated && levels.is_none() {
+            continue;
+        }
+        route_with(buf, dst, &mut send.gain, levels, &mut send.delay, edge);
     }
+}
+
+/// Processes one strip on `buf` (its input, `len` frames starting at
+/// timeline frame `pos`) and routes the result into the aux buses or the
+/// master input. Real-time safe.
+#[allow(clippy::too_many_arguments)]
+fn process_strip(
+    strip: &mut Strip,
+    buf: &mut [f32],
+    edge: &mut [f32],
+    bus: &mut [f32],
+    master: &mut [f32],
+    chunk: usize,
+    shared: &EngineShared,
+    stems: Option<&mut Stems>,
+    stem_offset: usize,
+    pos: u64,
+    advancing: bool,
+) -> BlockMeter {
+    let len = buf.len() / 2;
+    if let Some(auto) = strip.auto.as_mut() {
+        auto.render(pos, len, advancing, advancing);
+    }
+    if strip.mono {
+        for f in buf.as_chunks_mut::<2>().0.iter_mut() {
+            let m = 0.5 * (f[0] + f[1]);
+            f[0] = m;
+            f[1] = m;
+        }
+    }
+    run_inserts(strip, buf, pos, advancing);
+    route_sends(strip, buf, bus, edge, chunk, true);
+    apply_fader(strip, buf);
+    route_sends(strip, buf, bus, edge, chunk, false);
     let meter = BlockMeter::scan(buf);
     shared.meter(
         strip.meter_slot,
@@ -594,10 +744,10 @@ fn process_strip(
             edge,
         ),
         Dest::Aux(a) => {
-            let r = bus_slice(bus, a);
+            let start = a * chunk * 2;
             route(
                 buf,
-                &mut bus[r],
+                &mut bus[start..start + len * 2],
                 &mut strip.out_gate,
                 &mut strip.out_delay,
                 edge,
@@ -701,6 +851,7 @@ impl Engine {
         self.swap_plan(midi);
         self.drain_commands(midi);
         self.drain_live();
+        self.drain_overrides();
         if let Some(s) = self.stems.as_mut() {
             s.data.fill(0.0);
         }
@@ -768,6 +919,50 @@ impl Engine {
         );
         self.shared
             .add_block(frames as u64, started.elapsed().as_nanos() as u64);
+    }
+
+    fn drain_overrides(&mut self) {
+        let release = (elyvon_project::automation_record::TOUCH_RELEASE_SECONDS
+            * f64::from(self.plan.sample_rate)) as u64;
+        while let Ok(o) = self.overrides.pop() {
+            let plan = &mut *self.plan;
+            let strip = match o.strip {
+                StripKey::Track(k) => match plan.find_track(k) {
+                    Some(i) => Some(&mut plan.tracks[i].strip),
+                    None => None,
+                },
+                StripKey::Aux(k) => plan
+                    .auxes
+                    .iter_mut()
+                    .find(|a| a.strip.key == k)
+                    .map(|a| &mut a.strip),
+                StripKey::Master => Some(&mut plan.master),
+            };
+            if let Some(auto) = strip.and_then(|s| s.auto.as_mut())
+                && auto.mode.writes()
+            {
+                let mode = auto.mode;
+                if let Some(slot) = auto.slot_mut(&o.param) {
+                    slot.apply(o.value, o.phase, mode, release);
+                }
+            }
+        }
+    }
+
+    /// Ends every live control gesture (transport stopped).
+    fn clear_overrides(&mut self) {
+        let plan = &mut *self.plan;
+        let strips = plan
+            .tracks
+            .iter_mut()
+            .map(|t| &mut t.strip)
+            .chain(plan.auxes.iter_mut().map(|a| &mut a.strip))
+            .chain(std::iter::once(&mut plan.master));
+        for strip in strips {
+            if let Some(a) = strip.auto.as_mut() {
+                a.clear_overrides();
+            }
+        }
     }
 
     fn drain_live(&mut self) {
@@ -903,6 +1098,7 @@ impl Engine {
         }
         self.state = state;
         self.all_notes_off(0, midi);
+        self.clear_overrides();
     }
 
     fn start(
@@ -1189,6 +1385,8 @@ impl Engine {
                 &self.shared,
                 self.stems.as_mut(),
                 stem_offset,
+                pos,
+                timeline,
             );
             if let Some(m) = self.measure.as_mut().and_then(|m| m.get_mut(ti)) {
                 m.peak = m.peak.max(meter.peak[0].max(meter.peak[1]));
@@ -1212,21 +1410,30 @@ impl Engine {
                 &self.shared,
                 self.stems.as_mut(),
                 stem_offset,
+                pos,
+                timeline,
             );
         }
         let master = &mut plan.master;
         let buf = &mut self.master_buf[..len * 2];
-        for insert in &mut master.inserts {
-            insert.process(buf);
+        if let Some(a) = master.auto.as_mut() {
+            a.render(pos, len, timeline, timeline);
         }
+        run_inserts(master, buf, pos, timeline);
         let dst = &mut self.mix[off * 2..(off + len) * 2];
-        route(
-            buf,
-            dst,
-            &mut master.fader,
-            &mut master.out_delay,
-            &mut self.edge,
-        );
+        if master.auto.as_ref().is_some_and(|a| a.fader_dynamic()) {
+            apply_fader(master, buf);
+            let mut unity = Smoothed::new((1.0, 1.0));
+            route(buf, dst, &mut unity, &mut master.out_delay, &mut self.edge);
+        } else {
+            route(
+                buf,
+                dst,
+                &mut master.fader,
+                &mut master.out_delay,
+                &mut self.edge,
+            );
+        }
         if timeline && plan.metronome {
             let clicks = &plan.clicks;
             let rate = plan.sample_rate;
@@ -1280,7 +1487,11 @@ fn mix_track(track: &PlanTrack, p: u64, q: u64, buf: &mut [f32], shared: &Engine
                 break;
             };
             let g = seg.envelope(t);
-            let [left, right] = media.sample(src);
+            let [left, right] = if seg.reversed {
+                media.sample_reverse(src)
+            } else {
+                media.sample(src)
+            };
             let i = ((t - p) as usize) * 2;
             buf[i] += left * g;
             buf[i + 1] += right * g;

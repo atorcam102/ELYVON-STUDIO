@@ -1,13 +1,17 @@
 import { IconButton } from "../../components/Button";
 import { useUi, type BottomTab } from "../../state/ui";
 import { Mixer } from "../mixer/Mixer";
-import { AudioEditor, PianoRoll } from "./PianoRoll";
+import { AutomationEditor } from "./AutomationEditor";
+import { PianoRoll } from "./PianoRoll";
 import { ScoreEditor, SmartTempoEditor, SmartControls } from "./ReferenceEditors";
+import { AudioEditor } from "./TakesEditor";
 
 const TABS: { id: BottomTab; label: string; note?: string }[] = [
   { id: "pianoRoll", label: "Editor de teclado" },
   { id: "score", label: "Partitura" },
   { id: "smartTempo", label: "Tempo inteligente" },
+  { id: "automation", label: "Automatización" },
+  { id: "audioEditor", label: "Tomas y audio" },
 ];
 
 export function BottomPanel() {
@@ -45,6 +49,7 @@ export function BottomPanel() {
         {tab === "mixer" && <Mixer />}
         {tab === "pianoRoll" && <PianoRoll />}
         {tab === "audioEditor" && <AudioEditor />}
+        {tab === "automation" && <AutomationEditor />}
         {tab === "score" && <ScoreEditor />}
         {tab === "smartTempo" && <SmartTempoEditor />}
         {tab === "smartControls" && <SmartControls />}

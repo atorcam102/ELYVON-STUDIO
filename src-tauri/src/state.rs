@@ -30,6 +30,8 @@ pub struct AppState {
     pub audio: AudioService,
     pub capture: crate::recording::CaptureService,
     pub midi: crate::midi::MidiService,
+    /// Automation written while playing (Phase 10).
+    pub automation: crate::automation::AutomationCapture,
     pub rendering: std::sync::Arc<AtomicBool>,
     pub paths: AppPaths,
     /// Set once the user confirmed quitting, so close/exit events pass through.
@@ -56,6 +58,7 @@ impl AppState {
             audio: AudioService::new(),
             capture: crate::recording::CaptureService::default(),
             midi: crate::midi::MidiService::default(),
+            automation: crate::automation::AutomationCapture::default(),
             rendering: std::sync::Arc::new(AtomicBool::new(false)),
             paths,
             exit_confirmed: AtomicBool::new(false),

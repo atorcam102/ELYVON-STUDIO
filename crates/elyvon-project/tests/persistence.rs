@@ -103,6 +103,8 @@ fn schema_v1_fixture_loads_with_all_fields() {
             fade_in: 0,
             fade_out: 0,
             looped: false,
+            reversed: false,
+            fade_curve: elyvon_project::FadeCurve::EqualPower,
         } => {
             assert_eq!(*id, p.media[0].id);
             assert_eq!(*gain_db, 0.0);
@@ -204,12 +206,12 @@ fn encoded_files_carry_the_current_envelope() {
 #[test]
 fn newer_schema_is_refused_with_clear_error() {
     let text = std::fs::read_to_string(fixture("v1-basic.elyvon")).unwrap();
-    let newer = text.replace("\"schemaVersion\": 1", "\"schemaVersion\": 5");
+    let newer = text.replace("\"schemaVersion\": 1", "\"schemaVersion\": 6");
     let err = format::decode(newer.as_bytes()).unwrap_err();
     assert!(matches!(
         err,
         ProjectError::NewerSchema {
-            found: 5,
+            found: 6,
             supported: CURRENT_SCHEMA_VERSION
         }
     ));

@@ -23,6 +23,7 @@ fn region(name: &str, start_bar: Ticks, bars: Ticks, content: RegionContent) -> 
         length: bars * BAR,
         muted: false,
         content,
+        automation: Vec::new(),
     }
 }
 

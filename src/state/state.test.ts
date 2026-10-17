@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project } from "../bindings/Project";
-import { defaultStrip, emptyMixer } from "../lib/mixerDefaults";
+import { defaultAutomation, defaultStrip, emptyMixer } from "../lib/mixerDefaults";
 import type { SessionView } from "../bindings/SessionView";
 
 // The native core is replaced by an in-memory fake for store tests.
@@ -50,7 +50,10 @@ function project(trackIds: string[], regionIds: string[] = []): Project {
       soloed: false,
       volumeDb: 0,
       pan: 0,
-      regions: i === 0 ? regionIds.map((r) => ({ capture:null,midiEvents:[],id: r, name: r, start: 0, length: 960, muted: false, content: { type: "midi", notes: [] } })) : [],
+      regions: i === 0 ? regionIds.map((r) => ({ capture:null,midiEvents:[],id: r, name: r, start: 0, length: 960, muted: false, content: { type: "midi", notes: [] }, automation: [] })) : [],
+      automation: defaultAutomation(),
+      freeze: null,
+      comps: [],
     })),
   };
 }

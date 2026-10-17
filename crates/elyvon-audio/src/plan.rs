@@ -17,9 +17,14 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use elyvon_core::{Tempo, TempoMap, Ticks, TimeSignature};
+use elyvon_project::automation::{
+    AutomationParam, ChannelAutomation, TickPiece, lane_pieces, overlay, static_value,
+};
+use elyvon_project::mixer::ChannelRef;
 use elyvon_project::mixer::{AuxId, ChannelFormat, OutputTarget, PanLaw};
-use elyvon_project::{MediaId, Project, RegionContent, TrackKind};
+use elyvon_project::{FadeCurve, MediaId, Project, RegionContent, TrackKind};
 
+use crate::automation::{Envelope, Slot, StripAuto, Target};
 use crate::dsp::{Insert, Smoothed, StereoDelay};
 use crate::gain::{constant_power_pan, db_to_gain};
 use crate::media::MediaBuffer;
@@ -27,6 +32,8 @@ use crate::synth::TestSynth;
 
 /// Upper bound on tracks the engine pre-allocates state for.
 pub const MAX_TRACKS: usize = elyvon_project::validate::limits::MAX_TRACKS;
+/// Largest internal processing block (automation buffers are this long).
+pub const MAX_CHUNK: usize = 1024;
 
 /// One contiguous piece of a clip as heard on the timeline (engine frames).
 #[derive(Debug, Clone)]
@@ -44,33 +51,41 @@ pub struct PlanSegment {
     pub gain: f32,
     pub fade_in: u64,
     pub fade_out: u64,
-    /// Equal-power ramps at the segment edges (crossfades with covering clips).
+    /// Ramps at the segment edges (crossfades with covering clips), shaped
+    /// like the covering clip's fades.
     pub xfade_in: u64,
     pub xfade_out: u64,
+    /// Plays the source span backwards.
+    pub reversed: bool,
+    /// Shape of this clip's own fades.
+    pub curve: FadeCurve,
+    pub xcurve_in: FadeCurve,
+    pub xcurve_out: FadeCurve,
 }
 
 impl PlanSegment {
     /// Envelope at absolute frame `t` (inside the segment). Fade-ins use
-    /// `sin(d/F)` and fade-outs `sin(remaining/F)`, so a fade-out over the same
-    /// frames as a fade-in is its exact equal-power complement.
+    /// `shape(d/F)` and fade-outs `shape(remaining/F)`, so a fade-out over the
+    /// same frames as a fade-in of the same shape is its exact complement
+    /// (constant power for equal power, constant gain for linear and S).
     #[inline]
     pub fn envelope(&self, t: u64) -> f32 {
         let mut g = self.gain;
         let d = t - self.clip_start;
         if d < self.fade_in {
-            g *= quarter_sine(d as f32 / self.fade_in as f32);
+            g *= self.curve.gain(d as f32 / self.fade_in as f32);
         }
         let rem = self.clip_end - t;
         if rem <= self.fade_out && self.fade_out > 0 {
-            g *= quarter_sine(rem as f32 / self.fade_out as f32);
+            g *= self.curve.gain(rem as f32 / self.fade_out as f32);
         }
         let e = t - self.start;
         if e < self.xfade_in {
-            g *= quarter_sine(e as f32 / self.xfade_in as f32);
+            g *= self.xcurve_in.gain(e as f32 / self.xfade_in as f32);
         }
         let rem = self.end - t;
         if rem <= self.xfade_out && self.xfade_out > 0 {
-            g *= quarter_sine(rem as f32 / self.xfade_out as f32);
+            g *= self.xcurve_out.gain(rem as f32 / self.xfade_out as f32);
         }
         g
     }
@@ -79,6 +94,10 @@ impl PlanSegment {
     #[inline]
     pub fn source_frame(&self, t: u64) -> Option<usize> {
         let frames = self.media.frames() as u64;
+        if self.reversed {
+            let p = self.offset + (self.clip_end - 1 - t);
+            return (p < frames).then_some(p as usize);
+        }
         let p = self.offset + (t - self.clip_start);
         if p < frames {
             Some(p as usize)
@@ -139,6 +158,9 @@ pub struct PlanSend {
     pub gain: Smoothed,
     /// Path compensation on this edge.
     pub delay: StereoDelay,
+    /// The level is automated: `gain` only gates (0 or 1) and the strip's
+    /// automation slot supplies the per-sample level.
+    pub automated: bool,
 }
 
 /// One channel strip of the processing graph.
@@ -162,6 +184,8 @@ pub struct Strip {
     /// Anything can be heard from this strip (otherwise it is skipped once
     /// its ramps reach silence).
     pub active: bool,
+    /// Automated parameters (Phase 10); `None` keeps the static fast path.
+    pub auto: Option<Box<StripAuto>>,
 }
 
 impl Strip {
@@ -170,6 +194,7 @@ impl Strip {
         !self.active
             && (self.fader.is_silent() || self.out_gate.is_silent())
             && self.sends.iter().all(|s| s.gain.is_silent())
+            && self.auto.as_ref().is_none_or(|a| !a.any_dynamic())
     }
 
     /// Continue fader ramps, insert and delay state from the old graph.
@@ -190,6 +215,9 @@ impl Strip {
                 send.gain.adopt(&o.gain);
                 send.delay.adopt(&mut o.delay);
             }
+        }
+        if let (Some(a), Some(o)) = (self.auto.as_mut(), old.auto.as_ref()) {
+            a.adopt(o);
         }
     }
 }
@@ -284,6 +312,13 @@ pub struct PlanStats {
     /// Insert latency on the longest path to the output (compensated on
     /// every parallel path).
     pub latency_frames: usize,
+    /// Tracks playing their freeze file.
+    pub frozen: usize,
+    /// Frozen tracks playing live because their freeze no longer matches or
+    /// the file is unavailable.
+    pub stale_freezes: usize,
+    /// Compiled automation envelopes.
+    pub envelopes: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -326,13 +361,19 @@ impl PlaybackPlan {
                     let Some(src) = seg.source_frame(at) else {
                         break;
                     };
+                    let room = if seg.reversed {
+                        src + 1
+                    } else {
+                        seg.media.frames() - src
+                    };
                     let n = ((end - at) as usize)
-                        .min(seg.media.frames() - src)
+                        .min(room)
                         .min(crate::media::stream::PAGE_FRAMES);
                     if n == 0 {
                         break;
                     }
-                    seg.media.prefetch(src as u64, n)?;
+                    let first = if seg.reversed { src + 1 - n } else { src };
+                    seg.media.prefetch(first as u64, n)?;
                     at += n as u64;
                 }
             }
@@ -409,9 +450,11 @@ struct Clip {
     media: Arc<MediaBuffer>,
     offset: u64,
     looped: bool,
+    reversed: bool,
     gain: f32,
     fade_in: u64,
     fade_out: u64,
+    curve: FadeCurve,
 }
 
 /// Subtracts sorted disjoint `covered` intervals from `[s, e)`.
@@ -452,13 +495,17 @@ fn cover(covered: &mut Vec<(u64, u64)>, s: u64, e: u64) {
 fn resolve_overlaps(mut clips: Vec<Clip>) -> Vec<PlanSegment> {
     // Priority: later start wins; ties keep list order (later wins).
     clips.sort_by_key(|c| c.start);
-    let mut fade_at_start: HashMap<u64, u64> = HashMap::new();
-    let mut fade_at_end: HashMap<u64, u64> = HashMap::new();
+    let mut fade_at_start: HashMap<u64, (u64, FadeCurve)> = HashMap::new();
+    let mut fade_at_end: HashMap<u64, (u64, FadeCurve)> = HashMap::new();
     for c in &clips {
-        let f = fade_at_start.entry(c.start).or_default();
-        *f = (*f).max(c.fade_in);
-        let f = fade_at_end.entry(c.end).or_default();
-        *f = (*f).max(c.fade_out);
+        let f = fade_at_start.entry(c.start).or_insert((0, c.curve));
+        if c.fade_in >= f.0 {
+            *f = (c.fade_in, c.curve);
+        }
+        let f = fade_at_end.entry(c.end).or_insert((0, c.curve));
+        if c.fade_out >= f.0 {
+            *f = (c.fade_out, c.curve);
+        }
     }
     let mut covered: Vec<(u64, u64)> = Vec::new();
     let mut pieces = Vec::new();
@@ -470,15 +517,19 @@ fn resolve_overlaps(mut clips: Vec<Clip>) -> Vec<PlanSegment> {
             let mut end = b;
             let mut xfade_in = 0;
             let mut xfade_out = 0;
+            let mut xcurve_in = FadeCurve::EqualPower;
+            let mut xcurve_out = FadeCurve::EqualPower;
             if b < c.end {
-                let ext = fade_at_start.get(&b).copied().unwrap_or(0);
+                let (ext, curve) = fade_at_start.get(&b).copied().unwrap_or((0, c.curve));
                 end = (b + ext).min(c.end);
                 xfade_out = end - b;
+                xcurve_out = curve;
             }
             if a > c.start {
-                let ext = fade_at_end.get(&a).copied().unwrap_or(0);
+                let (ext, curve) = fade_at_end.get(&a).copied().unwrap_or((0, c.curve));
                 start = a.saturating_sub(ext).max(c.start);
                 xfade_in = a - start;
+                xcurve_in = curve;
             }
             segments.push(PlanSegment {
                 start,
@@ -493,6 +544,10 @@ fn resolve_overlaps(mut clips: Vec<Clip>) -> Vec<PlanSegment> {
                 fade_out: c.fade_out,
                 xfade_in,
                 xfade_out,
+                reversed: c.reversed,
+                curve: c.curve,
+                xcurve_in,
+                xcurve_out,
             });
         }
         cover(&mut covered, c.start, c.end);
@@ -501,7 +556,56 @@ fn resolve_overlaps(mut clips: Vec<Clip>) -> Vec<PlanSegment> {
     segments
 }
 
-/// Left/right gains of a strip for `pan` under `law` (mono) or balance (stereo).
+/// The clip of one audio region (`None` while its file is unavailable).
+fn region_clip(
+    region: &elyvon_project::Region,
+    media: &dyn Fn(MediaId) -> Option<Arc<MediaBuffer>>,
+    at: &dyn Fn(Ticks) -> u64,
+    stats: &mut PlanStats,
+) -> Option<Clip> {
+    let RegionContent::Audio {
+        media: Some(id),
+        offset,
+        gain_db,
+        fade_in,
+        fade_out,
+        looped,
+        reversed,
+        fade_curve,
+    } = &region.content
+    else {
+        return None;
+    };
+    let Some(buffer) = media(*id) else {
+        stats.missing_media += 1;
+        return None;
+    };
+    let start = at(region.start);
+    let end = at(region.end()).max(start + 1);
+    let len = end - start;
+    let mut fi = buffer.engine_frames(*fade_in);
+    let mut fo = buffer.engine_frames(*fade_out);
+    if fi + fo > len {
+        // Scale both fades to fit the region.
+        let scale = len as f64 / (fi + fo) as f64;
+        fi = (fi as f64 * scale) as u64;
+        fo = len - fi;
+    }
+    Some(Clip {
+        start,
+        end,
+        offset: buffer.engine_frames(*offset),
+        media: buffer,
+        looped: *looped && !*reversed,
+        reversed: *reversed,
+        gain: db_to_gain(*gain_db) as f32,
+        fade_in: fi,
+        fade_out: fo,
+        curve: *fade_curve,
+    })
+}
+
+// Left/right gains of a strip for `pan` under `law` (mono) or balance (stereo).
 pub fn pan_gains(mono: bool, pan: f64, law: PanLaw) -> (f64, f64) {
     let p = pan.clamp(-1.0, 1.0);
     if !mono {
@@ -553,6 +657,7 @@ fn master_strip(project: &Project, rate: u32) -> Strip {
         latency: own,
         meter_slot: MASTER_SLOT,
         active: true,
+        auto: None,
     }
 }
 
@@ -672,6 +777,186 @@ fn aux_order(graph: &mut Graph) -> Vec<usize> {
     order
 }
 
+/// Whether `param` gets an automation slot on a channel: it has points
+/// (channel or region lanes) and the mode reads them, or the mode writes.
+fn wants_slot(
+    auto: &ChannelAutomation,
+    regions: &[elyvon_project::Region],
+    param: &AutomationParam,
+) -> bool {
+    if auto.mode.writes() {
+        return true;
+    }
+    auto.mode.reads()
+        && (auto.lane(param).is_some_and(|l| !l.points.is_empty())
+            || regions.iter().filter(|r| !r.muted).any(|r| {
+                r.automation
+                    .iter()
+                    .any(|l| l.param == *param && !l.points.is_empty())
+            }))
+}
+
+struct AutoContext<'a> {
+    map: &'a TempoMap,
+    rate: u32,
+    law: PanLaw,
+    volume_db: f64,
+    pan: f64,
+    include_inserts: bool,
+}
+
+/// Compiles a channel's automation into slots for `strip`. `None` when
+/// nothing is automated and nothing can be written.
+fn strip_automation(
+    project: &Project,
+    channel: ChannelRef,
+    auto: &ChannelAutomation,
+    regions: &[elyvon_project::Region],
+    strip: &mut Strip,
+    cx: AutoContext<'_>,
+    stats: &mut PlanStats,
+) -> Option<Box<StripAuto>> {
+    let mode = auto.mode;
+    if !mode.reads() {
+        return None;
+    }
+    let mut params: Vec<AutomationParam> = Vec::new();
+    let add = |p: AutomationParam, params: &mut Vec<AutomationParam>| {
+        if !params.contains(&p) {
+            params.push(p);
+        }
+    };
+    for l in auto.lanes.iter().filter(|l| !l.points.is_empty()) {
+        add(l.param, &mut params);
+    }
+    for r in regions.iter().filter(|r| !r.muted) {
+        for l in r.automation.iter().filter(|l| !l.points.is_empty()) {
+            add(l.param, &mut params);
+        }
+    }
+    if mode.writes() {
+        for p in elyvon_project::automation_record::writable_params(project, channel) {
+            add(p, &mut params);
+        }
+    }
+    let target_of = |p: &AutomationParam, strip: &Strip| -> Option<Target> {
+        Some(match *p {
+            AutomationParam::Volume => Target::Volume,
+            AutomationParam::Pan if channel != ChannelRef::Master => Target::Pan,
+            AutomationParam::Pan => return None,
+            AutomationParam::Mute => Target::Mute,
+            AutomationParam::SendLevel { aux } => {
+                Target::Send(strip.sends.iter().position(|s| s.key == aux.0.as_u128())?)
+            }
+            AutomationParam::Insert { id, param } if cx.include_inserts => {
+                Target::Insert(strip.inserts.iter().position(|i| i.id == id)?, param)
+            }
+            AutomationParam::Insert { .. } => return None,
+        })
+    };
+    let mut slots = Vec::new();
+    for p in &params {
+        let Some(target) = target_of(p, strip) else {
+            continue;
+        };
+        let Some(static_v) = static_value(project, channel, p) else {
+            continue;
+        };
+        let spec = p.spec();
+        let base = auto.lane(p).and_then(|l| lane_pieces(l, 0.0));
+        let mut overlays: Vec<&elyvon_project::Region> = regions
+            .iter()
+            .filter(|r| {
+                !r.muted
+                    && r.automation
+                        .iter()
+                        .any(|l| l.param == *p && !l.points.is_empty())
+            })
+            .collect();
+        overlays.sort_by_key(|r| r.start);
+        let pieces: Option<Vec<TickPiece>> = if overlays.is_empty() {
+            base
+        } else {
+            let mut pieces = base.unwrap_or_else(|| {
+                vec![TickPiece::constant(
+                    0.0,
+                    f64::INFINITY,
+                    spec.to_norm(static_v),
+                )]
+            });
+            for r in overlays {
+                if let Some(over) = r
+                    .automation
+                    .iter()
+                    .find(|l| l.param == *p)
+                    .and_then(|l| lane_pieces(l, r.start as f64))
+                {
+                    pieces = overlay(&pieces, &over, r.start as f64, r.end() as f64);
+                }
+            }
+            Some(pieces)
+        };
+        let is_level = matches!(
+            p,
+            AutomationParam::Volume
+                | AutomationParam::SendLevel { .. }
+                | AutomationParam::Insert {
+                    param: elyvon_project::automation::InsertParam::TrimGain,
+                    ..
+                }
+        );
+        let env = pieces.map(|pc| {
+            let e = Envelope::compile(&pc, cx.map, cx.rate);
+            if is_level {
+                e.level(spec.min, spec.max)
+            } else {
+                e
+            }
+        });
+        if env.is_some() {
+            stats.envelopes += 1;
+        }
+        if let Target::Insert(i, elyvon_project::automation::InsertParam::Bypass) = target {
+            strip.inserts[i].set_bypass_automated();
+        }
+        if let Target::Send(i) = target {
+            // The send's smoothed gain becomes its on/off gate.
+            let on = if strip.sends[i].gain.target.0 > 0.0 {
+                1.0
+            } else {
+                0.0
+            };
+            strip.sends[i].gain = Smoothed::new((on, on));
+            strip.sends[i].automated = true;
+        }
+        slots.push(Slot::new(target, *p, env, static_v, MAX_CHUNK));
+    }
+    if slots.is_empty() {
+        return None;
+    }
+    let find = |t: Target| slots.iter().position(|s| s.target == t);
+    let sends = (0..strip.sends.len())
+        .map(|i| find(Target::Send(i)))
+        .collect();
+    let (l, r) = if channel == ChannelRef::Master {
+        (1.0, 1.0)
+    } else {
+        pan_gains(strip.mono, cx.pan, cx.law)
+    };
+    Some(Box::new(StripAuto {
+        mode,
+        volume: find(Target::Volume),
+        pan: find(Target::Pan),
+        mute: find(Target::Mute),
+        sends,
+        static_gain: db_to_gain(cx.volume_db) as f32,
+        static_pan: (l as f32, r as f32),
+        mono: strip.mono,
+        law: cx.law,
+        slots,
+    }))
+}
+
 /// Builds the plan for `project` at `sample_rate`. `media` returns prepared
 /// buffers (at `sample_rate`) for pool ids; regions without one are silent and
 /// counted in [`PlanStats::missing_media`].
@@ -734,86 +1019,142 @@ pub fn build_plan(
     let safe: Vec<bool> = strips_in.iter().map(|s| s.solo_safe).collect();
     let solo = solo_state(&graph, &soloed, &safe);
 
+    // Which channels have a mute slot (automation then decides; the static
+    // mute only sets the slot's resting value).
+    let channel_auto: Vec<&ChannelAutomation> = tracks_in
+        .iter()
+        .map(|t| &t.automation)
+        .chain(auxes_in.iter().map(|a| &a.automation))
+        .collect();
+    let mute_auto: Vec<bool> = (0..strips_in.len())
+        .map(|node| {
+            if node < graph.t && tracks_in[node].kind == TrackKind::Midi {
+                return false;
+            }
+            let regions: &[elyvon_project::Region] = if node < graph.t {
+                &tracks_in[node].regions
+            } else {
+                &[]
+            };
+            wants_slot(channel_auto[node], regions, &AutomationParam::Mute)
+        })
+        .collect();
+    let muted_eff: Vec<bool> = muted
+        .iter()
+        .zip(&mute_auto)
+        .map(|(m, a)| *m && !*a)
+        .collect();
+
     // Sources: audio segments, notes, events and instruments per track.
     let mut tracks = Vec::with_capacity(tracks_in.len());
+    let mut frozen_tracks = vec![false; tracks_in.len()];
+    let mut end_frame = at(project.content_end());
     for (ti, track) in tracks_in.iter().enumerate() {
         let mut clips = Vec::new();
         let mut notes = Vec::new();
         let mut events = Vec::new();
-        for region in track.regions.iter().filter(|r| !r.muted) {
-            let start = at(region.start);
-            let end = at(region.end()).max(start + 1);
-            match &region.content {
-                RegionContent::Audio {
-                    media: Some(id),
-                    offset,
-                    gain_db,
-                    fade_in,
-                    fade_out,
-                    looped,
-                } if track.kind == TrackKind::Audio => {
-                    let Some(buffer) = media(*id) else {
-                        stats.missing_media += 1;
-                        continue;
-                    };
-                    let len = end - start;
-                    let mut fi = buffer.engine_frames(*fade_in);
-                    let mut fo = buffer.engine_frames(*fade_out);
-                    if fi + fo > len {
-                        // Scale both fades to fit the region.
-                        let scale = len as f64 / (fi + fo) as f64;
-                        fi = (fi as f64 * scale) as u64;
-                        fo = len - fi;
+        // A current freeze replaces the regions and inserts.
+        let frozen = track
+            .freeze
+            .as_ref()
+            .filter(|_| {
+                track.kind != TrackKind::Midi
+                    && elyvon_project::comp::freeze_is_current(project, track)
+            })
+            .and_then(|f| media(f.media).map(|b| (f, b)));
+        if track.freeze.is_some() && frozen.is_none() {
+            stats.stale_freezes += 1;
+        }
+        if let Some((f, buffer)) = frozen {
+            let start = at(f.start);
+            let end = start + buffer.frames().max(1) as u64;
+            end_frame = end_frame.max(end);
+            clips.push(Clip {
+                start,
+                end,
+                media: buffer,
+                offset: 0,
+                looped: false,
+                reversed: false,
+                gain: 1.0,
+                fade_in: 0,
+                fade_out: 0,
+                curve: FadeCurve::EqualPower,
+            });
+            frozen_tracks[ti] = true;
+            stats.frozen += 1;
+        } else {
+            for region in track.regions.iter().filter(|r| !r.muted) {
+                match &region.content {
+                    RegionContent::Audio { .. } if track.kind == TrackKind::Audio => {
+                        if let Some(c) = region_clip(region, media, &at, &mut stats) {
+                            clips.push(c);
+                        }
                     }
-                    clips.push(Clip {
-                        start,
-                        end,
-                        offset: buffer.engine_frames(*offset),
-                        media: buffer,
-                        looped: *looped,
-                        gain: db_to_gain(*gain_db) as f32,
-                        fade_in: fi,
-                        fade_out: fo,
-                    });
-                }
-                RegionContent::Midi {
-                    notes: region_notes,
-                } => {
-                    for event in region
-                        .midi_events
-                        .iter()
-                        .filter(|e| e.tick <= region.length)
-                    {
-                        if let Some(packet) = crate::midi::Packet::parse(&event.bytes) {
-                            events.push(PlanEvent {
-                                on: at(region.start.saturating_add(event.tick)),
-                                packet,
+                    RegionContent::Midi {
+                        notes: region_notes,
+                    } => {
+                        for event in region
+                            .midi_events
+                            .iter()
+                            .filter(|e| e.tick <= region.length)
+                        {
+                            if let Some(packet) = crate::midi::Packet::parse(&event.bytes) {
+                                events.push(PlanEvent {
+                                    on: at(region.start.saturating_add(event.tick)),
+                                    packet,
+                                });
+                            }
+                        }
+                        for n in region_notes
+                            .iter()
+                            .filter(|n| !n.muted && n.start < region.length)
+                        {
+                            let on_tick = region.start + n.start;
+                            let off_tick =
+                                region.start + n.start.saturating_add(n.length).min(region.length);
+                            let on = at(on_tick);
+                            let off = at(off_tick).max(on + 1);
+                            notes.push(PlanNote {
+                                on,
+                                off,
+                                pitch: n.pitch.min(127),
+                                velocity: n.velocity.clamp(1, 127),
+                                channel: n.channel & 0x0f,
                             });
                         }
                     }
-                    for n in region_notes
-                        .iter()
-                        .filter(|n| !n.muted && n.start < region.length)
-                    {
-                        let on_tick = region.start + n.start;
-                        let off_tick =
-                            region.start + n.start.saturating_add(n.length).min(region.length);
-                        let on = at(on_tick);
-                        let off = at(off_tick).max(on + 1);
-                        notes.push(PlanNote {
-                            on,
-                            off,
-                            pitch: n.pitch.min(127),
-                            velocity: n.velocity.clamp(1, 127),
-                            channel: n.channel & 0x0f,
-                        });
+                    _ => {}
+                }
+            }
+            // Comps play their virtual regions (the takes stay muted).
+            if track.kind == TrackKind::Audio {
+                for comp in track.comps.iter().filter(|c| !c.flattened) {
+                    for region in elyvon_project::comp::comp_regions(project, &map, track, comp) {
+                        if let Some(c) = region_clip(&region, media, &at, &mut stats) {
+                            clips.push(c);
+                        }
                     }
                 }
-                _ => {}
             }
         }
         stats.clips += clips.len();
-        let all_mono = !clips.is_empty() && clips.iter().all(|c| c.media.channels() <= 1);
+        let all_mono = if frozen_tracks[ti] {
+            // The freeze file is stereo; keep the format the live track had.
+            let sources: Vec<usize> = track
+                .regions
+                .iter()
+                .filter_map(|r| match &r.content {
+                    RegionContent::Audio {
+                        media: Some(id), ..
+                    } => media(*id).map(|b| b.channels()),
+                    _ => None,
+                })
+                .collect();
+            !sources.is_empty() && sources.iter().all(|c| *c <= 1)
+        } else {
+            !clips.is_empty() && clips.iter().all(|c| c.media.channels() <= 1)
+        };
         let segments = resolve_overlaps(clips);
         stats.segments += segments.len();
         let mut max_end = Vec::with_capacity(segments.len());
@@ -831,9 +1172,9 @@ pub fn build_plan(
             ChannelFormat::Stereo => false,
             ChannelFormat::Auto => track.kind == TrackKind::Audio && all_mono,
         };
-        let synth =
-            (track.kind == TrackKind::Instrument).then(|| Box::new(TestSynth::new(sample_rate)));
-        let audible = solo.processed(ti) && !muted[ti];
+        let synth = (track.kind == TrackKind::Instrument && !frozen_tracks[ti])
+            .then(|| Box::new(TestSynth::new(sample_rate)));
+        let audible = solo.processed(ti) && !muted_eff[ti];
         let has_audio = !segments.is_empty() || synth.is_some();
         tracks.push(PlanTrack {
             key: track.id.0.as_u128(),
@@ -841,7 +1182,11 @@ pub fn build_plan(
                 key: track.id.0.as_u128(),
                 mono,
                 fader: Smoothed::new((0.0, 0.0)),
-                inserts: inserts(&track.strip.inserts, sample_rate),
+                inserts: if frozen_tracks[ti] {
+                    Vec::new()
+                } else {
+                    inserts(&track.strip.inserts, sample_rate)
+                },
                 output: graph.out[ti],
                 out_gate: Smoothed::new((0.0, 0.0)),
                 out_delay: StereoDelay::new(0),
@@ -849,6 +1194,7 @@ pub fn build_plan(
                 latency: 0,
                 meter_slot: ti,
                 active: audible && has_audio,
+                auto: None,
             },
             events,
             audible,
@@ -874,13 +1220,14 @@ pub fn build_plan(
                 sends: Vec::new(),
                 latency: 0,
                 meter_slot: aux_slot(i),
-                active: solo.processed(graph.t + i) && !muted[graph.t + i],
+                active: solo.processed(graph.t + i) && !muted_eff[graph.t + i],
+                auto: None,
             },
         })
         .collect();
     stats.auxes = auxes.len();
 
-    // Faders, gates and sends.
+    // Faders, gates, sends and automation.
     let n_nodes = strips_in.len();
     for node in 0..n_nodes {
         let (volume, pan) = if node < graph.t {
@@ -894,7 +1241,7 @@ pub fn build_plan(
         } else {
             &mut auxes[node - graph.t].strip
         };
-        let on = solo.processed(node) && !muted[node];
+        let on = solo.processed(node) && !muted_eff[node];
         let (l, r) = pan_gains(strip.mono, pan, law);
         let v = if muted[node] { 0.0 } else { db_to_gain(volume) };
         strip.fader = Smoothed::new(((v * l) as f32, (v * r) as f32));
@@ -924,9 +1271,45 @@ pub fn build_plan(
                     pre_fader: s.pre_fader,
                     gain: Smoothed::new(gain_pair(g)),
                     delay: StereoDelay::new(0),
+                    automated: false,
                 })
             })
             .collect();
+        let is_midi = node < graph.t && tracks_in[node].kind == TrackKind::Midi;
+        if !is_midi {
+            let (channel, regions): (ChannelRef, &[elyvon_project::Region]) = if node < graph.t {
+                (
+                    ChannelRef::Track {
+                        id: tracks_in[node].id,
+                    },
+                    &tracks_in[node].regions,
+                )
+            } else {
+                (
+                    ChannelRef::Aux {
+                        id: auxes_in[node - graph.t].id,
+                    },
+                    &[],
+                )
+            };
+            let include_inserts = !(node < graph.t && frozen_tracks[node]);
+            strip.auto = strip_automation(
+                project,
+                channel,
+                channel_auto[node],
+                regions,
+                strip,
+                AutoContext {
+                    map: &map,
+                    rate: sample_rate,
+                    law,
+                    volume_db: volume,
+                    pan,
+                    include_inserts,
+                },
+                &mut stats,
+            );
+        }
         stats.inserts += strip.inserts.len();
         strip.latency = strip.inserts.iter().map(Insert::latency).sum();
     }
@@ -976,7 +1359,24 @@ pub fn build_plan(
             s.delay = StereoDelay::new(in_lat[s.aux].saturating_sub(lat));
         }
     }
-    let master = master_strip(project, sample_rate);
+    let mut master = master_strip(project, sample_rate);
+    master.auto = strip_automation(
+        project,
+        ChannelRef::Master,
+        &mixer.master.automation,
+        &[],
+        &mut master,
+        AutoContext {
+            map: &map,
+            rate: sample_rate,
+            law,
+            volume_db: mixer.master.volume_db,
+            pan: 0.0,
+            include_inserts: true,
+        },
+        &mut stats,
+    );
+    master.latency = master.inserts.iter().map(Insert::latency).sum();
     stats.inserts += master.inserts.len();
     stats.latency_frames = master_in + master.latency;
 
@@ -988,7 +1388,6 @@ pub fn build_plan(
         .enabled
         .then(|| (at(lr.start), at(lr.end)))
         .filter(|(s, e)| e > s);
-    let end_frame = at(project.content_end());
     let key = project_map_key(project);
     PlaybackPlan {
         generation,

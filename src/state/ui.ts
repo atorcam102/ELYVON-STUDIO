@@ -8,13 +8,32 @@ import type { Layout } from "../bindings/Layout";
 import type { Project } from "../bindings/Project";
 import { clampZoom, DEFAULT_PX_PER_QUARTER } from "../lib/geometry";
 
-export type BottomTab = "mixer" | "pianoRoll" | "audioEditor" | "score" | "smartTempo" | "smartControls";
+export type BottomTab = "mixer" | "pianoRoll" | "audioEditor" | "automation" | "score" | "smartTempo" | "smartControls";
 export type BrowserTab = "files" | "loops" | "instruments" | "plugins";
 export type { SettingsSection } from "./uiContract";
 
 export type { Selection } from "./uiContract";
 
+export type EditTool = "pointer" | "marquee";
+
+/** A marquee (time range over some tracks) drawn with the marquee tool. */
+export interface Marquee {
+  trackIds: string[];
+  start: number;
+  end: number;
+}
+
 interface UiState extends UiPresentationV1 {
+  /** Arrangement tool (Phase 11). */
+  tool: EditTool;
+  setTool: (tool: EditTool) => void;
+  /** Deleting regions closes the gap they leave. */
+  ripple: boolean;
+  setRipple: (on: boolean) => void;
+  marquee: Marquee | null;
+  setMarquee: (m: Marquee | null) => void;
+  mediaOpen: boolean;
+  setMediaOpen: (open: boolean) => void;
   /** User-chosen snap grid; `null` follows the zoom level. */
   snapSpec: GridSpec | null;
   setSnapSpec: (spec: GridSpec | null) => void;
@@ -59,6 +78,14 @@ export const useUi = create<UiState>((set) => ({
   demoMeters: false,
   snapSpec: null,
   setSnapSpec: (snapSpec) => set({ snapSpec }),
+  tool: "pointer",
+  setTool: (tool) => set({ tool, marquee: null }),
+  ripple: false,
+  setRipple: (ripple) => set({ ripple }),
+  marquee: null,
+  setMarquee: (marquee) => set({ marquee }),
+  mediaOpen: false,
+  setMediaOpen: (mediaOpen) => set({ mediaOpen }),
 
   setLayout: (patch) => set((s) => ({ layout: { ...s.layout, ...patch } })),
   replaceLayout: (layout) => set({ layout }),

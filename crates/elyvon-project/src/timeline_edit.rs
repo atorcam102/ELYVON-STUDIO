@@ -25,7 +25,10 @@ fn tempo_map(project: &Project) -> Result<TempoMap, EditError> {
 
 /// Source sample rate and length of a media file, falling back to the project
 /// rate when the file was never measured (schema-1 migrations).
-fn source_rate_and_frames(project: &Project, media: Option<MediaId>) -> (u32, Option<u64>) {
+pub(crate) fn source_rate_and_frames(
+    project: &Project,
+    media: Option<MediaId>,
+) -> (u32, Option<u64>) {
     match media
         .and_then(|id| project.media_asset(id))
         .and_then(|a| a.info.as_ref())
@@ -194,6 +197,7 @@ pub(crate) fn import_audio(
             length: end - placement.start,
             muted: false,
             content: RegionContent::audio(Some(placement.media_id)),
+            automation: Vec::new(),
         };
         outcome.created_regions.push(region.id);
         track.regions.push(region);
@@ -204,14 +208,94 @@ pub(crate) fn import_audio(
 
 use crate::model::TrackId;
 
+/// Source frame (at `rate`) of timeline tick `tick`, rounded on the absolute
+/// position exactly like the engine, so differences of these values match
+/// the engine's frame arithmetic for reversed regions.
+pub fn abs_frame(map: &TempoMap, tick: Ticks, rate: u32) -> u64 {
+    elyvon_core::tempo::round_frame(map.seconds_at(tick as f64) * f64::from(rate))
+}
+
+/// Splits region lanes at `rel` (relative ticks): the left keeps
+/// `[0, rel]`, the right gets `[rel, ∞)` shifted to start at zero, each with
+/// a boundary point holding the value at the cut.
+fn split_lanes(
+    lanes: &[crate::automation::AutomationLane],
+    rel: Ticks,
+) -> (
+    Vec<crate::automation::AutomationLane>,
+    Vec<crate::automation::AutomationLane>,
+) {
+    let mut left = Vec::with_capacity(lanes.len());
+    let mut right = Vec::with_capacity(lanes.len());
+    for lane in lanes {
+        let mut l = crate::automation::AutomationLane {
+            param: lane.param,
+            points: lane
+                .points
+                .iter()
+                .filter(|p| p.tick <= rel)
+                .copied()
+                .collect(),
+        };
+        let mut r = crate::automation::AutomationLane {
+            param: lane.param,
+            points: lane
+                .points
+                .iter()
+                .filter(|p| p.tick >= rel)
+                .map(|p| crate::automation::AutomationPoint {
+                    tick: p.tick - rel,
+                    ..*p
+                })
+                .collect(),
+        };
+        if let Some(v) = lane.value_at(rel as f64) {
+            let next = lane.points.iter().map(|p| p.id).max().unwrap_or(0) + 1;
+            if l.points.last().is_none_or(|p| p.tick < rel) {
+                l.points.push(crate::automation::AutomationPoint {
+                    id: next,
+                    tick: rel,
+                    value: lane.value_before(rel as f64).unwrap_or(v),
+                    curve: crate::automation::Curve::Linear,
+                });
+            }
+            if r.points.first().is_none_or(|p| p.tick > 0) {
+                r.points.insert(
+                    0,
+                    crate::automation::AutomationPoint {
+                        id: next,
+                        tick: 0,
+                        value: v,
+                        curve: lane
+                            .points
+                            .iter()
+                            .rev()
+                            .find(|p| p.tick <= rel)
+                            .map_or(crate::automation::Curve::Linear, |p| p.curve),
+                    },
+                );
+            }
+        }
+        left.push(l);
+        right.push(r);
+    }
+    (left, right)
+}
+
 /// Splits one region at `at` (strictly inside it). Returns the right half.
 fn split_one(project: &Project, map: &TempoMap, region: &mut Region, at: Ticks) -> Region {
     let rel = at - region.start;
+    let end = region.end();
     let mut right = region.clone();
     right.id = RegionId::new();
     right.start = at;
     right.length = region.length - rel;
     region.length = rel;
+    if !region.automation.is_empty() {
+        let (l, r) = split_lanes(&region.automation, rel);
+        region.automation = l;
+        right.automation = r;
+    }
     match (&mut region.content, &mut right.content) {
         (
             RegionContent::Audio {
@@ -219,6 +303,7 @@ fn split_one(project: &Project, map: &TempoMap, region: &mut Region, at: Ticks) 
                 offset,
                 fade_out,
                 looped,
+                reversed,
                 ..
             },
             RegionContent::Audio {
@@ -228,8 +313,14 @@ fn split_one(project: &Project, map: &TempoMap, region: &mut Region, at: Ticks) 
             },
         ) => {
             let (rate, frames) = source_rate_and_frames(project, *media);
-            let elapsed = frames_between(map, at - rel, at, rate);
-            *right_offset = wrap(offset.saturating_add(elapsed), frames, *looped);
+            if *reversed {
+                // The left half plays the top of the source span.
+                *right_offset = *offset;
+                *offset += abs_frame(map, end, rate) - abs_frame(map, at, rate);
+            } else {
+                let elapsed = frames_between(map, at - rel, at, rate);
+                *right_offset = wrap(offset.saturating_add(elapsed), frames, *looped);
+            }
             *right_fade_in = 0;
             *fade_out = 0;
         }
@@ -294,22 +385,69 @@ pub(crate) fn split_regions(
 pub(crate) fn trim_region(
     project: &mut Project,
     id: RegionId,
+    start: Ticks,
+    end: Ticks,
+) -> Result<(), EditError> {
+    let map = tempo_map(project)?;
+    let (ti, ri) = project
+        .find_region(id)
+        .ok_or(EditError::UnknownRegion(id))?;
+    let region = trimmed_copy(project, &map, &project.tracks[ti].regions[ri], start, end)?;
+    let track = &mut project.tracks[ti];
+    track.regions[ri] = region;
+    sort_regions(track);
+    Ok(())
+}
+
+/// A copy of `region` with its edges moved to `start`/`end` (clamped to the
+/// source file when it does not loop). Audio keeps its timeline position;
+/// MIDI notes, events and region automation are cropped or shifted.
+pub fn trimmed_copy(
+    project: &Project,
+    map: &TempoMap,
+    region: &Region,
     mut start: Ticks,
     mut end: Ticks,
-) -> Result<(), EditError> {
+) -> Result<Region, EditError> {
     if start >= end {
         return Err(invalid("a region must keep a positive length"));
     }
     if end > limits::MAX_TICKS {
         return Err(invalid("region would end out of range"));
     }
-    let map = tempo_map(project)?;
-    let (ti, ri) = project
-        .find_region(id)
-        .ok_or(EditError::UnknownRegion(id))?;
-    let mut region = project.tracks[ti].regions[ri].clone();
+    let mut region = region.clone();
     let old_start = region.start;
+    let old_end = region.end();
     match &mut region.content {
+        RegionContent::Audio {
+            media,
+            offset,
+            reversed: true,
+            ..
+        } => {
+            let (rate, frames) = source_rate_and_frames(project, *media);
+            // The end edge moves the bottom of the source span; the start
+            // edge only extends or shortens the top.
+            let old_e = abs_frame(map, old_end, rate);
+            let new_e = abs_frame(map, end, rate);
+            if new_e <= old_e {
+                *offset += old_e - new_e;
+            } else if new_e - old_e <= *offset {
+                *offset -= new_e - old_e;
+            } else {
+                let secs = (old_e + *offset) as f64 / f64::from(rate);
+                end = (map.tick_at_seconds(secs).floor() as Ticks).min(end);
+                *offset = offset.saturating_sub(abs_frame(map, end, rate).saturating_sub(old_e));
+            }
+            if let Some(n) = frames {
+                let room = n.saturating_sub(*offset);
+                let e = abs_frame(map, end, rate);
+                if e.saturating_sub(abs_frame(map, start, rate)) > room {
+                    let secs = e.saturating_sub(room) as f64 / f64::from(rate);
+                    start = (map.tick_at_seconds(secs).ceil() as Ticks).max(start);
+                }
+            }
+        }
         RegionContent::Audio {
             media,
             offset,
@@ -318,7 +456,7 @@ pub(crate) fn trim_region(
         } => {
             let (rate, frames) = source_rate_and_frames(project, *media);
             if start < old_start {
-                let back = frames_between(&map, start, old_start, rate);
+                let back = frames_between(map, start, old_start, rate);
                 if back <= *offset {
                     *offset -= back;
                 } else if let (true, Some(n)) = (*looped, frames.filter(|n| *n > 0)) {
@@ -331,12 +469,12 @@ pub(crate) fn trim_region(
                     *offset = 0;
                 }
             } else if start > old_start {
-                let fwd = frames_between(&map, old_start, start, rate);
+                let fwd = frames_between(map, old_start, start, rate);
                 *offset = wrap(offset.saturating_add(fwd), frames, *looped);
             }
             if let (false, Some(n)) = (*looped, frames) {
                 let remaining = n.saturating_sub(*offset).max(1);
-                end = end.min(tick_after_frames(&map, start, remaining, rate));
+                end = end.min(tick_after_frames(map, start, remaining, rate));
             }
         }
         RegionContent::Midi { notes } => {
@@ -374,12 +512,25 @@ pub(crate) fn trim_region(
             }
         }
     }
+    if !region.automation.is_empty() {
+        let lanes = if start > old_start {
+            split_lanes(&region.automation, start - old_start).1
+        } else {
+            let d = old_start - start;
+            let mut lanes = region.automation.clone();
+            for l in &mut lanes {
+                for p in &mut l.points {
+                    p.tick += d;
+                }
+            }
+            lanes
+        };
+        let len = end - start;
+        region.automation = split_lanes(&lanes, len).0;
+    }
     region.start = start;
     region.length = end - start;
-    let track = &mut project.tracks[ti];
-    track.regions[ri] = region;
-    sort_regions(track);
-    Ok(())
+    Ok(region)
 }
 
 pub(crate) fn duplicate_regions(

@@ -1,5 +1,15 @@
 # Status
 
+**Phases 10–11 (2026-10-17, schema 5): PARTIAL.** Sample-accurate mix automation (track/region
+lanes for volume, pan, mute, sends and insert parameters; Read/Touch/Latch/Write with lock-free
+capture; linear/step/Bézier curves; offline render bit-identical to live playback) and
+non-destructive editing (comping of cycle takes with flatten/unflatten, reverse, fade shapes and
+crossfades, slip, ripple, marquee, glue, transient slices/markers, normalise, freeze, bounce in
+place, media repair/collect/backed-up clean-up, memory-bounded history) are implemented and
+verified by Rust, frontend and native E2E tests built and run on this Windows x64 laptop.
+Listening tests, a real microphone cycle recording and every other platform remain pending.
+Evidence: [audit/PHASE-10-11.md](audit/PHASE-10-11.md).
+
 **Phases 08–09 (2026-10-16, 0.3.0): PARTIAL.** Piano-roll editing (notes, lanes, reversible
 quantise, multi-region, grouped undo), a built-in test instrument and the engine mixer graph
 (aux buses, pre/post sends, native inserts with path latency compensation, solo/mute/groups,

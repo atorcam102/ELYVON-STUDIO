@@ -29,7 +29,7 @@ use crate::model::Project;
 use crate::validate::validate;
 
 pub const FORMAT_ID: &str = "elyvon-studio-project";
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 pub const FILE_EXTENSION: &str = "elyvon";
 /// Projects reference media instead of embedding it, so 64 MiB is generous.
 pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -129,6 +129,14 @@ pub fn migrate(value: Value, from: u32) -> Result<Value, ProjectError> {
             // into notes by the typed step in `decode`.
             let mut value = value;
             value["schemaVersion"] = serde_json::json!(4);
+            migrate(value, 4)
+        }
+        4 => {
+            // Schema 5 adds automation (channel and region lanes, modes),
+            // comps, track freeze, reversed regions, fade shapes and linked
+            // group edits. Every new field has a neutral serde default.
+            let mut value = value;
+            value["schemaVersion"] = serde_json::json!(5);
             Ok(value)
         }
         other => Err(ProjectError::UnsupportedSchema { found: other }),

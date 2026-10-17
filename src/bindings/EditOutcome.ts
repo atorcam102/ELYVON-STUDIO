@@ -14,4 +14,12 @@ export type EditOutcome = { createdTracks: Array<TrackId>, createdRegions: Array
 /**
  * Note ids, within the edited region.
  */
-createdNotes: Array<number>, createdAuxes: Array<AuxId>, createdInserts: Array<InsertId>, createdGroups: Array<GroupId>, createdFolders: Array<FolderId>, };
+createdNotes: Array<number>, createdAuxes: Array<AuxId>, createdInserts: Array<InsertId>, createdGroups: Array<GroupId>, createdFolders: Array<FolderId>, 
+/**
+ * Automation point ids, within the edited lane.
+ */
+createdPoints: Array<number>, 
+/**
+ * Regions the UI should select (e.g. inside a marquee range).
+ */
+selectedRegions: Array<RegionId>, };

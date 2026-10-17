@@ -8,6 +8,7 @@
 
 6. [Converge the Phase 03 and arrangement engines](0006-converge-phase03-and-arrangement-engines.md)
 7. [Notes as the editable MIDI source and a graph-plan mixer](0007-notes-as-source-and-a-graph-plan-mixer.md)
+8. [Sample-accurate automation and non-destructive comping](0008-sample-accurate-automation-and-non-destructive-comping.md)
 
 Implementation/evidence: [STATUS](../STATUS.md), [CONTRACTS](../CONTRACTS.md),
 [FEATURE_MATRIX](../FEATURE_MATRIX.md), [validation](../audit/VALIDATION.md).

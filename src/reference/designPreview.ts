@@ -1,6 +1,6 @@
 /** Development-only, in-memory visual fixture. Never used by the native app. */
 import type { Project } from "../bindings/Project";
-import { defaultStrip, emptyMixer } from "../lib/mixerDefaults";
+import { defaultAutomation, defaultStrip, emptyMixer } from "../lib/mixerDefaults";
 import { useProject } from "../state/project";
 import { useUi, DEFAULT_LAYOUT } from "../state/ui";
 import { notify } from "../state/notifications";
@@ -17,10 +17,10 @@ export function initializeDesignPreview() {
     },
     tracks: [{ id: "design-track", name: "Deluxe Classic", kind: "instrument", color: "#17a42c", muted: false, soloed: false, volumeDb: 0, pan: 0, folder: null, strip: defaultStrip(),
       io: { armed: false, inputChannel: 0, inputChannels: 2, monitor: false, midiInput: null, midiOutput: null, midiChannel: null, outputChannel: null, midiMonitor: false },
-      regions: [],
+      regions: [], automation: defaultAutomation(), freeze: null, comps: [],
     }], media: [], markers: [], mixer: emptyMixer(),
   };
-  if (new URLSearchParams(location.search).has("region")) project.tracks[0]!.regions.push({ id: "design-region", name: "Deluxe Classic", start: 0, length: 3840, muted: false, capture: null, midiEvents: [], content: { type: "midi", notes: [] } });
+  if (new URLSearchParams(location.search).has("region")) project.tracks[0]!.regions.push({ id: "design-region", name: "Deluxe Classic", start: 0, length: 3840, muted: false, capture: null, midiEvents: [], content: { type: "midi", notes: [] }, automation: [] });
   useProject.getState().setView({ project, path: null, origin: "new", dirty: false, undoLabel: null, redoLabel: null, revision: 0 });
   useUi.getState().replaceLayout({ ...DEFAULT_LAYOUT, browserVisible: false, inspectorVisible: false });
   if (project.tracks[0]!.regions.length) useUi.getState().selectRegions(["design-region"], ["design-track"]);
@@ -59,12 +59,12 @@ export function initializeDesignPreview() {
       case "createMidiRegion": {
         const t = tracks.find(t => t.id === command.trackId);
         const id = crypto.randomUUID();
-        t?.regions.push({ id, name: t.name, start: command.start, length: command.length, muted: false, capture: null, midiEvents: [], content: { type: "midi", notes: [] } });
+        t?.regions.push({ id, name: t.name, start: command.start, length: command.length, muted: false, capture: null, midiEvents: [], content: { type: "midi", notes: [] }, automation: [] });
         createdRegions.push(id); break;
       }
       default: notify("info", "La vista de diseño no tiene motor nativo. Abre Elyvon Studio para esta operación."); return null;
     }
     useProject.getState().setView({ ...view, project: next, revision: view.revision + 1 });
-    return { createdRegions, createdTracks, createdMarkers: [], createdNotes: [], createdAuxes: [], createdInserts: [], createdGroups: [], createdFolders: [] };
+    return { createdRegions, createdTracks, createdMarkers: [], createdNotes: [], createdAuxes: [], createdInserts: [], createdGroups: [], createdFolders: [], createdPoints: [], selectedRegions: [] };
   } });
 }

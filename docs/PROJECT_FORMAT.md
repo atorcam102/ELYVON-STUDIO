@@ -1,4 +1,4 @@
-# Formato de proyecto `.elyvon` (esquema 4)
+# Formato de proyecto `.elyvon` (esquema 5)
 
 Un proyecto de Elyvon Studio es un único archivo JSON UTF-8 con extensión
 `.elyvon`. Describe la canción (pistas, regiones, ajustes) y **referencia** los
@@ -217,3 +217,40 @@ Note-off velocity is not stored.
 `panLaw` (`constantPower` −3 dB, `constantPowerCompensated` 0 dB, `linear` −6 dB). At most 64
 auxes, 32 groups and 64 folders. Every reference must exist and the output/send graph must be
 acyclic; a file or edit with a cycle is rejected (no feedback mode exists).
+
+## Schema 5 — automation, comps, freeze and editing (Phases 10–11)
+
+Schema 4 files migrate in memory without being rewritten (`tests/fixtures/v4-mixer.elyvon`).
+Every new field has a neutral default. Older applications refuse schema 5.
+
+**Automation.** Tracks, auxes (`mixer.auxes[].automation`) and the master
+(`mixer.master.automation`) have `automation: { mode, lanes[] }`; `mode` is `off`, `read`
+(default), `touch`, `latch` or `write`. A lane is `{ param, points[] }`:
+
+| `param` | Unit and range | Interpolation scale |
+| --- | --- | --- |
+| `{type:"volume"}`, `{type:"sendLevel", aux}` | dB −96 (silence) … +6 | linear in dB |
+| `{type:"pan"}` | −1 … +1 (not on the master) | linear |
+| `{type:"mute"}`, insert `bypass` | 0 or 1 (always stepped) | — |
+| `{type:"insert", id, param:"trimGain"}` | −48 … +24 dB | linear in dB |
+| `… "filterCutoff"` / `"filterQ"` | 20 Hz … 20 kHz / 0.3 … 10 | logarithmic |
+| `… "limiterCeiling"` / `"limiterRelease"` | −24 … 0 dB / 1 … 1000 ms | linear / logarithmic |
+
+Points are `{ id, tick, value, curve }`, sorted by `tick` (several points may share a tick: a
+jump), at most 100 000 per lane and 64 lanes per channel. `curve` shapes the segment to the next
+point: `{type:"linear"}`, `{type:"step"}` or `{type:"bezier", c1, c2}` (control values 0…1;
+1/3, 2/3 is linear). The fraction between two points is measured in ticks. Regions may have
+`automation: [lane]` with ticks relative to the region start (inside the region, at most 16
+lanes); it replaces the track lane inside the region. A lane must address an existing send or
+insert parameter of its channel; external MIDI tracks have no automation.
+
+**Audio regions** add `reversed` (plays `[offset, offset + heard length)` backwards; not with
+`looped`) and `fadeCurve`: `equalPower` (default), `linear` or `sCurve`; it also shapes the
+crossfade a region makes with the region it covers.
+
+**Tracks** add `comps[]` — `{ folder, segments: [{ start, end, take }], crossfadeMs (0…200),
+flattened, regions[] }` (a take folder's composite; segments ordered and non-overlapping) — and
+`freeze: { media, start, fingerprint } | null` (a pre-fader render in the media pool; the
+fingerprint identifies the material it was rendered from).
+
+**Mixer groups** add `linkEdit` (phase-locked region editing across members).

@@ -3,6 +3,7 @@
 
 pub mod audio;
 pub mod browser;
+pub mod editing;
 pub mod project;
 pub mod system;
 
