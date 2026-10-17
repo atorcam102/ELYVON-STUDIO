@@ -1074,6 +1074,7 @@
   display: flex;
   flex-direction: column;
   background: var(--editor-bg);
+  overflow-y: auto;
 }
 
 .pr__bar {
@@ -1149,7 +1150,7 @@
 
 .pr__scroll {
   flex: 1;
-  min-height: 0;
+  min-height: 72px;
   overflow: auto;
   outline: none;
   position: relative;
@@ -1173,7 +1174,6 @@
 
 .pr__lane {
   flex: none;
-  height: 96px;
   display: flex;
   border-top: 1px solid #1a1a1a;
 }

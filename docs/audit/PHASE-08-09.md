@@ -97,6 +97,7 @@ Meters follow the real channel — **met**; the simulated-meter path was removed
 | `npm run check` (versions, typecheck, ESLint, Vitest 42 tests, production build) | pass |
 | `npm run tauri -- build --debug --no-bundle -- --locked` | pass (`x86_64-pc-windows-msvc`, debug) |
 | `node --test e2e/app.e2e.mjs` (tauri-driver + msedgedriver, real binary) | **15/15 pass** (2 new: pencil drawing, bus routing + meters) |
+| Same suite against the release binary packaged in the installers (`target/x86_64-pc-windows-msvc/release`) | 15/15 pass after fixing the piano-roll note area on short panels (it was 16 px tall with a 140 px bottom panel) |
 | `cargo test -p elyvon-audio --features device --test hardware_probe -- --ignored` | devices listed above |
 | `cargo deny`, `npm audit`, `actionlint` | **not run** (cargo-deny/actionlint not installed here) |
 
