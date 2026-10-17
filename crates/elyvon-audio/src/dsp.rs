@@ -288,7 +288,7 @@ enum Fade {
     Out,
 }
 
-//// A prepared insert processor.
+/// A prepared insert processor.
 #[derive(Debug, Clone)]
 pub struct Insert {
     pub id: elyvon_project::mixer::InsertId,
@@ -469,12 +469,19 @@ impl Insert {
     /// Processes with per-frame automated trim gain (dB) and/or bypass
     /// amount (0 processed … 1 dry), so the result does not depend on how
     /// a span is split. Real-time safe.
-    pub fn process_levels(&mut self, buf: &mut [f32], trim_db: Option<&[f32]>, bypass: Option<&[f32]>) {
+    pub fn process_levels(
+        &mut self,
+        buf: &mut [f32],
+        trim_db: Option<&[f32]>,
+        bypass: Option<&[f32]>,
+    ) {
         if trim_db.is_none() && bypass.is_none() {
             return self.process(buf);
         }
         self.fade = Fade::None;
-        let at = |s: Option<&[f32]>, i: usize, default: f32| s.and_then(|s| s.get(i)).copied().unwrap_or(default);
+        let at = |s: Option<&[f32]>, i: usize, default: f32| {
+            s.and_then(|s| s.get(i)).copied().unwrap_or(default)
+        };
         let static_amount = self.amount_target;
         if let Kind::Limiter(l) = &mut self.kind {
             for (i, f) in buf.as_chunks_mut::<2>().0.iter_mut().enumerate() {

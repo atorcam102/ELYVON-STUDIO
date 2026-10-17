@@ -45,6 +45,18 @@ import {
   setSelectedRegionsMuted,
   splitSelectedAtPlayhead,
 } from "../project/regionActions";
+import {
+  bounceSelected,
+  crossfadeWithNext,
+  glueSelected,
+  markersAtTransients,
+  normalizeSelected,
+  reverseSelected,
+  rippleDeleteSelected,
+  setFadeCurve,
+  sliceAtTransients,
+  splitMarquee,
+} from "../project/editingActions";
 import { AddTrackButton } from "../tracks/AddTrackMenu";
 import { TrackHeader } from "../tracks/TrackHeader";
 import { ArrangementMenus } from "./ArrangementMenus";
@@ -72,6 +84,17 @@ interface TrimDrag {
   start: number;
   end: number;
   moved: boolean;
+}
+
+interface SlipDrag {
+  region: Region;
+  startX: number;
+  dTicks: number;
+}
+
+interface MarqueeDrag {
+  startTick: number;
+  startRow: number;
 }
 
 interface TrackDrag {
@@ -146,6 +169,35 @@ function EmptyProject() {
   );
 }
 
+function MarqueeView({
+  marquee,
+  rows,
+  pxPerQuarter,
+  onMenu,
+}: {
+  marquee: { start: number; end: number };
+  rows: number[];
+  pxPerQuarter: number;
+  onMenu: (at: { x: number; y: number }) => void;
+}) {
+  if (!rows.length) return null;
+  const top = Math.min(...rows) * TRACK_HEIGHT;
+  const height = (Math.max(...rows) + 1) * TRACK_HEIGHT - top;
+  return (
+    <div
+      className="marquee"
+      data-testid="marquee"
+      style={{ left: ticksToPx(marquee.start, pxPerQuarter), width: ticksToPx(marquee.end - marquee.start, pxPerQuarter), top, height }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onMenu({ x: e.clientX, y: e.clientY });
+      }}
+    />
+  );
+}
+
 export function Timeline() {
   const project = useProject((s) => s.view?.project);
   const demo = useProject((s) => s.view?.origin === "demo");
@@ -165,6 +217,11 @@ export function Timeline() {
   const vp = useViewport(scrollRef);
   const [regionDrag, setRegionDrag] = useState<RegionDrag | null>(null);
   const [trimDrag, setTrimDrag] = useState<TrimDrag | null>(null);
+  const [slipDrag, setSlipDrag] = useState<SlipDrag | null>(null);
+  const [marqueeDrag, setMarqueeDrag] = useState<MarqueeDrag | null>(null);
+  const tool = useUi((s) => s.tool);
+  const ripple = useUi((s) => s.ripple);
+  const marquee = useUi((s) => s.marquee);
   const [trackDrag, setTrackDrag] = useState<TrackDrag | null>(null);
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; entries: MenuEntry[] } | null>(null);
   const [dropRow, setDropRow] = useState<number | null>(null);
@@ -290,6 +347,12 @@ export function Timeline() {
     (e: ReactPointerEvent<HTMLDivElement>, region: Region) => {
       if (e.button !== 0 || !project) return;
       e.stopPropagation();
+      // Ctrl/Cmd+Alt drag slips the audio inside the region.
+      if (hasPrimaryModifier(e) && e.altKey && region.content.type === "audio") {
+        selectRegion(region, false);
+        setSlipDrag({ region, startX: e.clientX, dTicks: 0 });
+        return;
+      }
       const ids = selectRegion(region, e.shiftKey || hasPrimaryModifier(e));
       if (!ids.includes(region.id)) return;
       setRegionDrag({ ids, primary: region, startX: e.clientX, startY: e.clientY, moved: false, dTicks: 0, dTracks: 0, valid: true });
@@ -317,6 +380,7 @@ export function Timeline() {
         { heading: ids.length > 1 ? `${ids.length} regions` : region.name },
         { id: "split", label: "Split at playhead", icon: "split", onSelect: () => void splitSelectedAtPlayhead() },
         { id: "dup", label: "Duplicate", icon: "duplicate", onSelect: () => void duplicateSelectedRegions() },
+        { id: "glue", label: "Glue", shortcut: "Ctrl+J", disabled: ids.length < 2, onSelect: () => void glueSelected() },
         "separator",
         { id: "cut", label: "Cut", onSelect: () => void cutSelectedRegions() },
         { id: "copy", label: "Copy", onSelect: () => void copySelectedRegions() },
@@ -333,7 +397,21 @@ export function Timeline() {
             void apply({ type: "setAudioRegion", id: region.id, gainDb: audio.gainDb, fadeIn: audio.fadeIn, fadeOut: audio.fadeOut, looped: !audio.looped }),
         });
       }
-      entries.push("separator", {
+      if (audio) {
+        entries.push(
+          "separator",
+          { id: "reverse", label: audio.reversed ? "Play forwards" : "Reverse", onSelect: () => void reverseSelected() },
+          { id: "normalize", label: "Normalize to −1 dBFS", onSelect: () => void normalizeSelected(-1) },
+          { id: "xfade", label: "Crossfade with next region (20 ms)", onSelect: () => void crossfadeWithNext(20) },
+          { id: "fadeEp", label: `Fade shape: equal power${audio.fadeCurve === "equalPower" ? " ✓" : ""}`, onSelect: () => void setFadeCurve("equalPower") },
+          { id: "fadeLin", label: `Fade shape: linear${audio.fadeCurve === "linear" ? " ✓" : ""}`, onSelect: () => void setFadeCurve("linear") },
+          { id: "fadeS", label: `Fade shape: S-curve${audio.fadeCurve === "sCurve" ? " ✓" : ""}`, onSelect: () => void setFadeCurve("sCurve") },
+          { id: "slice", label: "Slice at transients", onSelect: () => void sliceAtTransients(0.5) },
+          { id: "markers", label: "Add markers at transients", onSelect: () => void markersAtTransients(0.5) },
+          { id: "bounce", label: "Bounce in place", onSelect: () => void bounceSelected(false) },
+        );
+      }
+      entries.push("separator", { id: "ripple", label: "Ripple delete", onSelect: () => void rippleDeleteSelected() }, {
         id: "delete",
         label: "Delete",
         icon: "trash",
@@ -348,10 +426,30 @@ export function Timeline() {
   // Pointer moves/ups for drags are tracked on window so they keep working
   // when the pointer leaves the element that captured it.
   useEffect(() => {
-    if (!regionDrag && !trackDrag && !trimDrag) return;
+    if (!regionDrag && !trackDrag && !trimDrag && !slipDrag && !marqueeDrag) return;
     const onMove = (e: PointerEvent) => {
       if (!project) return;
       const zoom = useUi.getState().pxPerQuarter;
+      if (slipDrag) {
+        setSlipDrag({ ...slipDrag, dTicks: Math.round(pxToTicks(e.clientX - slipDrag.startX, zoom)) });
+        return;
+      }
+      if (marqueeDrag) {
+        const lanes = lanesRef.current;
+        if (!lanes) return;
+        const rect = lanes.getBoundingClientRect();
+        const tick = Math.max(0, pxToTicks(e.clientX - rect.left, zoom));
+        const row = Math.max(0, Math.min(project.tracks.length - 1, Math.floor((e.clientY - rect.top) / TRACK_HEIGHT)));
+        const [r0, r1] = [Math.min(row, marqueeDrag.startRow), Math.max(row, marqueeDrag.startRow)];
+        const a = e.altKey ? Math.round(marqueeDrag.startTick) : snap(marqueeDrag.startTick);
+        const b = e.altKey ? Math.round(tick) : snap(tick);
+        useUi.getState().setMarquee({
+          trackIds: project.tracks.slice(r0, r1 + 1).map((t) => t.id),
+          start: Math.min(a, b),
+          end: Math.max(a, b),
+        });
+        return;
+      }
       if (trimDrag) {
         const dx = e.clientX - trimDrag.startX;
         if (!trimDrag.moved && Math.abs(dx) < 3) return;
@@ -382,6 +480,15 @@ export function Timeline() {
       }
     };
     const onUp = () => {
+      if (slipDrag && slipDrag.dTicks !== 0) {
+        void apply({ type: "slipRegions", ids: [slipDrag.region.id], deltaTicks: slipDrag.dTicks });
+      }
+      if (marqueeDrag) {
+        const m = useUi.getState().marquee;
+        if (m && m.end - m.start < 1) useUi.getState().setMarquee(null);
+      }
+      setSlipDrag(null);
+      setMarqueeDrag(null);
       if (trimDrag?.moved) {
         const r = trimDrag.region;
         if (trimDrag.start !== r.start || trimDrag.end !== r.start + r.length) {
@@ -413,7 +520,7 @@ export function Timeline() {
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [regionDrag, trackDrag, trimDrag, project, regionIndex, apply, snap]);
+  }, [regionDrag, trackDrag, trimDrag, slipDrag, marqueeDrag, project, regionIndex, apply, snap]);
 
   if (!project || !map) return <div className="timeline" />;
 
@@ -471,6 +578,13 @@ export function Timeline() {
     if (e.button !== 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const row = Math.floor((e.clientY - rect.top) / TRACK_HEIGHT);
+    if (tool === "marquee" && project.tracks[row]) {
+      const tick = Math.max(0, pxToTicks(e.clientX - rect.left, pxPerQuarter));
+      useUi.getState().setMarquee(null);
+      setMarqueeDrag({ startTick: tick, startRow: row });
+      return;
+    }
+    useUi.getState().setMarquee(null);
     const track = project.tracks[row];
     const ui = useUi.getState();
     if (track) {
@@ -505,6 +619,35 @@ export function Timeline() {
     <section className="timeline" aria-label="Arrangement">
       <div className="timeline__toolbar">
         <ArrangementMenus />
+        <div className="segmented timeline__tools" role="group" aria-label="Arrangement tool">
+          <button
+            type="button"
+            className={tool === "pointer" ? "is-on" : ""}
+            aria-pressed={tool === "pointer"}
+            title="Pointer: select, move and trim regions. Ctrl+Alt-drag slips the audio inside a region."
+            onClick={() => useUi.getState().setTool("pointer")}
+          >
+            Pointer
+          </button>
+          <button
+            type="button"
+            className={tool === "marquee" ? "is-on" : ""}
+            aria-pressed={tool === "marquee"}
+            title="Marquee: drag a time range over tracks, then right-click to split, delete or ripple-delete it"
+            onClick={() => useUi.getState().setTool("marquee")}
+          >
+            Marquee
+          </button>
+        </div>
+        <button
+          type="button"
+          className={`pr__btn timeline__ripple${ripple ? " is-on" : ""}`}
+          aria-pressed={ripple}
+          title="Ripple: deleting regions or ranges closes the gap on their tracks"
+          onClick={() => useUi.getState().setRipple(!ripple)}
+        >
+          Ripple {ripple ? "on" : "off"}
+        </button>
         <div className="timeline__toolbar-right">
           <label className="hint" title="Snap grid for moving, trimming and the cursor. Hold Alt while dragging for no snapping.">
             Snap{" "}
@@ -654,6 +797,46 @@ export function Timeline() {
               {project.markers.map((m) => (
                 <div key={m.id} className="marker-line" style={{ left: ticksToPx(m.tick, pxPerQuarter) }} />
               ))}
+              {marquee && (
+                <MarqueeView
+                  marquee={marquee}
+                  rows={marquee.trackIds.map((id) => project.tracks.findIndex((t) => t.id === id)).filter((i) => i >= 0)}
+                  pxPerQuarter={pxPerQuarter}
+                  onMenu={(at) =>
+                    setMenu({
+                      at,
+                      entries: [
+                        { heading: `Range ${map.formatPosition(marquee.start)} – ${map.formatPosition(marquee.end)}` },
+                        { id: "split", label: "Split at range (select inside)", onSelect: () => void splitMarquee() },
+                        {
+                          id: "del",
+                          label: "Delete range",
+                          onSelect: () =>
+                            void apply({ type: "cutRange", trackIds: marquee.trackIds, start: marquee.start, end: marquee.end, ripple: false }).then(() =>
+                              useUi.getState().setMarquee(null),
+                            ),
+                        },
+                        {
+                          id: "ripple",
+                          label: "Ripple delete range",
+                          onSelect: () =>
+                            void apply({ type: "cutRange", trackIds: marquee.trackIds, start: marquee.start, end: marquee.end, ripple: true }).then(() =>
+                              useUi.getState().setMarquee(null),
+                            ),
+                        },
+                      ],
+                    })
+                  }
+                />
+              )}
+              {slipDrag && (
+                <div
+                  className="slip-badge"
+                  style={{ left: ticksToPx(slipDrag.region.start, pxPerQuarter), top: (regionIndex.get(slipDrag.region.id) ?? 0) * TRACK_HEIGHT }}
+                >
+                  {`Slip ${slipDrag.dTicks >= 0 ? "+" : "−"}${Math.abs(map.secondsAt(slipDrag.region.start + slipDrag.dTicks) - map.secondsAt(slipDrag.region.start)).toFixed(3)} s`}
+                </div>
+              )}
               <div
                 className={`cursor-line${rolling ? " is-playing" : ""}`}
                 style={{ transform: `translateX(${ticksToPx(playhead, pxPerQuarter)}px)` }}

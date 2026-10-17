@@ -7,7 +7,8 @@
 // exercised through the same IPC commands the dialogs feed into.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -47,6 +48,19 @@ function sineWav(rate, seconds, freq) {
   return buf;
 }
 
+/** Interleaved samples of a 32-bit float WAV (render export). */
+function readFloatWav(path) {
+  const b = readFileSync(path);
+  let p = 12;
+  while (p + 8 <= b.length) {
+    const id = b.toString("ascii", p, p + 4);
+    const n = b.readUInt32LE(p + 4);
+    if (id === "data") return new Float32Array(b.buffer.slice(b.byteOffset + p + 8, b.byteOffset + p + 8 + n));
+    p += 8 + n + (n % 2);
+  }
+  throw new Error("no data chunk in " + path);
+}
+
 describe("Elyvon Studio", { timeout: 120_000 }, () => {
   before(async () => {
     d = await Driver.start({ application: app });
@@ -84,7 +98,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     const view = await d.invoke("project_get");
     assert.equal(view.ok.dirty, false);
     const contracts = await d.invoke("app_contracts");
-    assert.deepEqual(contracts.ok, { ipc: 2, project: 4, audio: 1, jobs: 1 });
+    assert.deepEqual(contracts.ok, { ipc: 2, project: 5, audio: 1, jobs: 1 });
     await shot("01-empty");
   });
 
@@ -136,7 +150,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.ok(saved.ok.path.endsWith("session.elyvon"));
     const file = JSON.parse(readFileSync(saved.ok.path, "utf8"));
     assert.equal(file.format, "elyvon-studio-project");
-    assert.equal(file.schemaVersion, 4);
+    assert.equal(file.schemaVersion, 5);
     assert.equal(file.project.tracks[0].name, "Keys");
 
     const fresh = await d.invoke("project_new", { discardChanges: false });
@@ -409,6 +423,183 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.ok((await d.invoke("project_save", { path: file })).ok);
     const reopened = await d.invoke("project_open", { path: file, discardChanges: false });
     assert.deepEqual(reopened.ok.project.tracks[0].strip.output, { type: "aux", id: auxId }, "routing is preserved on reopen");
+  });
+
+  it("writes automation from the mixer fader in Touch mode and undoes it as one step", async () => {
+    await d.invoke("project_new", { discardChanges: true });
+    await d.exec("location.reload()");
+    await d.find(".controlbar", { timeout: 10_000 });
+    const wav = join(work, "lead.wav");
+    writeFileSync(wav, sineWav(48_000, 8, 440));
+    const imported = await d.invoke("media_import", { paths: [wav], trackId: null, start: 0, layout: "newTracks" });
+    assert.ok(imported.ok, JSON.stringify(imported.err));
+    const track = imported.ok.view.project.tracks[0];
+    const channel = { type: "track", id: track.id };
+    // Commands sent straight over IPC do not refresh the UI mirror.
+    await d.exec("location.reload()");
+    await d.find(".region--audio", { timeout: 10_000 });
+    const vol = { channel, param: { type: "volume" } };
+    const lane = async () => (await d.invoke("project_get")).ok.project.tracks[0].automation.lanes.find((l) => l.param.type === "volume");
+    // Read mode: a lane at −96 dB silences the render; Off ignores it.
+    assert.ok((await d.invoke("project_apply", { command: { type: "addAutomationPoints", target: vol, points: [{ tick: 0, value: -96 }] } })).ok);
+    const silent = await d.invoke("project_render", { path: join(work, "auto-silent.wav"), startTick: 0, endTick: 3840, metronome: false });
+    assert.ok(silent.ok, JSON.stringify(silent.err));
+    assert.ok(silent.ok.peak[0] < 1e-4, "the lane silences the track: " + silent.ok.peak[0]);
+    assert.ok((await d.invoke("project_apply", { command: { type: "setAutomationMode", channel, mode: "off" } })).ok);
+    const off = await d.invoke("project_render", { path: join(work, "auto-off.wav"), startTick: 0, endTick: 3840, metronome: false });
+    assert.ok(off.ok.peak[0] > 0.3, "Off plays the static fader");
+
+    // The lane editor adds a point where it is clicked; undo removes it.
+    await d.clickCss('.bottom-panel [role=tab][title="Automation"]');
+    const canvas = await d.find("[data-testid=automation-editor] canvas", { timeout: 5000 });
+    await d.click(canvas);
+    await d.waitFor(async () => (await lane())?.points.length === 2, { message: "point added from the canvas" });
+    await shot("12-automation-lane");
+    await d.clickCss('[aria-label^="Undo"]');
+    await d.waitFor(async () => (await lane())?.points.length === 1, { message: "undo removes the point" });
+
+    // Touch: dragging the fader while playing writes automation, not the fader.
+    assert.ok((await d.invoke("project_apply", { command: { type: "removeAutomationLane", target: vol } })).ok);
+    assert.ok((await d.invoke("project_apply", { command: { type: "setAutomationMode", channel, mode: "touch" } })).ok);
+    await d.exec("location.reload()");
+    await d.find(".region--audio", { timeout: 10_000 });
+    await d.clickCss('.bottom-panel [role=tab][title="Mixer"]');
+    assert.equal(await d.exec("return document.querySelector('.strip__auto').value"), "touch", "the strip shows the mode");
+    await d.invoke("transport_command", { command: { type: "locate", tick: 0 } });
+    await d.invoke("transport_command", { command: { type: "play", fromTick: 0, countIn: false, preRoll: false } });
+    await d.waitFor(async () => {
+      const s = (await d.invoke("transport_state")).ok;
+      return s && s.state === "playing" && s.seconds > 0.5;
+    }, { message: "playing", timeout: 10_000 });
+    const faderCss = '.fader[aria-label="' + track.name + ' volume"]';
+    await d.exec("document.querySelector(arguments[0]).scrollIntoView({ block: 'center' })", [faderCss]);
+    const fader = await d.find(faderCss);
+    await d.drag(fader, 0, -40, 12);
+    await new Promise((r) => setTimeout(r, 700));
+    await d.invoke("transport_command", { command: { type: "stop" } });
+    const written = await d.waitFor(async () => {
+      const v = (await d.invoke("project_get")).ok;
+      return v.undoLabel === "Write Automation" ? v : null;
+    }, { message: "written automation becomes one undo step", timeout: 10_000 });
+    const t = written.project.tracks[0];
+    assert.equal(t.volumeDb, 0, "the static fader is unchanged in Touch mode");
+    const w = t.automation.lanes.find((l) => l.param.type === "volume");
+    assert.ok(w && w.points.length >= 2, "points written: " + JSON.stringify(w));
+    assert.ok(w.points.some((p) => p.value > 0.5), "the fader moved up while playing: " + JSON.stringify(w.points));
+    assert.deepEqual(t.regions.map((r) => r.automation), [[]], "region lanes untouched");
+    await d.clickCss('[aria-label^="Undo"]');
+    await d.waitFor(async () => !(await lane()), { message: "undo removes the written lane" });
+  });
+
+  it("comps three takes in the takes editor, exports them exactly and repairs moved media", async () => {
+    await d.invoke("project_new", { discardChanges: true });
+    await d.exec("location.reload()");
+    await d.find(".controlbar", { timeout: 10_000 });
+    const freqs = [220, 330, 495];
+    const files = freqs.map((f, i) => {
+      const p = join(work, "take" + (i + 1) + ".wav");
+      writeFileSync(p, sineWav(48_000, 2, f));
+      return p;
+    });
+    // Measure the files with the importer, then commit them as one cycle
+    // recording (the edit the recorder issues after three passes).
+    const imported = await d.invoke("media_import", { paths: files, trackId: null, start: 0, layout: "newTracks" });
+    assert.ok(imported.ok, JSON.stringify(imported.err));
+    const p0 = imported.ok.view.project;
+    const track = p0.tracks[0];
+    const assets = p0.media.map((m) => ({ ...m, id: randomUUID(), name: m.name.replace(".wav", "") }));
+    const commit = await d.invoke("project_apply", {
+      command: {
+        type: "batch",
+        commands: [
+          { type: "removeTracks", ids: p0.tracks.slice(1).map((t) => t.id) },
+          { type: "removeRegions", ids: [track.regions[0].id] },
+          { type: "removeUnusedMedia" },
+          { type: "importTakes", assets, placements: assets.map((a) => ({ mediaId: a.id, track: { type: "existing", id: track.id }, start: 0 })), recordedAt: 1 },
+        ],
+      },
+    });
+    assert.ok(commit.ok, JSON.stringify(commit.err));
+    const takes = commit.ok.view.project.tracks[0].regions;
+    assert.equal(takes.length, 3);
+    const folder = takes[0].capture.folder;
+    await d.exec("location.reload()");
+    await d.find(".region--audio", { timeout: 10_000 });
+
+    // Select a take (the three overlap; the last one is on top) and comp
+    // with the mouse in the takes editor.
+    const regions = await d.findAll(".region--audio");
+    await d.drag(regions[regions.length - 1], 0, 0, 1);
+    await d.clickCss('.bottom-panel [role=tab][title="Takes & Audio"]');
+    await d.find("[data-testid=takes-editor]", { timeout: 5000 });
+    assert.equal(await d.count("[data-testid^=take-]"), 3);
+    await d.find('[data-testid="take-1"] [data-testid="waveform"][data-state="ready"]', { timeout: 15_000 });
+    const lane1 = await d.find('[data-testid="take-1"]');
+    await d.drag(lane1, 160, 0, 10);
+    const comped = await d.waitFor(async () => {
+      const t = (await d.invoke("project_get")).ok.project.tracks[0];
+      return t.comps.length && t.comps[0].segments.some((s) => s.take === 1) ? t : null;
+    }, { message: "dragging across take 1 comps it in", timeout: 5000 });
+    assert.ok(comped.regions.every((r) => r.muted), "takes are kept and muted");
+    await shot("13-takes-comp");
+
+    // Exact thirds from takes 1, 2 and 3, then verify the exported samples.
+    for (const [take, start, end] of [[1, 0, 1280], [2, 1280, 2560], [3, 2560, 3840]]) {
+      const r = await d.invoke("project_apply", { command: { type: "compTake", trackId: track.id, folder, take, start, end } });
+      assert.ok(r.ok, JSON.stringify(r.err));
+    }
+    const out = join(work, "comp.wav");
+    const rep = await d.invoke("project_render", { path: out, startTick: 0, endTick: 3840, metronome: false });
+    assert.ok(rep.ok, JSON.stringify(rep.err));
+    const rate = rep.ok.sampleRate;
+    const left = readFloatWav(out).filter((_, i) => i % 2 === 0);
+    for (const [take, seconds] of [[0, 0.33], [1, 1.0], [2, 1.66]]) {
+      for (let k = 0; k < 40; k++) {
+        const f = Math.round(seconds * rate) + k * 7;
+        const expected = 0.5 * Math.SQRT1_2 * Math.sin((2 * Math.PI * freqs[take] * f) / rate);
+        assert.ok(Math.abs(left[f] - expected) < 0.01, "take " + (take + 1) + " at frame " + f + ": " + left[f] + " vs " + expected);
+      }
+    }
+    // Flatten keeps the takes and is reversible.
+    const flat = await d.invoke("project_apply", { command: { type: "flattenComp", trackId: track.id, folder } });
+    assert.equal(flat.ok.view.project.tracks[0].regions.length, 6);
+    const unflat = await d.invoke("project_apply", { command: { type: "unflattenComp", trackId: track.id, folder } });
+    assert.equal(unflat.ok.view.project.tracks[0].regions.length, 3);
+
+    // Normalise (region gain) and freeze (rendered file, inserts locked).
+    const norm = await d.invoke("region_normalize", { ids: takes.map((r) => r.id), targetDb: -1 });
+    assert.ok(norm.ok, JSON.stringify(norm.err));
+    assert.ok(norm.ok.view.project.tracks[0].regions.every((r) => Math.abs(r.content.gainDb - 5.02) < 0.05));
+    const frozen = await d.invoke("track_freeze", { id: track.id });
+    assert.ok(frozen.ok, JSON.stringify(frozen.err));
+    assert.ok(frozen.ok.view.project.tracks[0].freeze);
+    assert.deepEqual((await d.invoke("mixer_status")).ok.staleFreezes, []);
+    const refused = await d.invoke("project_apply", { command: { type: "compTake", trackId: track.id, folder, take: 2, start: 0, end: 100 } });
+    assert.equal(refused.err.code, "invalidEdit", "frozen material cannot be edited");
+    assert.ok((await d.invoke("project_apply", { command: { type: "unfreezeTrack", id: track.id } })).ok);
+
+    // Save, move a take away, repair it by content, collect media, reopen.
+    const dir = join(work, "comp-song");
+    mkdirSync(dir, { recursive: true });
+    const song = join(dir, "song.elyvon");
+    assert.ok((await d.invoke("project_save", { path: song })).ok);
+    const moved = join(work, "moved");
+    mkdirSync(moved, { recursive: true });
+    renameSync(files[1], join(moved, "take2.wav"));
+    await d.invoke("media_rescan");
+    const repair = await d.invoke("media_repair", { directory: moved });
+    assert.ok(repair.ok, JSON.stringify(repair.err));
+    assert.equal(repair.ok.report.relinked.length, 1);
+    const collected = await d.invoke("media_collect");
+    assert.ok(collected.ok, JSON.stringify(collected.err));
+    assert.ok(collected.ok.project.media.every((m) => m.path.startsWith("Media/")), JSON.stringify(collected.ok.project.media.map((m) => m.path)));
+    assert.ok((await d.invoke("project_save", { path: null })).ok);
+    const cancelled = await d.invoke("media_backup_unused", { confirm: false });
+    assert.equal(cancelled.err.code, "cancelled", "destructive clean-up needs confirmation");
+    const reopened = await d.invoke("project_open", { path: song, discardChanges: false });
+    assert.ok(reopened.ok, JSON.stringify(reopened.err));
+    assert.equal(reopened.ok.project.tracks[0].comps[0].segments.length, 3);
+    assert.deepEqual(readFileSync(join(moved, "take2.wav")), sineWav(48_000, 2, 330), "sources never modified");
   });
 
   it("explains why updates are unavailable instead of pretending", async () => {

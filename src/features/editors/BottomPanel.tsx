@@ -2,13 +2,14 @@ import { IconButton } from "../../components/Button";
 import { useUi, type BottomTab } from "../../state/ui";
 import { Mixer } from "../mixer/Mixer";
 import { AutomationEditor } from "./AutomationEditor";
-import { AudioEditor, PianoRoll } from "./PianoRoll";
+import { PianoRoll } from "./PianoRoll";
+import { AudioEditor } from "./TakesEditor";
 
 const TABS: { id: BottomTab; label: string; note?: string }[] = [
   { id: "mixer", label: "Mixer" },
   { id: "pianoRoll", label: "Piano Roll" },
   { id: "automation", label: "Automation" },
-  { id: "audioEditor", label: "Audio Editor", note: "Phase 2" },
+  { id: "audioEditor", label: "Takes & Audio" },
 ];
 
 export function BottomPanel() {

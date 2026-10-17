@@ -7,6 +7,18 @@ section of each version into the GitHub release and into the update dialog.
 
 ## [Unreleased]
 
+### Added
+
+- Mix automation: lanes for volume, pan, mute, send levels and insert parameters on tracks, aux channels, the master and regions; Off/Read/Touch/Latch/Write modes; linear, step and Bézier curves; an Automation editor (draw, move, copy, duplicate, curve per point, simplify); mixer faders, pan, mute and sends record automation while playing. Playback is sample-accurate and identical to export.
+- Takes and comping: drag across takes in the new Takes & Audio editor; crossfades centred on each boundary; flatten and unflatten without touching the takes.
+- Non-destructive editing: reverse, fade shapes (equal power, linear, S-curve), editable crossfades, slip, ripple delete, marquee split/delete, glue, slices and markers at transients, normalise, phase-locked group edits, bounce in place and track freeze.
+- Project media dialog: find moved files by content, rescan, collect media into the project folder, remove unused pool entries and move unused project files to a backup folder after confirmation.
+
+### Changed
+
+- Project schema 5 (schema 1–4 files migrate on open without being rewritten).
+- The undo history also has a memory budget, so very large projects keep fewer steps instead of exhausting memory.
+
 ## [0.3.0] - 2026-10-16
 
 ### Added

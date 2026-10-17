@@ -24,6 +24,9 @@ pub struct MixerStatus {
     pub sample_rate: u32,
     /// Plug-in delay compensated on the longest path, in frames.
     pub latency_frames: u32,
+    /// Frozen tracks whose freeze no longer matches their material (they
+    /// play live until refrozen).
+    pub stale_freezes: Vec<TrackId>,
 }
 
 /// Plays a note on the track's built-in instrument (instrument tracks) or
@@ -54,10 +57,21 @@ pub async fn mixer_reset_clips(app: AppHandle) -> IpcResult<()> {
 
 #[tauri::command]
 pub async fn mixer_status(app: AppHandle) -> IpcResult<MixerStatus> {
-    let audio = &app.state::<AppState>().audio;
+    let state = app.state::<AppState>();
+    let stale_freezes = {
+        let s = state.session();
+        let p = s.project();
+        p.tracks
+            .iter()
+            .filter(|t| t.freeze.is_some() && !elyvon_project::comp::freeze_is_current(p, t))
+            .map(|t| t.id)
+            .collect()
+    };
+    let audio = &state.audio;
     Ok(MixerStatus {
         sample_rate: audio.rate(),
         latency_frames: u32::try_from(audio.latency_frames()).unwrap_or(u32::MAX),
+        stale_freezes,
     })
 }
 

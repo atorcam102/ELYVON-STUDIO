@@ -25,7 +25,10 @@ fn tempo_map(project: &Project) -> Result<TempoMap, EditError> {
 
 /// Source sample rate and length of a media file, falling back to the project
 /// rate when the file was never measured (schema-1 migrations).
-pub(crate) fn source_rate_and_frames(project: &Project, media: Option<MediaId>) -> (u32, Option<u64>) {
+pub(crate) fn source_rate_and_frames(
+    project: &Project,
+    media: Option<MediaId>,
+) -> (u32, Option<u64>) {
     match media
         .and_then(|id| project.media_asset(id))
         .and_then(|a| a.info.as_ref())
@@ -227,7 +230,12 @@ fn split_lanes(
     for lane in lanes {
         let mut l = crate::automation::AutomationLane {
             param: lane.param,
-            points: lane.points.iter().filter(|p| p.tick <= rel).copied().collect(),
+            points: lane
+                .points
+                .iter()
+                .filter(|p| p.tick <= rel)
+                .copied()
+                .collect(),
         };
         let mut r = crate::automation::AutomationLane {
             param: lane.param,

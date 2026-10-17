@@ -82,7 +82,11 @@ impl Piece {
                         if db <= lo { 0.0 } else { 10f64.powf(db / 20.0) }
                     };
                     let g = to_gain(v) + (to_gain(self.next) - to_gain(v)) * w;
-                    let db = if g <= 10f64.powf(lo / 20.0) { lo } else { 20.0 * g.log10() };
+                    let db = if g <= 10f64.powf(lo / 20.0) {
+                        lo
+                    } else {
+                        20.0 * g.log10()
+                    };
                     ((db - lo) / (hi - lo)).clamp(0.0, 1.0)
                 }
                 None => v + (self.next - v) * w,
@@ -221,7 +225,11 @@ impl Envelope {
                 i += 1;
             }
             let p = &self.pieces[i];
-            *o = if t < p.start { p.v0 } else { p.value(t, self.gain) } as f32;
+            *o = if t < p.start {
+                p.v0
+            } else {
+                p.value(t, self.gain)
+            } as f32;
         }
     }
 
@@ -314,7 +322,13 @@ pub struct Slot {
 }
 
 impl Slot {
-    pub fn new(target: Target, param: AutomationParam, env: Option<Envelope>, static_value: f64, chunk: usize) -> Self {
+    pub fn new(
+        target: Target,
+        param: AutomationParam,
+        env: Option<Envelope>,
+        static_value: f64,
+        chunk: usize,
+    ) -> Self {
         let spec = param.spec();
         Self {
             target,
@@ -470,7 +484,9 @@ impl StripAuto {
     }
 
     pub fn has_insert_slots(&self) -> bool {
-        self.slots.iter().any(|s| matches!(s.target, Target::Insert(..)) && s.is_dynamic())
+        self.slots
+            .iter()
+            .any(|s| matches!(s.target, Target::Insert(..)) && s.is_dynamic())
     }
 
     /// Renders every slot for the span.
@@ -545,10 +561,17 @@ mod tests {
         let l = lane(&[(0, -1.0, Curve::Step), (960, 1.0, Curve::Linear)]);
         let env = Envelope::compile(&lane_pieces(&l, 0.0).unwrap(), &map, 48_000);
         assert_eq!(env.value(23_000), 0.0);
-        assert_eq!(env.value(24_000), 1.0, "the point's frame has the point's value");
+        assert_eq!(
+            env.value(24_000),
+            1.0,
+            "the point's frame has the point's value"
+        );
         let mut buf = vec![0.0f32; 200];
         env.fill(23_850, &mut buf);
-        let max_step = buf.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
+        let max_step = buf
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0, f32::max);
         assert!(max_step < 0.011, "de-clicked over 96 frames: {max_step}");
         // fill and value agree.
         for (k, v) in buf.iter().enumerate() {

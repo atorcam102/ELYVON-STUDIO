@@ -55,13 +55,25 @@ fn moved_files_are_found_by_fingerprint_and_lookalikes_are_refused() {
     std::fs::create_dir_all(&moved).unwrap();
     std::fs::rename(&a, moved.join("kick.wav")).unwrap();
     std::fs::remove_file(&b).unwrap();
-    write_wav(&moved.join("snare.wav"), &[sine(201.0, 0.5, 48_000, 4800)], 48_000, 16);
+    write_wav(
+        &moved.join("snare.wav"),
+        &[sine(201.0, 0.5, 48_000, 4800)],
+        48_000,
+        16,
+    );
     assert_eq!(repair::missing_media(s.project(), None).len(), 2);
     let report = repair::find_missing(s.project(), None, &root.path().join("library"), 10_000);
     assert_eq!(report.relinked.len(), 1);
     assert_eq!(report.relinked[0].id, ka);
-    assert_eq!(report.not_found, vec![kb], "same name, different content is not relinked");
-    s.apply(&EditCommand::RelinkMediaFiles { items: report.relinked }).unwrap();
+    assert_eq!(
+        report.not_found,
+        vec![kb],
+        "same name, different content is not relinked"
+    );
+    s.apply(&EditCommand::RelinkMediaFiles {
+        items: report.relinked,
+    })
+    .unwrap();
     assert_eq!(repair::missing_media(s.project(), None), vec![kb]);
     assert!(s.undo());
     assert_eq!(repair::missing_media(s.project(), None).len(), 2);
@@ -84,8 +96,12 @@ fn collect_media_makes_the_project_folder_portable_without_touching_sources() {
     let relinks = repair::collect(s.project(), &project_dir).unwrap();
     assert_eq!(relinks.len(), 1);
     assert_eq!(relinks[0].path, "Media/vox (2).wav");
-    assert_eq!(std::fs::read(project_dir.join("Media").join("vox.wav")).unwrap(), b"not this one");
-    s.apply(&EditCommand::RelinkMediaFiles { items: relinks }).unwrap();
+    assert_eq!(
+        std::fs::read(project_dir.join("Media").join("vox.wav")).unwrap(),
+        b"not this one"
+    );
+    s.apply(&EditCommand::RelinkMediaFiles { items: relinks })
+        .unwrap();
     let file = project_dir.join("Song.elyvon");
     s.save(Some(&file), "test").unwrap();
     assert_eq!(fingerprint(&src).unwrap(), before, "source untouched");
@@ -101,7 +117,11 @@ fn collect_media_makes_the_project_folder_portable_without_touching_sources() {
         assert_eq!(format!("{hash:016x}"), a.info.as_ref().unwrap().fingerprint);
     }
     // Collecting again changes nothing.
-    assert!(repair::collect(reopened.project(), &moved).unwrap().is_empty());
+    assert!(
+        repair::collect(reopened.project(), &moved)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]

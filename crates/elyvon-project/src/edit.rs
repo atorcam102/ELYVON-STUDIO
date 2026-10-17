@@ -13,8 +13,6 @@ use crate::automation::{
     self as au, AutomationMode, AutomationPoint, AutomationTarget, AutomationWrite, PointSpec,
 };
 use crate::error::EditError;
-use crate::model::FadeCurve;
-use crate::region_edit::{self as re, MediaRelink, RegionGain};
 use crate::midi_edit::{
     self as me, ControllerLane, LanePoint, NoteEdge, NoteSpec, NoteTarget, NoteTransform,
 };
@@ -22,10 +20,12 @@ use crate::mixer::{
     AuxId, ChannelRef, FolderId, GroupId, InsertId, MixGroup, PanLaw, Processor, Send, TrackFolder,
 };
 use crate::mixer_edit::{self as mx, Linked, StripPatch};
+use crate::model::FadeCurve;
 use crate::model::{
     MarkerId, MediaAsset, MediaId, MediaInfo, MetronomeSettings, MidiNote, Project, Region,
     RegionContent, RegionId, Track, TrackId, TrackKind,
 };
+use crate::region_edit::{self as re, MediaRelink, RegionGain};
 use crate::timeline_edit as tl;
 use crate::validate::{limits, validate, validate_name};
 
@@ -1279,7 +1279,9 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
         EditCommand::AddAutomationPoints { target, points } => {
             outcome.created_points = au::add_points(project, target, points)?;
         }
-        EditCommand::RemoveAutomationPoints { target, ids } => au::remove_points(project, target, ids)?,
+        EditCommand::RemoveAutomationPoints { target, ids } => {
+            au::remove_points(project, target, ids)?
+        }
         EditCommand::UpdateAutomationPoints { target, points } => {
             au::update_points(project, target, points)?
         }

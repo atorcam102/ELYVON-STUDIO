@@ -20,15 +20,15 @@ use rtrb::{Consumer, Producer, RingBuffer};
 use serde::Serialize;
 use ts_rs::TS;
 
-use crate::contracts::{MidiEvent, MidiMessage};
 use crate::automation::{ParamOverride, StripKey};
+use crate::contracts::{MidiEvent, MidiMessage};
 use crate::dsp::Smoothed;
-use elyvon_project::automation::InsertParam;
 use crate::plan::{
     ClickSounds, Dest, MASTER_SLOT, MAX_AUXES, MAX_CHANNELS, MAX_TRACKS, PlanTrack, PlaybackPlan,
     Strip,
 };
 use crate::transport::{EngineShared, PlayState, TransportCommand};
+use elyvon_project::automation::InsertParam;
 
 /// What the audio engine can currently do, as reported to the UI.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -584,7 +584,9 @@ fn run_inserts(strip: &mut Strip, buf: &mut [f32], pos: u64, advancing: bool) {
             let levels = |p: InsertParam| {
                 auto.slots
                     .iter()
-                    .find(|s| s.target == crate::automation::Target::Insert(ii, p) && s.is_dynamic())
+                    .find(|s| {
+                        s.target == crate::automation::Target::Insert(ii, p) && s.is_dynamic()
+                    })
                     .map(|s| &s.buf[k..k + n])
             };
             insert.process_levels(
@@ -609,7 +611,11 @@ fn apply_fader(strip: &mut Strip, buf: &mut [f32]) {
         for (i, f) in buf.as_chunks_mut::<2>().0.iter_mut().enumerate() {
             let g = vol.map_or(auto.static_gain, |s| {
                 let db = s.buf[i];
-                if db <= -96.0 { 0.0 } else { crate::gain::db_to_gain(f64::from(db)) as f32 }
+                if db <= -96.0 {
+                    0.0
+                } else {
+                    crate::gain::db_to_gain(f64::from(db)) as f32
+                }
             });
             let (pl, pr) = match pan {
                 Some(s) => {
@@ -647,7 +653,14 @@ fn apply_fader(strip: &mut Strip, buf: &mut [f32]) {
 }
 
 /// Routes the strip's pre- or post-fader sends.
-fn route_sends(strip: &mut Strip, buf: &[f32], bus: &mut [f32], edge: &mut [f32], chunk: usize, pre: bool) {
+fn route_sends(
+    strip: &mut Strip,
+    buf: &[f32],
+    bus: &mut [f32],
+    edge: &mut [f32],
+    chunk: usize,
+    pre: bool,
+) {
     let len = buf.len() / 2;
     for (si, send) in strip.sends.iter_mut().enumerate() {
         if send.pre_fader != pre {
@@ -656,10 +669,13 @@ fn route_sends(strip: &mut Strip, buf: &[f32], bus: &mut [f32], edge: &mut [f32]
         let start = send.aux * chunk * 2;
         let dst = &mut bus[start..start + len * 2];
         let levels = if send.automated {
-            strip
-                .auto
-                .as_ref()
-                .and_then(|a| a.sends.get(si).copied().flatten().map(|i| &a.slots[i].buf[..len]))
+            strip.auto.as_ref().and_then(|a| {
+                a.sends
+                    .get(si)
+                    .copied()
+                    .flatten()
+                    .map(|i| &a.slots[i].buf[..len])
+            })
         } else {
             None
         };
@@ -915,7 +931,11 @@ impl Engine {
                     Some(i) => Some(&mut plan.tracks[i].strip),
                     None => None,
                 },
-                StripKey::Aux(k) => plan.auxes.iter_mut().find(|a| a.strip.key == k).map(|a| &mut a.strip),
+                StripKey::Aux(k) => plan
+                    .auxes
+                    .iter_mut()
+                    .find(|a| a.strip.key == k)
+                    .map(|a| &mut a.strip),
                 StripKey::Master => Some(&mut plan.master),
             };
             if let Some(auto) = strip.and_then(|s| s.auto.as_mut())

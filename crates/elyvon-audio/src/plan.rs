@@ -17,11 +17,11 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use elyvon_core::{Tempo, TempoMap, Ticks, TimeSignature};
-use elyvon_project::mixer::{AuxId, ChannelFormat, OutputTarget, PanLaw};
 use elyvon_project::automation::{
     AutomationParam, ChannelAutomation, TickPiece, lane_pieces, overlay, static_value,
 };
 use elyvon_project::mixer::ChannelRef;
+use elyvon_project::mixer::{AuxId, ChannelFormat, OutputTarget, PanLaw};
 use elyvon_project::{FadeCurve, MediaId, Project, RegionContent, TrackKind};
 
 use crate::automation::{Envelope, Slot, StripAuto, Target};
@@ -779,16 +779,21 @@ fn aux_order(graph: &mut Graph) -> Vec<usize> {
 
 /// Whether `param` gets an automation slot on a channel: it has points
 /// (channel or region lanes) and the mode reads them, or the mode writes.
-fn wants_slot(auto: &ChannelAutomation, regions: &[elyvon_project::Region], param: &AutomationParam) -> bool {
+fn wants_slot(
+    auto: &ChannelAutomation,
+    regions: &[elyvon_project::Region],
+    param: &AutomationParam,
+) -> bool {
     if auto.mode.writes() {
         return true;
     }
     auto.mode.reads()
         && (auto.lane(param).is_some_and(|l| !l.points.is_empty())
-            || regions
-                .iter()
-                .filter(|r| !r.muted)
-                .any(|r| r.automation.iter().any(|l| l.param == *param && !l.points.is_empty())))
+            || regions.iter().filter(|r| !r.muted).any(|r| {
+                r.automation
+                    .iter()
+                    .any(|l| l.param == *param && !l.points.is_empty())
+            }))
 }
 
 struct AutoContext<'a> {
@@ -861,14 +866,23 @@ fn strip_automation(
         let base = auto.lane(p).and_then(|l| lane_pieces(l, 0.0));
         let mut overlays: Vec<&elyvon_project::Region> = regions
             .iter()
-            .filter(|r| !r.muted && r.automation.iter().any(|l| l.param == *p && !l.points.is_empty()))
+            .filter(|r| {
+                !r.muted
+                    && r.automation
+                        .iter()
+                        .any(|l| l.param == *p && !l.points.is_empty())
+            })
             .collect();
         overlays.sort_by_key(|r| r.start);
         let pieces: Option<Vec<TickPiece>> = if overlays.is_empty() {
             base
         } else {
             let mut pieces = base.unwrap_or_else(|| {
-                vec![TickPiece::constant(0.0, f64::INFINITY, spec.to_norm(static_v))]
+                vec![TickPiece::constant(
+                    0.0,
+                    f64::INFINITY,
+                    spec.to_norm(static_v),
+                )]
             });
             for r in overlays {
                 if let Some(over) = r
@@ -893,7 +907,11 @@ fn strip_automation(
         );
         let env = pieces.map(|pc| {
             let e = Envelope::compile(&pc, cx.map, cx.rate);
-            if is_level { e.level(spec.min, spec.max) } else { e }
+            if is_level {
+                e.level(spec.min, spec.max)
+            } else {
+                e
+            }
         });
         if env.is_some() {
             stats.envelopes += 1;
@@ -903,7 +921,11 @@ fn strip_automation(
         }
         if let Target::Send(i) = target {
             // The send's smoothed gain becomes its on/off gate.
-            let on = if strip.sends[i].gain.target.0 > 0.0 { 1.0 } else { 0.0 };
+            let on = if strip.sends[i].gain.target.0 > 0.0 {
+                1.0
+            } else {
+                0.0
+            };
             strip.sends[i].gain = Smoothed::new((on, on));
             strip.sends[i].automated = true;
         }
@@ -913,7 +935,9 @@ fn strip_automation(
         return None;
     }
     let find = |t: Target| slots.iter().position(|s| s.target == t);
-    let sends = (0..strip.sends.len()).map(|i| find(Target::Send(i))).collect();
+    let sends = (0..strip.sends.len())
+        .map(|i| find(Target::Send(i)))
+        .collect();
     let (l, r) = if channel == ChannelRef::Master {
         (1.0, 1.0)
     } else {
@@ -1033,7 +1057,10 @@ pub fn build_plan(
         let frozen = track
             .freeze
             .as_ref()
-            .filter(|_| track.kind != TrackKind::Midi && elyvon_project::comp::freeze_is_current(project, track))
+            .filter(|_| {
+                track.kind != TrackKind::Midi
+                    && elyvon_project::comp::freeze_is_current(project, track)
+            })
             .and_then(|f| media(f.media).map(|b| (f, b)));
         if track.freeze.is_some() && frozen.is_none() {
             stats.stale_freezes += 1;
@@ -1118,7 +1145,9 @@ pub fn build_plan(
                 .regions
                 .iter()
                 .filter_map(|r| match &r.content {
-                    RegionContent::Audio { media: Some(id), .. } => media(*id).map(|b| b.channels()),
+                    RegionContent::Audio {
+                        media: Some(id), ..
+                    } => media(*id).map(|b| b.channels()),
                     _ => None,
                 })
                 .collect();

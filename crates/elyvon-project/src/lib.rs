@@ -33,7 +33,7 @@ pub mod validate;
 pub use edit::{AudioPlacement, ClipboardRegion, EditCommand, EditOutcome, PlacementTrack};
 pub use error::{EditError, ProjectError, ValidationError};
 pub use model::{
-    FadeCurve,     Marker, MarkerId, MediaAsset, MediaId, MediaInfo, MetronomeSettings, MidiNote, Project,
-    ProjectId, Region, RegionContent, RegionId, Track, TrackId, TrackKind, Transport,
+    FadeCurve, Marker, MarkerId, MediaAsset, MediaId, MediaInfo, MetronomeSettings, MidiNote,
+    Project, ProjectId, Region, RegionContent, RegionId, Track, TrackId, TrackKind, Transport,
 };
 pub use session::{ProjectOrigin, ProjectSession, SaveTicket, SessionView};

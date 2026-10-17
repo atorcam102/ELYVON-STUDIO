@@ -5,6 +5,7 @@ import { isEditableTarget } from "../../lib/platform";
 import { notify } from "../../state/notifications";
 import { currentProject, useProject } from "../../state/project";
 import { useUi } from "../../state/ui";
+import { deleteRegionsOrRange } from "./editingActions";
 
 export async function addTrack(kind: TrackKind) {
   const ui = useUi.getState();
@@ -36,6 +37,8 @@ export async function deleteSelectedTracks() {
 
 /** Delete key: regions take precedence over tracks. */
 export async function deleteSelection() {
+  // Marquee ranges and ripple mode are handled by the editing actions.
+  if (await deleteRegionsOrRange()) return;
   const { regionIds, trackIds } = useUi.getState().selection;
   if (regionIds.length) {
     await useProject.getState().apply({ type: "removeRegions", ids: regionIds });

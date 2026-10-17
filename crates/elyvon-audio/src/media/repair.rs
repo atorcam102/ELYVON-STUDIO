@@ -98,7 +98,12 @@ pub fn stored_path(file: &Path, project_dir: Option<&Path>) -> String {
 }
 
 /// Searches `root` for the project's missing files.
-pub fn find_missing(project: &Project, project_dir: Option<&Path>, root: &Path, max_files: usize) -> RepairReport {
+pub fn find_missing(
+    project: &Project,
+    project_dir: Option<&Path>,
+    root: &Path,
+    max_files: usize,
+) -> RepairReport {
     let missing = missing_media(project, project_dir);
     let mut report = RepairReport::default();
     if missing.is_empty() {
@@ -112,13 +117,16 @@ pub fn find_missing(project: &Project, project_dir: Option<&Path>, root: &Path, 
         let Some(asset) = project.media_asset(id) else {
             continue;
         };
-        let name = file_name_key(Path::new(&asset.path)).unwrap_or_else(|| asset.name.to_lowercase());
+        let name =
+            file_name_key(Path::new(&asset.path)).unwrap_or_else(|| asset.name.to_lowercase());
         let candidates = by_name.get(&name).cloned().unwrap_or_default();
         let matches: Vec<PathBuf> = match &asset.info {
             Some(info) => candidates
                 .into_iter()
                 .filter(|p| std::fs::metadata(p).is_ok_and(|m| m.len() == info.size_bytes))
-                .filter(|p| fingerprint(p).is_ok_and(|(h, _)| format!("{h:016x}") == info.fingerprint))
+                .filter(|p| {
+                    fingerprint(p).is_ok_and(|(h, _)| format!("{h:016x}") == info.fingerprint)
+                })
                 .collect(),
             None => candidates,
         };
@@ -147,7 +155,8 @@ pub fn find_missing(project: &Project, project_dir: Option<&Path>, root: &Path, 
 /// existing different file is never overwritten.
 pub fn collect(project: &Project, project_dir: &Path) -> Result<Vec<MediaRelink>, String> {
     let media_dir = project_dir.join("Media");
-    std::fs::create_dir_all(&media_dir).map_err(|e| format!("could not create {}: {e}", media_dir.display()))?;
+    std::fs::create_dir_all(&media_dir)
+        .map_err(|e| format!("could not create {}: {e}", media_dir.display()))?;
     let mut relinks = Vec::new();
     let mut missing = Vec::new();
     for asset in &project.media {
@@ -187,13 +196,18 @@ pub fn collect(project: &Project, project_dir: &Path) -> Result<Vec<MediaRelink>
         }
         if !dest.exists() {
             let tmp = media_dir.join(format!(".{}.collecting", asset.id));
-            std::fs::copy(&src, &tmp).map_err(|e| format!("could not copy {}: {e}", src.display()))?;
+            std::fs::copy(&src, &tmp)
+                .map_err(|e| format!("could not copy {}: {e}", src.display()))?;
             let copied = fingerprint(&tmp).map(|(h, _)| h).ok();
             if copied != Some(hash) {
                 let _ = std::fs::remove_file(&tmp);
-                return Err(format!("the copy of {} does not match the original", src.display()));
+                return Err(format!(
+                    "the copy of {} does not match the original",
+                    src.display()
+                ));
             }
-            std::fs::rename(&tmp, &dest).map_err(|e| format!("could not place {}: {e}", dest.display()))?;
+            std::fs::rename(&tmp, &dest)
+                .map_err(|e| format!("could not place {}: {e}", dest.display()))?;
         }
         relinks.push(MediaRelink {
             id: asset.id,
@@ -229,7 +243,12 @@ pub fn unused_files(project: &Project, project_dir: &Path) -> Vec<PathBuf> {
         };
         for e in entries.flatten() {
             let p = e.path();
-            if p.is_file() && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) && !used.contains(&canon(&p)) {
+            if p.is_file()
+                && !p
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+                && !used.contains(&canon(&p))
+            {
                 out.push(p);
             }
         }
@@ -240,7 +259,11 @@ pub fn unused_files(project: &Project, project_dir: &Path) -> Vec<PathBuf> {
 
 /// Moves `files` (inside `project_dir`) into `project_dir/.elyvon-backup/<stamp>/`,
 /// keeping their relative paths. Returns the backup folder.
-pub fn move_to_backup(files: &[PathBuf], project_dir: &Path, stamp: &str) -> Result<PathBuf, String> {
+pub fn move_to_backup(
+    files: &[PathBuf],
+    project_dir: &Path,
+    stamp: &str,
+) -> Result<PathBuf, String> {
     let backup = project_dir.join(".elyvon-backup").join(stamp);
     for f in files {
         let rel = f
@@ -251,8 +274,10 @@ pub fn move_to_backup(files: &[PathBuf], project_dir: &Path, stamp: &str) -> Res
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         if std::fs::rename(f, &dest).is_err() {
-            std::fs::copy(f, &dest).map_err(|e| format!("could not back up {}: {e}", f.display()))?;
-            std::fs::remove_file(f).map_err(|e| format!("could not remove {}: {e}", f.display()))?;
+            std::fs::copy(f, &dest)
+                .map_err(|e| format!("could not back up {}: {e}", f.display()))?;
+            std::fs::remove_file(f)
+                .map_err(|e| format!("could not remove {}: {e}", f.display()))?;
         }
     }
     Ok(backup)

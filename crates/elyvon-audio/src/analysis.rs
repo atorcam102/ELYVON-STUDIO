@@ -8,16 +8,23 @@
 use std::sync::Arc;
 
 use elyvon_core::{TempoMap, Ticks};
-use elyvon_project::mixer::{OutputTarget, PanLaw};
 use elyvon_project::automation::AutomationParam;
+use elyvon_project::mixer::{OutputTarget, PanLaw};
 use elyvon_project::{MediaId, Project, Region, RegionContent, RegionId, TrackId};
 
 use crate::media::MediaBuffer;
 use crate::render::{self, RenderRequest};
 
+/// Maps a frame elapsed in a region to its engine-rate source frame.
+type FrameMap = Box<dyn Fn(u64) -> Option<usize>>;
+
 /// Engine-rate frames a region plays, in timeline order (`None` past the
 /// end of a non-looped file).
-fn heard_frames(map: &TempoMap, region: &Region, buffer: &MediaBuffer) -> Option<(u64, u64, Box<dyn Fn(u64) -> Option<usize>>)> {
+fn heard_frames(
+    map: &TempoMap,
+    region: &Region,
+    buffer: &MediaBuffer,
+) -> Option<(u64, u64, FrameMap)> {
     let RegionContent::Audio {
         offset,
         looped,
@@ -35,7 +42,11 @@ fn heard_frames(map: &TempoMap, region: &Region, buffer: &MediaBuffer) -> Option
     let len = end - start;
     let (looped, reversed) = (*looped && !*reversed, *reversed);
     let at = move |d: u64| -> Option<usize> {
-        let p = if reversed { offset + (len - 1 - d) } else { offset + d };
+        let p = if reversed {
+            offset + (len - 1 - d)
+        } else {
+            offset + d
+        };
         if p < frames {
             Some(p as usize)
         } else if looped && frames > 0 {
@@ -97,7 +108,12 @@ const HOP: usize = 128;
 /// Onsets in a region's audio (absolute ticks, sorted), from rises of the
 /// short-term energy. `sensitivity` 0…1 (higher finds softer onsets).
 /// Onsets are refined to the first sample above half the hop's peak.
-pub fn detect_transients(map: &TempoMap, region: &Region, buffer: &MediaBuffer, sensitivity: f64) -> Vec<Ticks> {
+pub fn detect_transients(
+    map: &TempoMap,
+    region: &Region,
+    buffer: &MediaBuffer,
+    sensitivity: f64,
+) -> Vec<Ticks> {
     let Some((start, len, at)) = heard_frames(map, region, buffer) else {
         return Vec::new();
     };
@@ -201,10 +217,16 @@ pub fn render_track(
             .filter(|r| ids.contains(&r.id))
             .filter_map(|r| r.capture.as_ref().map(|c| c.folder))
             .collect();
-        track.comps.retain(|c| folders.contains(&c.folder) && !c.flattened);
-        let comped: std::collections::HashSet<RegionId> = track.comps.iter().map(|c| c.folder).collect();
+        track
+            .comps
+            .retain(|c| folders.contains(&c.folder) && !c.flattened);
+        let comped: std::collections::HashSet<RegionId> =
+            track.comps.iter().map(|c| c.folder).collect();
         track.regions.retain(|r| {
-            ids.contains(&r.id) || r.capture.as_ref().is_some_and(|c| comped.contains(&c.folder))
+            ids.contains(&r.id)
+                || r.capture
+                    .as_ref()
+                    .is_some_and(|c| comped.contains(&c.folder))
         });
     }
     track.freeze = None;
@@ -243,7 +265,9 @@ pub fn render_track(
     p.mixer.master = elyvon_project::mixer::MasterChannel::default();
     p.transport.loop_range.enabled = false;
     let map = p.transport.tempo_map().map_err(|e| e.to_string())?;
-    let latency = crate::plan::build_plan(&p, media, rate, 1).stats.latency_frames;
+    let latency = crate::plan::build_plan(&p, media, rate, 1)
+        .stats
+        .latency_frames;
     let end_secs = map.seconds_at(end as f64) + tail.max(0.0) + latency as f64 / f64::from(rate);
     let end_tick = map.tick_at_seconds(end_secs).ceil() as Ticks;
     let rendered = render::render(
@@ -286,7 +310,9 @@ pub fn render_track(
 /// Writes a track render as a 32-bit float stereo WAV, atomically.
 pub fn write_render(path: &std::path::Path, r: &TrackRender) -> std::io::Result<()> {
     if r.streaming_errors != 0 {
-        return Err(std::io::Error::other("render aborted: disk-cache reads failed"));
+        return Err(std::io::Error::other(
+            "render aborted: disk-cache reads failed",
+        ));
     }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -303,7 +329,11 @@ mod tests {
     fn normalisation_gain_targets_the_peak() {
         assert!((normalize_gain(0.5, 0.0).unwrap() - 6.0206).abs() < 1e-3);
         assert!((normalize_gain(0.5, -1.0).unwrap() - 5.0206).abs() < 1e-3);
-        assert_eq!(normalize_gain(1e-9, 0.0).unwrap(), 24.0, "clamped to +24 dB");
+        assert_eq!(
+            normalize_gain(1e-9, 0.0).unwrap(),
+            24.0,
+            "clamped to +24 dB"
+        );
         assert!(normalize_gain(0.0, 0.0).is_none());
     }
 }

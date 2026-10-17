@@ -563,7 +563,11 @@ fn automation_envelopes_and_live_overrides_never_allocate() {
             points: (0..40)
                 .map(|k| PointSpec {
                     tick: k * 200,
-                    value: if k % 2 == 0 { spec.min } else { spec.max.min(spec.min + 30.0) },
+                    value: if k % 2 == 0 {
+                        spec.min
+                    } else {
+                        spec.max.min(spec.min + 30.0)
+                    },
                     curve: Some(if k % 3 == 0 {
                         Curve::Step
                     } else {
@@ -636,7 +640,15 @@ fn automation_envelopes_and_live_overrides_never_allocate() {
         guarded(|| eng.process(&mut out, 2, &mut midi));
     }
     assert!(out.iter().all(|v| v.is_finite()));
-    assert_eq!(ALLOCS.load(Ordering::Relaxed), 0, "allocations in the audio callback");
-    assert_eq!(FREES.load(Ordering::Relaxed), 0, "frees in the audio callback");
+    assert_eq!(
+        ALLOCS.load(Ordering::Relaxed),
+        0,
+        "allocations in the audio callback"
+    );
+    assert_eq!(
+        FREES.load(Ordering::Relaxed),
+        0,
+        "frees in the audio callback"
+    );
     handle.poll();
 }

@@ -7,7 +7,9 @@ use elyvon_project::automation::{
 };
 use elyvon_project::automation_record::{AutomationRecorder, TouchPhase};
 use elyvon_project::mixer::{ChannelRef, Processor};
-use elyvon_project::{EditCommand, Project, ProjectSession, RegionContent, TrackId, TrackKind, format};
+use elyvon_project::{
+    EditCommand, Project, ProjectSession, RegionContent, TrackId, TrackKind, format,
+};
 
 fn session_with_track() -> (ProjectSession, TrackId) {
     let mut s = ProjectSession::new_empty();
@@ -77,7 +79,10 @@ fn points_are_edited_by_id_and_undo_restores_each_step() {
     .unwrap();
     let lane = elyvon_project::automation::lane(s.project(), &vol(t)).unwrap();
     assert_eq!(lane.points[1].tick, 1440);
-    assert!((lane.points[1].value - (-51.0)).abs() < 1e-9, "half the range down");
+    assert!(
+        (lane.points[1].value - (-51.0)).abs() < 1e-9,
+        "half the range down"
+    );
     let copies = s
         .apply(&EditCommand::MoveAutomationPoints {
             target: vol(t),
@@ -179,10 +184,24 @@ fn touch_writes_while_held_and_returns_to_the_lane_after_release() {
     for tick in (0..960).step_by(120) {
         rec.observe(tick, 0);
     }
-    assert!(rec.touch(vol(t), AutomationMode::Touch, TouchPhase::Begin, -3.0, 960, 0));
+    assert!(rec.touch(
+        vol(t),
+        AutomationMode::Touch,
+        TouchPhase::Begin,
+        -3.0,
+        960,
+        0
+    ));
     for (i, tick) in (1000..2880).step_by(60).enumerate() {
         rec.observe(tick, 0);
-        rec.touch(vol(t), AutomationMode::Touch, TouchPhase::Move, -3.0 + i as f64 * 0.1, tick, 0);
+        rec.touch(
+            vol(t),
+            AutomationMode::Touch,
+            TouchPhase::Move,
+            -3.0 + i as f64 * 0.1,
+            tick,
+            0,
+        );
     }
     rec.touch(vol(t), AutomationMode::Touch, TouchPhase::End, 0.0, 2880, 0);
     for tick in (2880..7680).step_by(120) {
@@ -192,18 +211,39 @@ fn touch_writes_while_held_and_returns_to_the_lane_after_release() {
     assert_eq!(cmd.label(), "Write Automation");
     s.apply(&cmd).unwrap();
     let p = s.project();
-    assert!((lane_value(p, vol(t), 480) - (-10.0)).abs() < 1e-9, "before the touch: lane");
-    assert!((lane_value(p, vol(t), 960) - (-3.0)).abs() < 1e-9, "touch starts at its own value");
+    assert!(
+        (lane_value(p, vol(t), 480) - (-10.0)).abs() < 1e-9,
+        "before the touch: lane"
+    );
+    assert!(
+        (lane_value(p, vol(t), 960) - (-3.0)).abs() < 1e-9,
+        "touch starts at its own value"
+    );
     assert!(lane_value(p, vol(t), 2000) > -3.0 && lane_value(p, vol(t), 2000) < 0.0);
-    assert!((lane_value(p, vol(t), 2880) - 0.0).abs() < 1e-9, "released value");
+    assert!(
+        (lane_value(p, vol(t), 2880) - 0.0).abs() < 1e-9,
+        "released value"
+    );
     // 200 ms at 120 BPM = 384 ticks to return to the old value.
-    assert!((lane_value(p, vol(t), 2880 + 400) - (-10.0)).abs() < 1e-9, "back on the lane");
+    assert!(
+        (lane_value(p, vol(t), 2880 + 400) - (-10.0)).abs() < 1e-9,
+        "back on the lane"
+    );
     assert!((lane_value(p, vol(t), 6000) - (-10.0)).abs() < 1e-9);
     // Linear runs are thinned.
-    let n = elyvon_project::automation::lane(p, &vol(t)).unwrap().points.len();
+    let n = elyvon_project::automation::lane(p, &vol(t))
+        .unwrap()
+        .points
+        .len();
     assert!(n < 12, "{n} points");
     assert!(s.undo());
-    assert_eq!(elyvon_project::automation::lane(s.project(), &vol(t)).unwrap().points.len(), 1);
+    assert_eq!(
+        elyvon_project::automation::lane(s.project(), &vol(t))
+            .unwrap()
+            .points
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -222,7 +262,14 @@ fn read_and_off_modes_and_stopped_transport_never_write() {
         ..vol(t)
     };
     let mut rec = AutomationRecorder::start(s.project(), 0, 0);
-    assert!(!rec.touch(region, AutomationMode::Latch, TouchPhase::Begin, -3.0, 100, 0));
+    assert!(!rec.touch(
+        region,
+        AutomationMode::Latch,
+        TouchPhase::Begin,
+        -3.0,
+        100,
+        0
+    ));
 }
 
 #[test]
@@ -273,7 +320,11 @@ fn write_mode_does_not_touch_unarmed_channels_or_region_lanes() {
     add(&mut s, region_lane, &[(0, -20.0), (960, -5.0)]);
     add(&mut s, vol(a), &[(0, -12.0), (7680, -12.0)]);
     add(&mut s, vol(b), &[(0, -4.0), (3840, -8.0)]);
-    s.apply(&EditCommand::SetTrackVolume { id: a, volume_db: -1.5 }).unwrap();
+    s.apply(&EditCommand::SetTrackVolume {
+        id: a,
+        volume_db: -1.5,
+    })
+    .unwrap();
     mode(&mut s, a, AutomationMode::Write);
     let before_b = s.project().tracks[1].clone();
     let before_region = s.project().tracks[0].regions[0].automation.clone();
@@ -282,14 +333,27 @@ fn write_mode_does_not_touch_unarmed_channels_or_region_lanes() {
         rec.observe(tick, 0);
     }
     // Track b is in Read mode: its gesture is ignored.
-    assert!(!rec.touch(vol(b), AutomationMode::Read, TouchPhase::Begin, 0.0, 2000, 0));
+    assert!(!rec.touch(
+        vol(b),
+        AutomationMode::Read,
+        TouchPhase::Begin,
+        0.0,
+        2000,
+        0
+    ));
     let cmd = rec.finish(4800, 0, s.project()).unwrap();
     s.apply(&cmd).unwrap();
     let p = s.project();
     assert_eq!(p.tracks[1], before_b, "unarmed channel untouched");
-    assert_eq!(p.tracks[0].regions[0].automation, before_region, "region lanes untouched");
+    assert_eq!(
+        p.tracks[0].regions[0].automation, before_region,
+        "region lanes untouched"
+    );
     assert!((lane_value(p, vol(a), 500) - (-12.0)).abs() < 1e-9);
-    assert!((lane_value(p, vol(a), 2000) - (-1.5)).abs() < 1e-9, "written with the fader value");
+    assert!(
+        (lane_value(p, vol(a), 2000) - (-1.5)).abs() < 1e-9,
+        "written with the fader value"
+    );
     assert!((lane_value(p, vol(a), 6000) - (-12.0)).abs() < 1e-9);
 }
 
@@ -303,8 +367,22 @@ fn latch_holds_until_stop_and_cycle_passes_overwrite_in_order() {
     for tick in (0..1000).step_by(100) {
         rec.observe(tick, 0);
     }
-    rec.touch(vol(t), AutomationMode::Latch, TouchPhase::Begin, -6.0, 1000, 0);
-    rec.touch(vol(t), AutomationMode::Latch, TouchPhase::End, -6.0, 1500, 0);
+    rec.touch(
+        vol(t),
+        AutomationMode::Latch,
+        TouchPhase::Begin,
+        -6.0,
+        1000,
+        0,
+    );
+    rec.touch(
+        vol(t),
+        AutomationMode::Latch,
+        TouchPhase::End,
+        -6.0,
+        1500,
+        0,
+    );
     for tick in (1500..3840).step_by(100) {
         rec.observe(tick, 0);
     }
@@ -313,14 +391,33 @@ fn latch_holds_until_stop_and_cycle_passes_overwrite_in_order() {
     for tick in (0..2000).step_by(100) {
         rec.observe(tick, 1);
     }
-    rec.touch(vol(t), AutomationMode::Latch, TouchPhase::Move, -2.0, 2000, 1);
+    rec.touch(
+        vol(t),
+        AutomationMode::Latch,
+        TouchPhase::Move,
+        -2.0,
+        2000,
+        1,
+    );
     let cmd = rec.finish(3000, 1, s.project()).unwrap();
     s.apply(&cmd).unwrap();
     let p = s.project();
-    assert!((lane_value(p, vol(t), 1200) - (-6.0)).abs() < 1e-9, "latched in pass 2 too");
-    assert!((lane_value(p, vol(t), 2500) - (-2.0)).abs() < 1e-9, "pass 2 overwrote pass 1");
-    assert!((lane_value(p, vol(t), 3500) - (-6.0)).abs() < 1e-9, "pass 1 beyond pass 2's end");
-    assert!((lane_value(p, vol(t), 5000) - (-20.0)).abs() < 1e-9, "after the written range");
+    assert!(
+        (lane_value(p, vol(t), 1200) - (-6.0)).abs() < 1e-9,
+        "latched in pass 2 too"
+    );
+    assert!(
+        (lane_value(p, vol(t), 2500) - (-2.0)).abs() < 1e-9,
+        "pass 2 overwrote pass 1"
+    );
+    assert!(
+        (lane_value(p, vol(t), 3500) - (-6.0)).abs() < 1e-9,
+        "pass 1 beyond pass 2's end"
+    );
+    assert!(
+        (lane_value(p, vol(t), 5000) - (-20.0)).abs() < 1e-9,
+        "after the written range"
+    );
 }
 
 #[test]
@@ -381,5 +478,8 @@ fn invalid_lanes_are_rejected_on_load() {
     add(&mut s, vol(t), &[(0, -12.0)]);
     let mut bytes = String::from_utf8(format::encode(s.project(), "test")).unwrap();
     bytes = bytes.replace("\"value\": -12.0", "\"value\": 12.0");
-    assert!(format::decode(bytes.as_bytes()).is_err(), "out-of-range value");
+    assert!(
+        format::decode(bytes.as_bytes()).is_err(),
+        "out-of-range value"
+    );
 }

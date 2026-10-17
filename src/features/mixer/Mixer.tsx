@@ -21,20 +21,46 @@ import { notify, notifyError } from "../../state/notifications";
 import { useProject } from "../../state/project";
 import { useTransport } from "../../state/transport";
 import { useUi } from "../../state/ui";
+import type { AutomationMode } from "../../bindings/AutomationMode";
+import type { AutomationParam } from "../../bindings/AutomationParam";
+import type { TouchPhase } from "../../bindings/TouchPhase";
+import { MODES, automatedValue, channelAutomation, sameParam, writesMode } from "../../lib/automation";
+import { isRolling } from "../../state/transport";
+
+/** Live automation capture for one control: `touch` sends a gesture to the
+ * core and resolves to whether it was written as automation. */
+type Touch = (phase: TouchPhase, value: number) => Promise<boolean>;
+
+/** The value a control shows: its automated value while playing, else its own. */
+function useAutomated(project: Project, channel: ChannelRef, param: AutomationParam, value: number): number {
+  const auto = channelAutomation(project, channel);
+  const automated =
+    !!auto &&
+    auto.mode !== "off" &&
+    (auto.lanes.some((l) => sameParam(l.param, param) && l.points.length > 0) ||
+      (channel.type === "track" &&
+        !!project.tracks.find((t) => t.id === channel.id)?.regions.some((r) => r.automation.some((l) => sameParam(l.param, param) && l.points.length))));
+  const tick = useTransport((s) => (automated && isRolling(s.snapshot) && s.snapshot ? Math.round(s.snapshot.ticks / 24) * 24 : null));
+  if (tick === null) return value;
+  return automatedValue(project, channel, param, tick) ?? value;
+}
 
 function Fader({
   value,
   onCommit,
   label,
   disabled,
+  touch,
 }: {
   value: number;
   onCommit: (db: number) => void;
   label: string;
   disabled?: boolean;
+  /** Set while the channel writes automation and the transport plays. */
+  touch?: Touch;
 }) {
   const [preview, setPreview] = useState<number | null>(null);
-  const drag = useRef<{ y: number; pos: number; height: number } | null>(null);
+  const drag = useRef<{ y: number; pos: number; height: number; touching: boolean } | null>(null);
   const db = preview ?? value;
   const pos = dbToFaderPos(db);
 
@@ -46,7 +72,9 @@ function Fader({
       y: e.clientY,
       pos,
       height: Math.max(40, e.currentTarget.getBoundingClientRect().height),
+      touching: !!touch,
     };
+    if (touch) void touch("begin", db);
   };
   const onMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!drag.current) return;
@@ -59,13 +87,24 @@ function Fader({
           ((drag.current.y - e.clientY) / drag.current.height) * sensitivity,
       ),
     );
-    setPreview(Math.round(faderPosToDb(p) * 10) / 10);
+    const next = Math.round(faderPosToDb(p) * 10) / 10;
+    setPreview(next);
+    if (drag.current.touching && touch) void touch("move", Math.max(MIN_DB, next));
   };
   const onUp = () => {
-    if (drag.current && preview !== null && preview !== value)
-      onCommit(Math.max(MIN_DB, preview));
+    const d = drag.current;
     drag.current = null;
+    const final = preview;
     setPreview(null);
+    if (!d) return;
+    if (d.touching && touch) {
+      // Written as automation while playing; otherwise an ordinary edit.
+      void touch("end", Math.max(MIN_DB, final ?? value)).then((captured) => {
+        if (!captured && final !== null && final !== value) onCommit(Math.max(MIN_DB, final));
+      });
+      return;
+    }
+    if (final !== null && final !== value) onCommit(Math.max(MIN_DB, final));
   };
 
   return (
@@ -111,10 +150,12 @@ function PanKnob({
   value,
   onCommit,
   disabled,
+  touch,
 }: {
   value: number;
   onCommit: (pan: number) => void;
   disabled?: boolean;
+  touch?: Touch;
 }) {
   const [preview, setPreview] = useState<number | null>(null);
   const drag = useRef<{ y: number; v: number } | null>(null);
@@ -135,6 +176,7 @@ function PanKnob({
         if (disabled) return;
         e.currentTarget.setPointerCapture(e.pointerId);
         drag.current = { y: e.clientY, v: value };
+        if (touch) void touch("begin", value);
       }}
       onPointerMove={(e) => {
         if (!drag.current) return;
@@ -143,12 +185,21 @@ function PanKnob({
           Math.max(-1, drag.current.v + (drag.current.y - e.clientY) / 100),
         );
         setPreview(Math.round(next * 64) / 64);
+        if (touch) void touch("move", Math.round(next * 64) / 64);
       }}
       onPointerUp={() => {
-        if (drag.current && preview !== null && preview !== value)
-          onCommit(preview);
+        const had = drag.current !== null;
+        const final = preview;
         drag.current = null;
         setPreview(null);
+        if (!had) return;
+        if (touch) {
+          void touch("end", final ?? value).then((captured) => {
+            if (!captured && final !== null && final !== value) onCommit(final);
+          });
+          return;
+        }
+        if (final !== null && final !== value) onCommit(final);
       }}
       onDoubleClick={() => !disabled && onCommit(0)}
       onKeyDown={(e) => {
@@ -419,6 +470,24 @@ const ChannelStrip = memo(function ChannelStrip({
   const disabledAudio = !strip.audio;
   const groups = project.mixer.groups;
   const group = routing?.group ? groups.find((g) => g.id === routing.group) : undefined;
+  const auto = channelAutomation(project, c);
+  const mode: AutomationMode = auto?.mode ?? "read";
+  const rolling = useTransport((s) => isRolling(s.snapshot));
+  const capture = rolling && writesMode(mode) && !disabledAudio;
+  const touchOf = (param: AutomationParam): Touch | undefined =>
+    capture ? (phase, value) => ipc.automation.touch(c, param, value, phase).catch(() => false) : undefined;
+  /** A discrete control (mute, a typed send level): one begin/end gesture. */
+  const tap = async (param: AutomationParam, value: number, fallback: () => void) => {
+    const t = touchOf(param);
+    if (t && (await t("begin", value))) {
+      await t("end", value);
+      return;
+    }
+    fallback();
+  };
+  const shownVolume = useAutomated(project, c, { type: "volume" }, strip.volumeDb);
+  const shownPan = useAutomated(project, c, { type: "pan" }, strip.pan);
+  const shownMute = useAutomated(project, c, { type: "mute" }, strip.muted ? 1 : 0) >= 0.5;
 
   const outputMenu = (e: React.MouseEvent) =>
     setMenu({
@@ -545,7 +614,9 @@ const ChannelStrip = memo(function ChannelStrip({
                 max={6}
                 step={0.5}
                 precision={1}
-                onCommit={(levelDb) => void apply({ type: "setSend", channel: c, target: s.target, send: { ...s, levelDb } })}
+                onCommit={(levelDb) =>
+                  void tap({ type: "sendLevel", aux: s.target }, levelDb, () => void apply({ type: "setSend", channel: c, target: s.target, send: { ...s, levelDb } }))
+                }
               />
             </div>
           ))}
@@ -594,10 +665,25 @@ const ChannelStrip = memo(function ChannelStrip({
           </button>
         </div>
       )}
-      {c.type === "master" ? <div className="knob" aria-hidden /> : <PanKnob value={strip.pan} disabled={disabledAudio} onCommit={(pan) => patch({ pan })} />}
+      {!disabledAudio && (
+        <select
+          className={`strip__auto is-${mode}`}
+          aria-label={`${strip.name} automation mode`}
+          title="Automation mode: Read plays lanes; Touch, Latch and Write record control moves while playing"
+          value={mode}
+          onChange={(e) => void apply({ type: "setAutomationMode", channel: c, mode: e.target.value as AutomationMode })}
+        >
+          {MODES.map((m) => (
+            <option key={m.mode} value={m.mode} title={m.title}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      )}
+      {c.type === "master" ? <div className="knob" aria-hidden /> : <PanKnob value={shownPan} disabled={disabledAudio} touch={touchOf({ type: "pan" })} onCommit={(pan) => patch({ pan })} />}
       <div className="strip__db">
         <span className="strip__db-box" title="Fader level">
-          {formatDb(strip.volumeDb)}
+          {formatDb(shownVolume)}
         </span>
         <span className="strip__db-box strip__db-box--peak" title="Peak hold (1.5 s), measured on this channel's real signal" ref={(el) => void (nodes().readout = el)}>
           −∞
@@ -623,10 +709,15 @@ const ChannelStrip = memo(function ChannelStrip({
           <div className="meter__rms" ref={(el) => void (nodes().rms = el)} />
           <div className="meter__hold" ref={(el) => void (nodes().hold = el)} />
         </div>
-        <Fader value={strip.volumeDb} label={`${strip.name} volume`} disabled={disabledAudio} onCommit={(volumeDb) => patch({ volumeDb })} />
+        <Fader value={shownVolume} label={`${strip.name} volume`} disabled={disabledAudio} touch={touchOf({ type: "volume" })} onCommit={(volumeDb) => patch({ volumeDb })} />
       </div>
       <div className="strip__ms">
-        <button type="button" className={`ms-btn ms-btn--mute${strip.muted ? " is-on" : ""}`} aria-pressed={strip.muted} onClick={() => patch({ muted: !strip.muted })}>
+        <button
+          type="button"
+          className={`ms-btn ms-btn--mute${shownMute ? " is-on" : ""}`}
+          aria-pressed={shownMute}
+          onClick={() => void tap({ type: "mute" }, shownMute ? 0 : 1, () => patch({ muted: !strip.muted }))}
+        >
           M
         </button>
         {c.type !== "master" && (

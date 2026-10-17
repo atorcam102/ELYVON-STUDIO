@@ -111,7 +111,11 @@ pub fn phase_locked(project: &Project, ids: &[RegionId]) -> Vec<RegionId> {
 /// Moves the content inside regions by `delta_ticks` (positive = later)
 /// without moving the regions. Audio stops at the source file's edges
 /// unless it loops; MIDI notes move and are cropped to the region.
-pub(crate) fn slip(project: &mut Project, ids: &[RegionId], delta_ticks: i64) -> Result<(), EditError> {
+pub(crate) fn slip(
+    project: &mut Project,
+    ids: &[RegionId],
+    delta_ticks: i64,
+) -> Result<(), EditError> {
     if ids.is_empty() {
         return Err(invalid("select the regions to slip"));
     }
@@ -138,7 +142,11 @@ pub(crate) fn slip(project: &mut Project, ids: &[RegionId], delta_ticks: i64) ->
                 if *looped {
                     if let Some(n) = frames.filter(|n| *n > 0) {
                         let s = shift % n;
-                        *offset = if later { (*offset + n - s) % n } else { (*offset + s) % n };
+                        *offset = if later {
+                            (*offset + n - s) % n
+                        } else {
+                            (*offset + s) % n
+                        };
                     }
                 } else if later {
                     *offset = offset.saturating_sub(shift);
@@ -170,10 +178,12 @@ pub(crate) fn slip(project: &mut Project, ids: &[RegionId], delta_ticks: i64) ->
                     .iter()
                     .filter_map(|e| {
                         let t = e.tick as i64 + delta_ticks;
-                        (0..=length as i64).contains(&t).then(|| crate::io::StoredMidiEvent {
-                            tick: t as u64,
-                            bytes: e.bytes.clone(),
-                        })
+                        (0..=length as i64)
+                            .contains(&t)
+                            .then(|| crate::io::StoredMidiEvent {
+                                tick: t as u64,
+                                bytes: e.bytes.clone(),
+                            })
                     })
                     .collect();
                 r.midi_events = shifted;
@@ -223,7 +233,8 @@ fn close_gaps(track: &mut Track, cuts: &[(Ticks, Ticks)]) {
         r.start -= ripple_shift(cuts, r.start);
     }
     for lane in &mut track.automation.lanes {
-        lane.points.retain(|p| !cuts.iter().any(|&(s, e)| p.tick > s && p.tick < e));
+        lane.points
+            .retain(|p| !cuts.iter().any(|&(s, e)| p.tick > s && p.tick < e));
         for p in &mut lane.points {
             p.tick -= ripple_shift(cuts, p.tick);
         }
@@ -311,7 +322,11 @@ pub(crate) fn cut_range(
 ) -> Result<(), EditError> {
     let inside = split_range(project, track_ids, start, end, outcome)?;
     outcome.created_regions.retain(|id| !inside.contains(id));
-    for track in project.tracks.iter_mut().filter(|t| track_ids.contains(&t.id)) {
+    for track in project
+        .tracks
+        .iter_mut()
+        .filter(|t| track_ids.contains(&t.id))
+    {
         track.regions.retain(|r| !inside.contains(&r.id));
         if ripple {
             close_gaps(track, &[(start, end)]);
@@ -336,7 +351,9 @@ pub(crate) fn glue(project: &mut Project, ids: &[RegionId]) -> Result<RegionId, 
     for id in ids {
         let (t, r) = locate(project, *id)?;
         if t != ti {
-            return Err(EditError::Incompatible("glue joins regions of one track".into()));
+            return Err(EditError::Incompatible(
+                "glue joins regions of one track".into(),
+            ));
         }
         regions.push(project.tracks[t].regions[r].clone());
     }
@@ -344,7 +361,9 @@ pub(crate) fn glue(project: &mut Project, ids: &[RegionId]) -> Result<RegionId, 
     let mut out = regions[0].clone();
     for w in regions.windows(2) {
         if w[1].start < w[0].end() {
-            return Err(EditError::Incompatible("overlapping regions cannot be glued".into()));
+            return Err(EditError::Incompatible(
+                "overlapping regions cannot be glued".into(),
+            ));
         }
     }
     let last = regions.last().expect("two or more");
@@ -381,7 +400,9 @@ pub(crate) fn glue(project: &mut Project, ids: &[RegionId]) -> Result<RegionId, 
                     },
                 ) = (&a.content, &b.content)
                 else {
-                    return Err(EditError::Incompatible("audio and MIDI cannot be glued".into()));
+                    return Err(EditError::Incompatible(
+                        "audio and MIDI cannot be glued".into(),
+                    ));
                 };
                 let expected = oa + frames_between(&map, a.start, a.end(), rate);
                 if ma != mb
@@ -405,7 +426,9 @@ pub(crate) fn glue(project: &mut Project, ids: &[RegionId]) -> Result<RegionId, 
             let mut next_id = notes.iter().map(|n| n.id).max().unwrap_or(0) + 1;
             for r in &regions[1..] {
                 let RegionContent::Midi { notes: more } = &r.content else {
-                    return Err(EditError::Incompatible("audio and MIDI cannot be glued".into()));
+                    return Err(EditError::Incompatible(
+                        "audio and MIDI cannot be glued".into(),
+                    ));
                 };
                 let d = r.start - out.start;
                 for n in more {
@@ -441,14 +464,13 @@ pub(crate) fn glue(project: &mut Project, ids: &[RegionId]) -> Result<RegionId, 
                     out.automation.last_mut().expect("pushed")
                 }
             };
-            let mut id = target.points.iter().map(|p| p.id).max().unwrap_or(0) + 1;
-            for p in &lane.points {
+            let first = target.points.iter().map(|p| p.id).max().unwrap_or(0) + 1;
+            for (id, p) in (first..).zip(&lane.points) {
                 target.points.push(crate::automation::AutomationPoint {
                     id,
                     tick: p.tick + d,
                     ..*p
                 });
-                id += 1;
             }
             target.points.sort_by_key(|p| p.tick);
         }
@@ -482,7 +504,9 @@ pub(crate) fn create_crossfade(
     let (lt, li) = locate(project, left)?;
     let (rt, ri) = locate(project, right)?;
     if lt != rt {
-        return Err(EditError::Incompatible("crossfades join regions of one track".into()));
+        return Err(EditError::Incompatible(
+            "crossfades join regions of one track".into(),
+        ));
     }
     let a = project.tracks[lt].regions[li].clone();
     let b = project.tracks[rt].regions[ri].clone();
@@ -504,7 +528,9 @@ pub(crate) fn create_crossfade(
         },
     ) = (&a.content, &b.content)
     else {
-        return Err(EditError::Incompatible("crossfades join audio regions".into()));
+        return Err(EditError::Incompatible(
+            "crossfades join audio regions".into(),
+        ));
     };
     let (rate_a, frames_a) = source_rate_and_frames(project, *ma);
     let (rate_b, frames_b) = source_rate_and_frames(project, *mb);
@@ -521,13 +547,17 @@ pub(crate) fn create_crossfade(
         } else if *ra {
             *oa as f64 / f64::from(rate_a)
         } else {
-            frames_a.map_or(f64::INFINITY, |n| n.saturating_sub(oa + heard_a) as f64 / f64::from(rate_a))
+            frames_a.map_or(f64::INFINITY, |n| {
+                n.saturating_sub(oa + heard_a) as f64 / f64::from(rate_a)
+            })
         };
         let heard_b = abs_frame(&map, b.end(), rate_b) - abs_frame(&map, b.start, rate_b);
         let before_b = if *lb {
             f64::INFINITY
         } else if *rb {
-            frames_b.map_or(f64::INFINITY, |n| n.saturating_sub(ob + heard_b) as f64 / f64::from(rate_b))
+            frames_b.map_or(f64::INFINITY, |n| {
+                n.saturating_sub(ob + heard_b) as f64 / f64::from(rate_b)
+            })
         } else {
             *ob as f64 / f64::from(rate_b)
         };
@@ -575,16 +605,25 @@ fn audio_mut(project: &mut Project, id: RegionId) -> Result<&mut RegionContent, 
     let c = &mut project.tracks[t].regions[r].content;
     match c {
         RegionContent::Audio { .. } => Ok(c),
-        RegionContent::Midi { .. } => Err(EditError::Incompatible("this applies to audio regions".into())),
+        RegionContent::Midi { .. } => Err(EditError::Incompatible(
+            "this applies to audio regions".into(),
+        )),
     }
 }
 
-pub(crate) fn set_reversed(project: &mut Project, ids: &[RegionId], on: bool) -> Result<(), EditError> {
+pub(crate) fn set_reversed(
+    project: &mut Project,
+    ids: &[RegionId],
+    on: bool,
+) -> Result<(), EditError> {
     if ids.is_empty() {
         return Err(invalid("select the audio regions to reverse"));
     }
     for id in ids {
-        if let RegionContent::Audio { looped, reversed, .. } = audio_mut(project, *id)? {
+        if let RegionContent::Audio {
+            looped, reversed, ..
+        } = audio_mut(project, *id)?
+        {
             if *looped && on {
                 return Err(EditError::Incompatible(
                     "looped regions cannot be reversed; turn looping off first".into(),
@@ -596,7 +635,11 @@ pub(crate) fn set_reversed(project: &mut Project, ids: &[RegionId], on: bool) ->
     Ok(())
 }
 
-pub(crate) fn set_fade_curve(project: &mut Project, ids: &[RegionId], curve: FadeCurve) -> Result<(), EditError> {
+pub(crate) fn set_fade_curve(
+    project: &mut Project,
+    ids: &[RegionId],
+    curve: FadeCurve,
+) -> Result<(), EditError> {
     if ids.is_empty() {
         return Err(invalid("select the audio regions"));
     }
@@ -614,7 +657,9 @@ pub(crate) fn set_gains(project: &mut Project, gains: &[RegionGain]) -> Result<(
         return Err(invalid("nothing to normalise"));
     }
     for g in gains {
-        if !g.gain_db.is_finite() || !(RegionContent::MIN_GAIN_DB..=RegionContent::MAX_GAIN_DB).contains(&g.gain_db) {
+        if !g.gain_db.is_finite()
+            || !(RegionContent::MIN_GAIN_DB..=RegionContent::MAX_GAIN_DB).contains(&g.gain_db)
+        {
             return Err(invalid("region gain must be between -96 and +24 dB"));
         }
         if let RegionContent::Audio { gain_db, .. } = audio_mut(project, g.id)? {
@@ -634,7 +679,11 @@ pub(crate) fn slice(
     let (t, r) = locate(project, id)?;
     let region = &project.tracks[t].regions[r];
     let (start, end) = (region.start, region.end());
-    let mut at: Vec<Ticks> = positions.iter().copied().filter(|p| *p > start && *p < end).collect();
+    let mut at: Vec<Ticks> = positions
+        .iter()
+        .copied()
+        .filter(|p| *p > start && *p < end)
+        .collect();
     at.sort_unstable();
     at.dedup();
     if at.is_empty() {
@@ -678,7 +727,10 @@ pub(crate) fn bounce_in_place(
         .clone()
         .ok_or_else(|| invalid("a bounced file must be measured"))?;
     if project.tracks.len() >= limits::MAX_TRACKS {
-        return Err(EditError::Limit(format!("at most {} tracks", limits::MAX_TRACKS)));
+        return Err(EditError::Limit(format!(
+            "at most {} tracks",
+            limits::MAX_TRACKS
+        )));
     }
     if project.media_asset(asset.id).is_some() {
         return Err(invalid("media id already in the pool"));
@@ -690,7 +742,8 @@ pub(crate) fn bounce_in_place(
         locate(project, *id)?;
     }
     let map = tempo_map(project)?;
-    let end = crate::timeline_edit::tick_after_frames(&map, start, info.frames.max(1), info.sample_rate);
+    let end =
+        crate::timeline_edit::tick_after_frames(&map, start, info.frames.max(1), info.sample_rate);
     let source = &project.tracks[index];
     let name: String = format!("{} Bounce", source.name)
         .chars()
@@ -755,7 +808,10 @@ pub fn used_media(project: &Project) -> HashSet<MediaId> {
             used.insert(f.media);
         }
         for r in &t.regions {
-            if let RegionContent::Audio { media: Some(id), .. } = r.content {
+            if let RegionContent::Audio {
+                media: Some(id), ..
+            } = r.content
+            {
                 used.insert(id);
             }
         }

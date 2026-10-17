@@ -121,7 +121,12 @@ fn shift_tick(map: &TempoMap, tick: Ticks, seconds: f64) -> Ticks {
 }
 
 /// The ordinary audio regions a comp plays as (fresh ids, no capture data).
-pub fn comp_regions(project: &Project, map: &TempoMap, track: &Track, comp: &TakeComp) -> Vec<Region> {
+pub fn comp_regions(
+    project: &Project,
+    map: &TempoMap,
+    track: &Track,
+    comp: &TakeComp,
+) -> Vec<Region> {
     let half = comp.crossfade_ms.clamp(0.0, MAX_CROSSFADE_MS) / 2000.0;
     let segs = &comp.segments;
     let mut out = Vec::with_capacity(segs.len());
@@ -130,15 +135,26 @@ pub fn comp_regions(project: &Project, map: &TempoMap, track: &Track, comp: &Tak
             continue;
         };
         let prev = k > 0 && segs[k - 1].end == seg.start && segs[k - 1].take != seg.take;
-        let next = segs.get(k + 1).is_some_and(|n| n.start == seg.end && n.take != seg.take);
-        let start = if prev { shift_tick(map, seg.start, -half) } else { seg.start };
-        let end = if next { shift_tick(map, seg.end, half) } else { seg.end };
+        let next = segs
+            .get(k + 1)
+            .is_some_and(|n| n.start == seg.end && n.take != seg.take);
+        let start = if prev {
+            shift_tick(map, seg.start, -half)
+        } else {
+            seg.start
+        };
+        let end = if next {
+            shift_tick(map, seg.end, half)
+        } else {
+            seg.end
+        };
         let start = start.max(take.start);
         let end = end.min(take.end());
         if start >= end {
             continue;
         }
-        let Ok(mut region) = crate::timeline_edit::trimmed_copy(project, map, take, start, end) else {
+        let Ok(mut region) = crate::timeline_edit::trimmed_copy(project, map, take, start, end)
+        else {
             continue;
         };
         if let RegionContent::Audio {
@@ -163,7 +179,11 @@ pub fn comp_regions(project: &Project, map: &TempoMap, track: &Track, comp: &Tak
             } else {
                 0
             };
-            *fade_out = if !next && end == take.end() { take_fades.1 } else { 0 };
+            *fade_out = if !next && end == take.end() {
+                take_fades.1
+            } else {
+                0
+            };
         }
         region.id = RegionId::new();
         region.capture = None;
@@ -181,7 +201,9 @@ fn comp_mut(track: &mut Track, folder: RegionId) -> Option<&mut TakeComp> {
 
 fn check_folder(track: &Track, folder: RegionId) -> Result<(Ticks, Ticks), EditError> {
     if track.kind != TrackKind::Audio {
-        return Err(EditError::Incompatible("comping works on audio take folders".into()));
+        return Err(EditError::Incompatible(
+            "comping works on audio take folders".into(),
+        ));
     }
     folder_span(track, folder).ok_or_else(|| invalid("the take folder does not exist"))
 }
@@ -206,7 +228,9 @@ pub(crate) fn comp_take(
     start: Ticks,
     end: Ticks,
 ) -> Result<(), EditError> {
-    let track = project.track_mut(track_id).ok_or(EditError::UnknownTrack(track_id))?;
+    let track = project
+        .track_mut(track_id)
+        .ok_or(EditError::UnknownTrack(track_id))?;
     let (fs, fe) = check_folder(track, folder)?;
     if take_region(track, folder, take).is_none() {
         return Err(invalid("take does not exist"));
@@ -266,7 +290,9 @@ pub(crate) fn comp_take(
         }
     }
     if merged.len() > MAX_SEGMENTS {
-        return Err(EditError::Limit(format!("at most {MAX_SEGMENTS} comp segments")));
+        return Err(EditError::Limit(format!(
+            "at most {MAX_SEGMENTS} comp segments"
+        )));
     }
     comp.segments = merged;
     mute_takes(track, folder, None);
@@ -280,7 +306,9 @@ pub(crate) fn select_take(
     folder: RegionId,
     take: u32,
 ) -> Result<(), EditError> {
-    let track = project.track_mut(track_id).ok_or(EditError::UnknownTrack(track_id))?;
+    let track = project
+        .track_mut(track_id)
+        .ok_or(EditError::UnknownTrack(track_id))?;
     if take_region(track, folder, take).is_none() {
         return Err(invalid("take does not exist"));
     }
@@ -303,10 +331,14 @@ pub(crate) fn set_crossfade(
     if !ms.is_finite() || !(0.0..=MAX_CROSSFADE_MS).contains(&ms) {
         return Err(invalid("comp crossfades are 0–200 ms"));
     }
-    let track = project.track_mut(track_id).ok_or(EditError::UnknownTrack(track_id))?;
+    let track = project
+        .track_mut(track_id)
+        .ok_or(EditError::UnknownTrack(track_id))?;
     let comp = comp_mut(track, folder).ok_or_else(|| invalid("the take folder has no comp"))?;
     if comp.flattened {
-        return Err(EditError::Incompatible("unflatten the comp to change its crossfades".into()));
+        return Err(EditError::Incompatible(
+            "unflatten the comp to change its crossfades".into(),
+        ));
     }
     comp.crossfade_ms = ms;
     Ok(())
@@ -319,7 +351,9 @@ pub(crate) fn flatten(
     outcome: &mut EditOutcome,
 ) -> Result<(), EditError> {
     let map = tempo_map(project)?;
-    let ti = project.track_index(track_id).ok_or(EditError::UnknownTrack(track_id))?;
+    let ti = project
+        .track_index(track_id)
+        .ok_or(EditError::UnknownTrack(track_id))?;
     let track = &project.tracks[ti];
     let comp = track
         .comps
@@ -347,8 +381,14 @@ pub(crate) fn flatten(
     Ok(())
 }
 
-pub(crate) fn unflatten(project: &mut Project, track_id: TrackId, folder: RegionId) -> Result<(), EditError> {
-    let track = project.track_mut(track_id).ok_or(EditError::UnknownTrack(track_id))?;
+pub(crate) fn unflatten(
+    project: &mut Project,
+    track_id: TrackId,
+    folder: RegionId,
+) -> Result<(), EditError> {
+    let track = project
+        .track_mut(track_id)
+        .ok_or(EditError::UnknownTrack(track_id))?;
     let comp = comp_mut(track, folder).ok_or_else(|| invalid("the take folder has no comp"))?;
     if !comp.flattened {
         return Err(invalid("the comp is not flattened"));
@@ -372,7 +412,9 @@ pub(crate) fn prune(project: &mut Project) {
             .iter()
             .filter_map(|r| r.capture.as_ref().map(|c| (c.folder, c.take)))
             .collect();
-        track.comps.retain(|c| takes.iter().any(|(f, _)| *f == c.folder));
+        track
+            .comps
+            .retain(|c| takes.iter().any(|(f, _)| *f == c.folder));
         for comp in &mut track.comps {
             let folder = comp.folder;
             comp.segments.retain(|s| takes.contains(&(folder, s.take)));
@@ -388,7 +430,8 @@ pub(crate) fn validate_track(path: &str, track: &Track) -> Result<(), Validation
         if !folders.insert(comp.folder) {
             return Err(ValidationError::new(cp, "duplicate comp for a take folder"));
         }
-        if !comp.crossfade_ms.is_finite() || !(0.0..=MAX_CROSSFADE_MS).contains(&comp.crossfade_ms) {
+        if !comp.crossfade_ms.is_finite() || !(0.0..=MAX_CROSSFADE_MS).contains(&comp.crossfade_ms)
+        {
             return Err(ValidationError::new(cp, "crossfade must be 0–200 ms"));
         }
         if comp.segments.len() > MAX_SEGMENTS {
@@ -397,7 +440,10 @@ pub(crate) fn validate_track(path: &str, track: &Track) -> Result<(), Validation
         let mut prev_end = 0;
         for s in &comp.segments {
             if s.start >= s.end || s.start < prev_end {
-                return Err(ValidationError::new(cp, "segments must be ordered and must not overlap"));
+                return Err(ValidationError::new(
+                    cp,
+                    "segments must be ordered and must not overlap",
+                ));
             }
             prev_end = s.end;
         }
@@ -431,7 +477,9 @@ pub fn freeze_fingerprint(project: &Project, track: &Track) -> String {
         .regions
         .iter()
         .filter_map(|r| match &r.content {
-            RegionContent::Audio { media: Some(id), .. } => project.media_asset(*id).map(|a| &a.info),
+            RegionContent::Audio {
+                media: Some(id), ..
+            } => project.media_asset(*id).map(|a| &a.info),
             _ => None,
         })
         .collect();
@@ -454,10 +502,10 @@ pub fn freeze_fingerprint(project: &Project, track: &Track) -> String {
 
 /// Whether the track's freeze still matches what it was rendered from.
 pub fn freeze_is_current(project: &Project, track: &Track) -> bool {
-    track
-        .freeze
-        .as_ref()
-        .is_some_and(|f| f.fingerprint == freeze_fingerprint(project, track) && project.media_asset(f.media).is_some())
+    track.freeze.as_ref().is_some_and(|f| {
+        f.fingerprint == freeze_fingerprint(project, track)
+            && project.media_asset(f.media).is_some()
+    })
 }
 
 pub(crate) fn freeze(
@@ -468,7 +516,9 @@ pub(crate) fn freeze(
 ) -> Result<(), EditError> {
     let track = project.track(id).ok_or(EditError::UnknownTrack(id))?;
     if track.kind == TrackKind::Midi {
-        return Err(EditError::Incompatible("external MIDI tracks have no audio to freeze".into()));
+        return Err(EditError::Incompatible(
+            "external MIDI tracks have no audio to freeze".into(),
+        ));
     }
     if asset.info.is_none() {
         return Err(invalid("a freeze file must be measured"));
@@ -529,7 +579,11 @@ pub(crate) fn check_frozen(before: &Project, after: &Project) -> Result<(), Edit
     Ok(())
 }
 
-pub(crate) fn validate_freeze(path: &str, track: &Track, media: &HashSet<MediaId>) -> Result<(), ValidationError> {
+pub(crate) fn validate_freeze(
+    path: &str,
+    track: &Track,
+    media: &HashSet<MediaId>,
+) -> Result<(), ValidationError> {
     if let Some(f) = &track.freeze {
         if !media.contains(&f.media) {
             return Err(ValidationError::new(
@@ -538,7 +592,10 @@ pub(crate) fn validate_freeze(path: &str, track: &Track, media: &HashSet<MediaId
             ));
         }
         if f.fingerprint.len() > 32 {
-            return Err(ValidationError::new(format!("{path}.freeze"), "invalid fingerprint"));
+            return Err(ValidationError::new(
+                format!("{path}.freeze"),
+                "invalid fingerprint",
+            ));
         }
     }
     Ok(())

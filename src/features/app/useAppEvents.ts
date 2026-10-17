@@ -33,6 +33,8 @@ import {
 } from "../project/regionActions";
 import { locate, toggleMetronome, togglePlay, stop } from "../transport/transportActions";
 import { connectMidi } from "../../state/midi";
+import type { SessionView } from "../../bindings/SessionView";
+import { glueSelected } from "../project/editingActions";
 import { connectCapture } from "../../state/capture";
 import { connectTransport } from "../../state/transport";
 
@@ -142,6 +144,10 @@ function onKeyDown(e: KeyboardEvent) {
     e.preventDefault();
     return redo();
   }
+  if (!isEditableTarget(e.target) && mod && !e.shiftKey && e.key.toLowerCase() === "j") {
+    e.preventDefault();
+    return void glueSelected();
+  }
   if (isEditableTarget(e.target) || mod || e.altKey) return;
 
   switch (e.key) {
@@ -194,6 +200,8 @@ export function useAppEvents() {
     const unlisten = [
       listen<string>("menu", (e) => runMenuAction(e.payload)),
       listen("app://close-requested", () => void quitApp()),
+      // Automation written during playback becomes one edit in the core.
+      listen<SessionView>("project://view", (e) => useProject.getState().setView(e.payload)),
     ];
     return () => {
       unlisten.forEach((p) => void p.then((f) => f()));

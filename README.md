@@ -23,10 +23,13 @@ A desktop digital audio workstation in development, built with **Rust, Tauri 2, 
 | **Projects** | Create, open and save `.elyvon` projects; use Save As and preserve names, tracks, regions and musical settings. |
 | **History and recovery** | Undo and redo edits, receive unsaved-change prompts and restore recovery snapshots after an unexpected exit. Project files are saved atomically. |
 | **Tracks** | Create audio, instrument and MIDI tracks; rename, duplicate, delete, reorder, recolour and select multiple tracks. |
-| **Arrangement** | Navigate by bar, move the cursor, adjust zoom and use the grid and snapping. Move regions in time or between compatible tracks, and create empty MIDI regions. |
+| **Arrangement** | Navigate by bar, zoom and snap. Move, trim, split, glue, slip (Ctrl+Alt-drag), ripple-delete and marquee-edit regions; reverse, normalise, crossfade, slice at transients and bounce in place — all without changing your files. |
+| **Takes and comping** | Cycle recordings become take folders; drag across takes in **Takes & Audio** to build a comp with smooth crossfades, then flatten or unflatten it. |
+| **Automation** | Draw volume, pan, mute, send and insert-parameter automation in the **Automation** editor, or record it from the mixer in Touch, Latch or Write mode. |
 | **Musical settings** | Change tempo, time signature and key; define and edit the project's cycle range. |
-| **Mixer** | Adjust volume, pan, mute and solo per track. These settings are saved in the project; they do not process audio yet. |
-| **Piano roll** | Inspect a MIDI region's notes and their timing. This is a read-only preview. |
+| **Mixer** | Volume, pan, mute, solo, aux buses, sends, native inserts, groups, real meters, stems export, freeze and automation modes per channel. |
+| **Piano roll** | Draw and edit notes, velocities and controllers; quantise, transpose and more. |
+| **Media** | **Functions ▸ Project media** finds moved files by content, collects media into the project folder and backs up unused files. |
 | **File library** | Browse folders and open `.elyvon` projects from the left sidebar. |
 | **Workspace** | Show, hide and resize the library, inspector and editors; switch between mixer and piano roll. |
 | **Desktop controls** | Use native menus, keyboard shortcuts, preferences and diagnostic logs. |
@@ -35,9 +38,9 @@ A desktop digital audio workstation in development, built with **Rust, Tauri 2, 
 ### Still to come
 
 - Physical-device validation across the intended operating systems; multi-device input clock drift and live input sample-rate conversion.
-- Advanced audio editing, final mixdown formats and bounce; import, region editing and diagnostic WAV export are implemented.
-- Piano-roll note editing, playback note chase and internal instruments; MIDI 2.0/UMP.
-- Built-in instruments, sampler, effects, buses and plug-in hosting.
+- Final mixdown formats, flex time and a sample-level editor; listening tests of automation and comps on real hardware.
+- Playback note chase and production instruments; MIDI 2.0/UMP.
+- Sampler, more effects and plug-in hosting.
 - Loop library with audio previews.
 
 Playback uses the native engine clock; the internal-clock fallback is labelled as silent. Audio recording requires a usable input device, armed tracks and matching sample rates. MIDI without an external output is explicitly monitor-only. Effect slots remain unavailable without hosted processors.

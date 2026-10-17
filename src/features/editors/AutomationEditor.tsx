@@ -39,6 +39,7 @@ import { isRolling, useTransport } from "../../state/transport";
 import { useUi } from "../../state/ui";
 
 const PAD = 10;
+const EMPTY: Set<number> = new Set();
 const HIT = 6;
 const DIVISIONS: GridSpec["division"][] = ["bar", "quarter", "eighth", "sixteenth", "thirtySecond"];
 
@@ -79,16 +80,17 @@ export function AutomationEditor() {
   const project = useProject((s) => s.view?.project);
   const trackIds = useUi((s) => s.selection.trackIds);
   const regionIds = useUi((s) => s.selection.regionIds);
-  const [picked, setPicked] = useState<ChannelRef | null>(null);
   const selectedTrack = trackIds[trackIds.length - 1];
   // Follow the arrangement selection until another channel is picked here.
-  useEffect(() => setPicked(null), [selectedTrack]);
+  const [pickedFor, setPickedFor] = useState<{ track: string | undefined; channel: ChannelRef } | null>(null);
+  const picked = pickedFor && pickedFor.track === selectedTrack ? pickedFor.channel : null;
   if (!project) return null;
   const all = channels(project);
   const channel: ChannelRef | undefined =
     (picked && all.find((c) => sameChannel(c, picked))) ??
     all.find((c) => c.type === "track" && c.id === selectedTrack) ??
-    all.find((c) => c.type === "track");
+    all.find((c) => c.type === "track") ??
+    all[all.length - 1];
   if (!channel) {
     return (
       <div className="editor-empty">
@@ -100,7 +102,16 @@ export function AutomationEditor() {
   }
   const track = channel.type === "track" ? project.tracks.find((t) => t.id === channel.id) : undefined;
   const region = track?.regions.find((r) => regionIds.includes(r.id));
-  return <LaneEditor key={channelKey(channel)} project={project} channel={channel} region={region?.id ?? null} channels={all} onPick={setPicked} />;
+  return (
+    <LaneEditor
+      key={channelKey(channel)}
+      project={project}
+      channel={channel}
+      region={region?.id ?? null}
+      channels={all}
+      onPick={(c) => setPickedFor({ track: selectedTrack, channel: c })}
+    />
+  );
 }
 
 interface Drag {
@@ -150,7 +161,11 @@ function LaneEditor({
   const spec = paramSpec(param);
   const [grid, setGrid] = useState<GridSpec>({ division: "sixteenth", triplet: false, swing: 0 });
   const [snapOn, setSnapOn] = useState(true);
-  const [selection, setSelection] = useState<Set<number>>(() => new Set());
+  // Selection belongs to one lane: switching lanes starts empty.
+  const scopeKey = `${paramK}|${useRegion}|${regionId}`;
+  const [selState, setSelState] = useState<{ key: string; ids: Set<number> }>({ key: scopeKey, ids: new Set() });
+  const selection = selState.key === scopeKey ? selState.ids : EMPTY;
+  const setSelection = (ids: Set<number>) => setSelState({ key: scopeKey, ids });
   const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[] } | null>(null);
   const [hover, setHover] = useState<{ tick: number; value: number } | null>(null);
   const [view, setView] = useState({ x: 0, w: 600, h: 160 });
@@ -159,8 +174,6 @@ function LaneEditor({
   const drag = useRef<Drag | null>(null);
   const [, force] = useState(0);
   const ppt = pxPerQuarter / 960;
-
-  useEffect(() => setSelection(new Set()), [paramK, useRegion, regionId]);
 
   const end = Math.max(map.barStart(project.lengthBars), project.tracks.flatMap((t) => t.regions).reduce((m, r) => Math.max(m, r.start + r.length), 0) + ticksPerBar(project.transport.timeSignature));
   const width = Math.ceil(end * ppt) + 200;
@@ -188,14 +201,11 @@ function LaneEditor({
   const staticV = staticValue(project, channel, param) ?? spec.min;
   const playhead = isRolling(snapshot) && snapshot ? snapshot.ticks : cursor;
 
-  const run = useCallback(
-    async (cmd: Parameters<typeof apply>[0]) => {
-      const out = await apply(cmd);
-      if (out?.createdPoints.length) setSelection(new Set(out.createdPoints));
-      return out;
-    },
-    [apply],
-  );
+  const run = async (cmd: Parameters<typeof apply>[0]) => {
+    const out = await apply(cmd);
+    if (out?.createdPoints.length) setSelection(new Set(out.createdPoints));
+    return out;
+  };
 
   // ---- drawing ----
   useEffect(() => {

@@ -55,7 +55,8 @@ fn not_playing(state: &AppState) -> IpcResult<()> {
     if state.audio.snapshot().is_some_and(|s| {
         matches!(
             s.state,
-            elyvon_audio::transport::PlayState::Playing | elyvon_audio::transport::PlayState::CountIn
+            elyvon_audio::transport::PlayState::Playing
+                | elyvon_audio::transport::PlayState::CountIn
         )
     }) {
         return Err(busy("Stop playback first."));
@@ -81,29 +82,47 @@ fn apply(app: &AppHandle, cmd: &EditCommand) -> IpcResult<ApplyResult> {
 fn region_and_buffer(
     state: &AppState,
     id: RegionId,
-) -> IpcResult<(elyvon_project::Region, elyvon_core::TempoMap, Arc<MediaBuffer>)> {
+) -> IpcResult<(
+    elyvon_project::Region,
+    elyvon_core::TempoMap,
+    Arc<MediaBuffer>,
+)> {
     let s = state.session();
     let p = s.project();
     let (ti, ri) = p
         .find_region(id)
         .ok_or_else(|| IpcError::new(ErrorCode::NotFound, "The region no longer exists."))?;
     let region = p.tracks[ti].regions[ri].clone();
-    let map = p.transport.tempo_map().map_err(|e| IpcError::internal(e.to_string()))?;
-    let RegionContent::Audio { media: Some(media), .. } = region.content else {
+    let map = p
+        .transport
+        .tempo_map()
+        .map_err(|e| IpcError::internal(e.to_string()))?;
+    let RegionContent::Audio {
+        media: Some(media), ..
+    } = region.content
+    else {
         return Err(invalid("Choose an audio region with a file."));
     };
-    let buffer = state
-        .audio
-        .buffer(media)
-        .ok_or_else(|| IpcError::new(ErrorCode::Media, "The region's audio file is not loaded (missing or still loading)."))?;
+    let buffer = state.audio.buffer(media).ok_or_else(|| {
+        IpcError::new(
+            ErrorCode::Media,
+            "The region's audio file is not loaded (missing or still loading).",
+        )
+    })?;
     Ok((region, map, buffer))
 }
 
 /// Sets each region's gain so its peak reaches `target_db` (non-destructive).
 #[tauri::command]
-pub async fn region_normalize(app: AppHandle, ids: Vec<RegionId>, target_db: f64) -> IpcResult<ApplyResult> {
+pub async fn region_normalize(
+    app: AppHandle,
+    ids: Vec<RegionId>,
+    target_db: f64,
+) -> IpcResult<ApplyResult> {
     if ids.is_empty() || ids.len() > 4096 || !(-60.0..=0.0).contains(&target_db) {
-        return Err(invalid("Choose 1–4096 regions and a target between −60 and 0 dBFS."));
+        return Err(invalid(
+            "Choose 1–4096 regions and a target between −60 and 0 dBFS.",
+        ));
     }
     let state = app.state::<AppState>();
     state.ensure_editable()?;
@@ -132,7 +151,11 @@ pub async fn region_normalize(app: AppHandle, ids: Vec<RegionId>, target_db: f64
 
 /// Onsets in a region (absolute ticks) for markers or slices.
 #[tauri::command]
-pub async fn region_transients(app: AppHandle, id: RegionId, sensitivity: f64) -> IpcResult<Vec<Ticks>> {
+pub async fn region_transients(
+    app: AppHandle,
+    id: RegionId,
+    sensitivity: f64,
+) -> IpcResult<Vec<Ticks>> {
     let state = app.state::<AppState>();
     let (region, map, buffer) = region_and_buffer(&state, id)?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -161,7 +184,13 @@ fn render_dir(state: &AppState, project: &Project, path: Option<&Path>, kind: &s
 fn safe_name(name: &str) -> String {
     let s: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == ' ' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == ' ' {
+                c
+            } else {
+                '_'
+            }
+        })
         .take(48)
         .collect();
     let s = s.trim().to_owned();
@@ -205,20 +234,31 @@ async fn render_to_file(
     let dir = render_dir(&state, &project, path.as_deref(), kind);
     let file = dir.join(format!("{} {}.wav", safe_name(&name), stamp()));
     let rate = state.audio.rate();
-    state.rendering.store(true, std::sync::atomic::Ordering::Release);
+    state
+        .rendering
+        .store(true, std::sync::atomic::Ordering::Release);
     let guard = RenderGuard(Arc::clone(&state.rendering));
     let target = file.clone();
     let rendered = tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
         let lookup = |id| media.get(&id).cloned();
-        let r = analysis::render_track(&project, &lookup, track, regions.as_deref(), include_fader, 2.0, rate)?;
+        let r = analysis::render_track(
+            &project,
+            &lookup,
+            track,
+            regions.as_deref(),
+            include_fader,
+            2.0,
+            rate,
+        )?;
         if r.missing_media > 0 {
             return Err(format!(
                 "{} region(s) have no audio file loaded; locate the missing files before rendering",
                 r.missing_media
             ));
         }
-        analysis::write_render(&target, &r).map_err(|e| format!("could not write {}: {e}", target.display()))?;
+        analysis::write_render(&target, &r)
+            .map_err(|e| format!("could not write {}: {e}", target.display()))?;
         Ok::<_, String>(r)
     })
     .await
@@ -227,12 +267,16 @@ async fn render_to_file(
     // Verify what was written by decoding it back.
     let budget = state.audio.remaining_budget();
     let load = file.clone();
-    let buffer = tauri::async_runtime::spawn_blocking(move || MediaStore::load_file(&load, rate, budget))
-        .await
-        .map_err(IpcError::from)?
-        .map_err(|e| IpcError::new(ErrorCode::Media, e.to_string()))?;
+    let buffer =
+        tauri::async_runtime::spawn_blocking(move || MediaStore::load_file(&load, rate, budget))
+            .await
+            .map_err(IpcError::from)?
+            .map_err(|e| IpcError::new(ErrorCode::Media, e.to_string()))?;
     if buffer.frames() != rendered.frames() {
-        return Err(IpcError::new(ErrorCode::Media, "The rendered file could not be verified."));
+        return Err(IpcError::new(
+            ErrorCode::Media,
+            "The rendered file could not be verified.",
+        ));
     }
     let asset = MediaAsset {
         id: MediaId::new(),
@@ -284,12 +328,24 @@ pub async fn track_bounce(
             let s = s.session();
             s.project()
                 .track(track_id)
-                .map(|t| t.regions.iter().filter(|r| !r.muted).map(|r| r.id).collect())
+                .map(|t| {
+                    t.regions
+                        .iter()
+                        .filter(|r| !r.muted)
+                        .map(|r| r.id)
+                        .collect()
+                })
                 .unwrap_or_default()
         }
     };
-    let (asset, start, buffer, file) =
-        render_to_file(&app, track_id, region_ids.filter(|v| !v.is_empty()), include_fader, "Bounces").await?;
+    let (asset, start, buffer, file) = render_to_file(
+        &app,
+        track_id,
+        region_ids.filter(|v| !v.is_empty()),
+        include_fader,
+        "Bounces",
+    )
+    .await?;
     let state = app.state::<AppState>();
     let media_id = asset.id;
     let result = apply(
@@ -317,7 +373,11 @@ pub struct RepairResult {
 }
 
 fn project_dir(state: &AppState) -> Option<PathBuf> {
-    state.session().path().and_then(Path::parent).map(Path::to_path_buf)
+    state
+        .session()
+        .path()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
 }
 
 /// Searches `directory` for missing files and relinks the verified matches
@@ -330,11 +390,16 @@ pub async fn media_repair(app: AppHandle, directory: String) -> IpcResult<Repair
     let dir = project_dir(&state);
     let root = PathBuf::from(directory);
     if !root.is_dir() {
-        return Err(IpcError::new(ErrorCode::NotFound, "Choose a folder to search."));
+        return Err(IpcError::new(
+            ErrorCode::NotFound,
+            "Choose a folder to search.",
+        ));
     }
-    let report = tauri::async_runtime::spawn_blocking(move || repair::find_missing(&project, dir.as_deref(), &root, 200_000))
-        .await
-        .map_err(IpcError::from)?;
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        repair::find_missing(&project, dir.as_deref(), &root, 200_000)
+    })
+    .await
+    .map_err(IpcError::from)?;
     let view = if report.relinked.is_empty() {
         state.session().view()
     } else {
@@ -361,7 +426,10 @@ pub async fn media_collect(app: AppHandle) -> IpcResult<SessionView> {
     let state = app.state::<AppState>();
     state.ensure_editable()?;
     let dir = project_dir(&state).ok_or_else(|| {
-        IpcError::new(ErrorCode::NeedsSaveAs, "Save the project first: media are collected next to the project file.")
+        IpcError::new(
+            ErrorCode::NeedsSaveAs,
+            "Save the project first: media are collected next to the project file.",
+        )
     })?;
     let project = state.session().project().clone();
     let relinks = tauri::async_runtime::spawn_blocking(move || repair::collect(&project, &dir))
@@ -394,18 +462,30 @@ pub async fn media_unused(app: AppHandle) -> IpcResult<Vec<String>> {
 #[tauri::command]
 pub async fn media_backup_unused(app: AppHandle, confirm: bool) -> IpcResult<String> {
     if !confirm {
-        return Err(IpcError::new(ErrorCode::Cancelled, "Confirm moving the unused files to a backup folder."));
+        return Err(IpcError::new(
+            ErrorCode::Cancelled,
+            "Confirm moving the unused files to a backup folder.",
+        ));
     }
     let state = app.state::<AppState>();
     state.ensure_editable()?;
-    let dir = project_dir(&state).ok_or_else(|| IpcError::new(ErrorCode::NeedsSaveAs, "Save the project first."))?;
+    let dir = project_dir(&state)
+        .ok_or_else(|| IpcError::new(ErrorCode::NeedsSaveAs, "Save the project first."))?;
     let project = state.session().project().clone();
     let files = repair::unused_files(&project, &dir);
     if files.is_empty() {
-        return Err(IpcError::new(ErrorCode::NotFound, "There are no unused files."));
+        return Err(IpcError::new(
+            ErrorCode::NotFound,
+            "There are no unused files.",
+        ));
     }
-    let backup = repair::move_to_backup(&files, &dir, &stamp()).map_err(|e| IpcError::new(ErrorCode::Io, e))?;
-    log::info!("moved {} unused file(s) to {}", files.len(), backup.display());
+    let backup = repair::move_to_backup(&files, &dir, &stamp())
+        .map_err(|e| IpcError::new(ErrorCode::Io, e))?;
+    log::info!(
+        "moved {} unused file(s) to {}",
+        files.len(),
+        backup.display()
+    );
     Ok(backup.display().to_string())
 }
 

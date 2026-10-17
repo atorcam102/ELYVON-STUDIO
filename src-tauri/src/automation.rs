@@ -12,7 +12,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use elyvon_audio::automation::{ParamOverride, StripKey};
 use elyvon_audio::transport::{PlayState, TransportSnapshot};
-use elyvon_project::automation::{AutomationParam, AutomationTarget, channel_automation, param_exists};
+use elyvon_project::automation::{
+    AutomationParam, AutomationTarget, channel_automation, param_exists,
+};
 use elyvon_project::automation_record::{AutomationRecorder, TouchPhase};
 use elyvon_project::mixer::ChannelRef;
 use tauri::{AppHandle, Emitter, Manager};
@@ -57,7 +59,11 @@ impl AutomationCapture {
                     let session = state.session();
                     let mut rec = lock(&self.recorder);
                     if rec.is_none() {
-                        *rec = Some(AutomationRecorder::start(session.project(), tick_of(snap), snap.cycles));
+                        *rec = Some(AutomationRecorder::start(
+                            session.project(),
+                            tick_of(snap),
+                            snap.cycles,
+                        ));
                     }
                 }
             }
@@ -120,7 +126,9 @@ impl AutomationCapture {
         };
         let captured = {
             let mut rec = lock(&self.recorder);
-            let r = rec.get_or_insert_with(|| AutomationRecorder::start(project, tick_of(&snap), snap.cycles));
+            let r = rec.get_or_insert_with(|| {
+                AutomationRecorder::start(project, tick_of(&snap), snap.cycles)
+            });
             r.touch(target, mode, phase, value, tick_of(&snap), snap.cycles)
         };
         drop(session);

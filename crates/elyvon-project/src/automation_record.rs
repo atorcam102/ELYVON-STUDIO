@@ -83,7 +83,13 @@ impl AutomationRecorder {
             .tracks
             .iter()
             .map(|t| ChannelRef::Track { id: t.id })
-            .chain(project.mixer.auxes.iter().map(|a| ChannelRef::Aux { id: a.id }))
+            .chain(
+                project
+                    .mixer
+                    .auxes
+                    .iter()
+                    .map(|a| ChannelRef::Aux { id: a.id }),
+            )
             .chain(std::iter::once(ChannelRef::Master));
         for channel in channels {
             let Some(auto) = channel_automation(project, channel) else {
@@ -189,7 +195,8 @@ impl AutomationRecorder {
                 }
             }
             None => {
-                let released = (phase == TouchPhase::End && mode == AutomationMode::Touch).then_some(at);
+                let released =
+                    (phase == TouchPhase::End && mode == AutomationMode::Touch).then_some(at);
                 self.touches.push(Touch {
                     target,
                     mode,
@@ -218,7 +225,11 @@ impl AutomationRecorder {
         };
         let mut writes = Vec::new();
         // Touch and Latch channels: one write per gesture.
-        for t in self.touches.iter().filter(|t| t.mode != AutomationMode::Write) {
+        for t in self
+            .touches
+            .iter()
+            .filter(|t| t.mode != AutomationMode::Write)
+        {
             let (_, pass_end) = self.passes[t.pass];
             let Some(&(begin, _)) = t.samples.first() else {
                 continue;
@@ -235,11 +246,21 @@ impl AutomationRecorder {
                     pass_end
                 }
             };
-            writes.push(make_write(t.target, begin, to.max(begin), &samples, map.as_ref()));
+            writes.push(make_write(
+                t.target,
+                begin,
+                to.max(begin),
+                &samples,
+                map.as_ref(),
+            ));
         }
         // Write channels: every lane (and every touched parameter) over every pass.
         let mut targets: Vec<(AutomationTarget, f64)> = self.write_targets.clone();
-        for t in self.touches.iter().filter(|t| t.mode == AutomationMode::Write) {
+        for t in self
+            .touches
+            .iter()
+            .filter(|t| t.mode == AutomationMode::Write)
+        {
             if !targets.iter().any(|(x, _)| *x == t.target)
                 && let Some(v) = static_value(project, t.target.channel, &t.target.param)
             {
@@ -252,11 +273,9 @@ impl AutomationRecorder {
             }
             for &(target, base) in &targets {
                 let mut samples = vec![(start, base)];
-                for t in self
-                    .touches
-                    .iter()
-                    .filter(|t| t.mode == AutomationMode::Write && t.pass == pass && t.target == target)
-                {
+                for t in self.touches.iter().filter(|t| {
+                    t.mode == AutomationMode::Write && t.pass == pass && t.target == target
+                }) {
                     samples.extend(t.samples.iter().copied());
                 }
                 samples.sort_by_key(|s| s.0);
@@ -289,7 +308,8 @@ fn make_write(
     let hold = |t: Ticks| -> Ticks {
         map.map_or(58, |m| {
             let s = m.seconds_at(t as f64) - HOLD_RAMP_SECONDS;
-            t.saturating_sub(m.tick_at_seconds(s.max(0.0)).round() as Ticks).max(1)
+            t.saturating_sub(m.tick_at_seconds(s.max(0.0)).round() as Ticks)
+                .max(1)
         })
     };
     let mut points: Vec<AutomationPoint> = Vec::with_capacity(samples.len() * 2);
@@ -338,7 +358,11 @@ fn make_write(
 /// Parameters a channel exposes for writing (for UI menus and tests).
 pub fn writable_params(project: &Project, channel: ChannelRef) -> Vec<AutomationParam> {
     let mut out = Vec::new();
-    for p in [AutomationParam::Volume, AutomationParam::Pan, AutomationParam::Mute] {
+    for p in [
+        AutomationParam::Volume,
+        AutomationParam::Pan,
+        AutomationParam::Mute,
+    ] {
         if crate::automation::param_exists(project, channel, &p) {
             out.push(p);
         }

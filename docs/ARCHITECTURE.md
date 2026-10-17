@@ -217,3 +217,18 @@ Ver [ADR 0007](ADR/0007-notes-as-source-and-a-graph-plan-mixer.md) y
 - El instrumento de pistas *Instrument* es un instrumento de prueba integrado (no un sintetizador
   de producción); teclado virtual, monitor de entrada MIDI y previsualización usan una cola SPSC
   hacia el callback.
+
+## Automatización y edición no destructiva (Fases 10–11)
+
+Ver [ADR 0008](ADR/0008-sample-accurate-automation-and-non-destructive-comping.md) y
+[audit/PHASE-10-11.md](audit/PHASE-10-11.md).
+
+- Las líneas de automatización viven en el proyecto (`elyvon-project::automation`) y se dirigen
+  por id estable. El hilo de control las compila a envolventes por frames, partidas en los cambios
+  de tempo (`elyvon-audio::automation`); el callback las evalúa por muestra sin asignar memoria.
+  Render offline y reproducción en directo son idénticos bit a bit.
+- Los gestos de los controles en Touch/Latch/Write llegan al callback por una cola SPSC
+  (`ParamOverride`) y a un grabador puro; al parar, todo se aplica como una sola edición.
+- Los comps describen qué toma suena en cada tramo; las tomas no cambian. Freeze y bounce
+  escriben ficheros nuevos; reverse, normalizar, slices, slip y glue solo cambian referencias.
+- El historial por instantáneas tiene presupuesto de memoria además del límite de pasos.

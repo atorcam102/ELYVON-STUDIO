@@ -88,6 +88,7 @@ export function ArrangementMenus() {
   const functions: MenuEntry[] = [
     { id: "import", label: "Import audio files…", icon: "importAudio", onSelect: () => void importAudioDialog() },
     { id: "render", label: "Export diagnostic render…", icon: "exportAudio", onSelect: () => void exportDiagnosticRender() },
+    { id: "media", label: "Project media (repair, collect)…", onSelect: () => useUi.getState().setMediaOpen(true) },
     "separator",
     {
       id: "audio",

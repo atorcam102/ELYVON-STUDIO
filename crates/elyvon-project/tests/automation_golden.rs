@@ -43,9 +43,21 @@ fn golden() -> Value {
                 (12_000, -96.0, Curve::Linear),
             ],
         ),
-        lane(AutomationParam::Pan, &[(0, -1.0, Curve::Linear), (3840, 1.0, Curve::Linear)]),
-        lane(AutomationParam::Mute, &[(500, 0.0, Curve::Step), (1500, 1.0, Curve::Step)]),
-        lane(cutoff, &[(0, 20.0, Curve::Linear), (8000, 20_000.0, Curve::Bezier { c1: 0.3, c2: 0.9 })]),
+        lane(
+            AutomationParam::Pan,
+            &[(0, -1.0, Curve::Linear), (3840, 1.0, Curve::Linear)],
+        ),
+        lane(
+            AutomationParam::Mute,
+            &[(500, 0.0, Curve::Step), (1500, 1.0, Curve::Step)],
+        ),
+        lane(
+            cutoff,
+            &[
+                (0, 20.0, Curve::Linear),
+                (8000, 20_000.0, Curve::Bezier { c1: 0.3, c2: 0.9 }),
+            ],
+        ),
     ];
     let ticks: Vec<f64> = vec![
         0.0, 50.0, 100.0, 700.0, 1999.0, 2000.0, 3000.0, 4999.0, 5000.0, 7000.0, 8000.0, 10_500.0,
@@ -61,10 +73,16 @@ fn golden() -> Value {
         .collect();
     // A region lane over [3000, 6000) on the volume lane (normalised values).
     let base = lane_pieces(&lanes[0], 0.0).unwrap();
-    let region = lane(AutomationParam::Volume, &[(0, -20.0, Curve::Linear), (1000, -10.0, Curve::Linear)]);
+    let region = lane(
+        AutomationParam::Volume,
+        &[(0, -20.0, Curve::Linear), (1000, -10.0, Curve::Linear)],
+    );
     let over = lane_pieces(&region, 3000.0).unwrap();
     let merged = overlay(&base, &over, 3000.0, 6000.0);
-    let overlaid: Vec<f64> = ticks.iter().map(|t| pieces_value(&merged, *t).unwrap()).collect();
+    let overlaid: Vec<f64> = ticks
+        .iter()
+        .map(|t| pieces_value(&merged, *t).unwrap())
+        .collect();
     json!({
         "lanes": lanes,
         "ticks": ticks,
@@ -79,11 +97,17 @@ fn golden() -> Value {
 
 #[test]
 fn automation_golden_vectors() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/automation_golden.json");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/automation_golden.json");
     let text = serde_json::to_string_pretty(&golden()).unwrap() + "\n";
     if std::env::var_os("UPDATE_GOLDEN").is_some() {
         std::fs::write(&path, &text).unwrap();
     }
-    let stored = std::fs::read_to_string(&path).expect("run with UPDATE_GOLDEN=1 to create the fixture");
-    assert_eq!(stored.replace("\r\n", "\n"), text, "golden vectors changed; update the UI mirror");
+    let stored =
+        std::fs::read_to_string(&path).expect("run with UPDATE_GOLDEN=1 to create the fixture");
+    assert_eq!(
+        stored.replace("\r\n", "\n"),
+        text,
+        "golden vectors changed; update the UI mirror"
+    );
 }

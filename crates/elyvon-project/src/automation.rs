@@ -87,10 +87,7 @@ impl InsertParam {
             (self, processor),
             (Self::Bypass, _)
                 | (Self::TrimGain, Processor::Trim { .. })
-                | (
-                    Self::FilterCutoff | Self::FilterQ,
-                    Processor::Filter { .. }
-                )
+                | (Self::FilterCutoff | Self::FilterQ, Processor::Filter { .. })
                 | (
                     Self::LimiterCeiling | Self::LimiterRelease,
                     Processor::Limiter { .. }
@@ -197,7 +194,11 @@ impl ParamSpec {
     }
 
     pub fn from_norm(&self, n: f64) -> f64 {
-        let n = if n.is_finite() { n.clamp(0.0, 1.0) } else { 0.0 };
+        let n = if n.is_finite() {
+            n.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         let v = match self.scale {
             Scale::Linear => self.min + n * (self.max - self.min),
             Scale::Log => self.min * (self.max / self.min).powf(n),
@@ -275,7 +276,10 @@ impl Curve {
     fn is_valid(&self) -> bool {
         match *self {
             Self::Bezier { c1, c2 } => {
-                c1.is_finite() && c2.is_finite() && (0.0..=1.0).contains(&c1) && (0.0..=1.0).contains(&c2)
+                c1.is_finite()
+                    && c2.is_finite()
+                    && (0.0..=1.0).contains(&c1)
+                    && (0.0..=1.0).contains(&c2)
             }
             _ => true,
         }
@@ -440,7 +444,11 @@ pub fn lane_pieces(lane: &AutomationLane, base: f64) -> Option<Vec<TickPiece>> {
         }
         let curve = if spec.discrete { Curve::Step } else { p.curve };
         let v0 = norm(p.value);
-        let v1 = if curve == Curve::Step { v0 } else { norm(next.value) };
+        let v1 = if curve == Curve::Step {
+            v0
+        } else {
+            norm(next.value)
+        };
         out.push(TickPiece {
             from: t0,
             to: t1,
@@ -503,7 +511,11 @@ impl AutomationLane {
 // Access and validation
 
 /// Static (unautomated) value of `param` on `channel`.
-pub fn static_value(project: &Project, channel: ChannelRef, param: &AutomationParam) -> Option<f64> {
+pub fn static_value(
+    project: &Project,
+    channel: ChannelRef,
+    param: &AutomationParam,
+) -> Option<f64> {
     let (volume, pan, muted, strip_sends, inserts) = match channel {
         ChannelRef::Track { id } => {
             let t = project.track(id)?;
@@ -606,8 +618,14 @@ fn check_target(project: &Project, target: &AutomationTarget) -> Result<(), Edit
         let (ti, _) = project
             .find_region(rid)
             .ok_or(EditError::UnknownRegion(rid))?;
-        if target.channel != (ChannelRef::Track { id: project.tracks[ti].id }) {
-            return Err(invalid("region automation belongs to the region's own track"));
+        if target.channel
+            != (ChannelRef::Track {
+                id: project.tracks[ti].id,
+            })
+        {
+            return Err(invalid(
+                "region automation belongs to the region's own track",
+            ));
         }
     }
     Ok(())
@@ -672,7 +690,10 @@ pub(crate) fn validate_lanes(path: &str, lanes: &[AutomationLane]) -> Result<(),
                 return Err(ValidationError::new(pp(), "duplicate point id"));
             }
             if p.tick < prev {
-                return Err(ValidationError::new(pp(), "points must be sorted by position"));
+                return Err(ValidationError::new(
+                    pp(),
+                    "points must be sorted by position",
+                ));
             }
             prev = p.tick;
             if p.tick > crate::validate::limits::MAX_TICKS {
@@ -716,7 +737,11 @@ pub(crate) fn validate_project(project: &Project) -> Result<(), ValidationError>
     };
     for (ti, t) in project.tracks.iter().enumerate() {
         let channel = ChannelRef::Track { id: t.id };
-        check(channel, &t.automation.lanes, &format!("tracks[{ti}].automation.lanes"))?;
+        check(
+            channel,
+            &t.automation.lanes,
+            &format!("tracks[{ti}].automation.lanes"),
+        )?;
         for (ri, r) in t.regions.iter().enumerate() {
             if r.automation.is_empty() {
                 continue;
@@ -726,8 +751,14 @@ pub(crate) fn validate_project(project: &Project) -> Result<(), ValidationError>
                 return Err(ValidationError::new(path, "too many region lanes"));
             }
             check(channel, &r.automation, &path)?;
-            if r.automation.iter().any(|l| l.points.iter().any(|p| p.tick > r.length)) {
-                return Err(ValidationError::new(path, "points must lie inside the region"));
+            if r.automation
+                .iter()
+                .any(|l| l.points.iter().any(|p| p.tick > r.length))
+            {
+                return Err(ValidationError::new(
+                    path,
+                    "points must lie inside the region",
+                ));
             }
         }
     }
@@ -755,7 +786,13 @@ pub(crate) fn prune(project: &mut Project) {
         .tracks
         .iter()
         .map(|t| ChannelRef::Track { id: t.id })
-        .chain(project.mixer.auxes.iter().map(|a| ChannelRef::Aux { id: a.id }))
+        .chain(
+            project
+                .mixer
+                .auxes
+                .iter()
+                .map(|a| ChannelRef::Aux { id: a.id }),
+        )
         .chain(std::iter::once(ChannelRef::Master))
         .collect();
     for &c in &channels {
@@ -766,7 +803,11 @@ pub(crate) fn prune(project: &mut Project) {
         if let ChannelRef::Track { id } = c
             && let Some(t) = project.track(id)
         {
-            params.extend(t.regions.iter().flat_map(|r| r.automation.iter().map(|l| l.param)));
+            params.extend(
+                t.regions
+                    .iter()
+                    .flat_map(|r| r.automation.iter().map(|l| l.param)),
+            );
         }
         for p in params {
             if param_exists(project, c, &p) {
@@ -861,15 +902,13 @@ pub(crate) fn add_points(
     let region_len = region_length(project, target)?;
     let lane = lane_mut(project, target, true)?;
     let spec = lane.param.spec();
-    let mut id = lane.next_id();
     let mut created = Vec::with_capacity(points.len());
-    for s in points {
+    for (id, s) in (lane.next_id()..).zip(points) {
         if region_len.is_some_and(|len| s.tick > len) {
             return Err(invalid("region automation must lie inside the region"));
         }
         lane.points.push(spec_point(&spec, s, id)?);
         created.push(id);
-        id += 1;
     }
     lane.sort();
     check_count(lane)?;
@@ -889,7 +928,10 @@ fn region_length(project: &Project, target: &AutomationTarget) -> Result<Option<
 }
 
 fn check_ids(lane: &AutomationLane, ids: &[u32]) -> Result<(), EditError> {
-    match ids.iter().find(|id| !lane.points.iter().any(|p| p.id == **id)) {
+    match ids
+        .iter()
+        .find(|id| !lane.points.iter().any(|p| p.id == **id))
+    {
         Some(id) => Err(invalid(format!("automation point {id} does not exist"))),
         None => Ok(()),
     }
@@ -998,7 +1040,10 @@ pub(crate) fn move_points(
     Ok(created)
 }
 
-pub(crate) fn remove_lane(project: &mut Project, target: &AutomationTarget) -> Result<(), EditError> {
+pub(crate) fn remove_lane(
+    project: &mut Project,
+    target: &AutomationTarget,
+) -> Result<(), EditError> {
     lane_mut(project, target, false)?;
     match target.region {
         None => channel_automation_mut(project, target.channel)?
@@ -1050,8 +1095,18 @@ pub(crate) fn write(project: &mut Project, w: &AutomationWrite) -> Result<(), Ed
         .rev()
         .find(|p| p.tick <= w.to)
         .map_or(Curve::Linear, |p| p.curve);
-    let mut kept_left: Vec<AutomationPoint> = lane.points.iter().filter(|p| p.tick < w.from).copied().collect();
-    let kept_right: Vec<AutomationPoint> = lane.points.iter().filter(|p| p.tick > w.to).copied().collect();
+    let mut kept_left: Vec<AutomationPoint> = lane
+        .points
+        .iter()
+        .filter(|p| p.tick < w.from)
+        .copied()
+        .collect();
+    let kept_right: Vec<AutomationPoint> = lane
+        .points
+        .iter()
+        .filter(|p| p.tick > w.to)
+        .copied()
+        .collect();
     let mut id = lane.next_id();
     let mut mid = Vec::with_capacity(w.points.len() + 2);
     if w.keep_outside {
@@ -1131,10 +1186,7 @@ pub fn thin(points: &[AutomationPoint], spec: &ParamSpec, tolerance: f64) -> Vec
     let norm = |p: &AutomationPoint| spec.to_norm(p.value);
     let mut stack = Vec::new();
     let mut start = 0;
-    for end in 1..n {
-        if !keep[end] {
-            continue;
-        }
+    for (end, _) in keep.iter().enumerate().skip(1).filter(|(_, k)| **k) {
         stack.push((start, end));
         start = end;
     }
@@ -1182,9 +1234,20 @@ pub fn approx_bytes(project: &Project) -> usize {
     project
         .tracks
         .iter()
-        .map(|t| lanes(&t.automation.lanes) + t.regions.iter().map(|r| lanes(&r.automation)).sum::<usize>())
+        .map(|t| {
+            lanes(&t.automation.lanes)
+                + t.regions
+                    .iter()
+                    .map(|r| lanes(&r.automation))
+                    .sum::<usize>()
+        })
         .sum::<usize>()
-        + project.mixer.auxes.iter().map(|a| lanes(&a.automation.lanes)).sum::<usize>()
+        + project
+            .mixer
+            .auxes
+            .iter()
+            .map(|a| lanes(&a.automation.lanes))
+            .sum::<usize>()
         + lanes(&project.mixer.master.automation.lanes)
 }
 
@@ -1226,7 +1289,16 @@ mod tests {
 
     #[test]
     fn bezier_controls_shape_the_segment() {
-        assert!((Curve::Bezier { c1: 1.0 / 3.0, c2: 2.0 / 3.0 }.shape(0.37) - 0.37).abs() < 1e-12);
+        assert!(
+            (Curve::Bezier {
+                c1: 1.0 / 3.0,
+                c2: 2.0 / 3.0
+            }
+            .shape(0.37)
+                - 0.37)
+                .abs()
+                < 1e-12
+        );
         let ease_in = Curve::Bezier { c1: 0.0, c2: 0.0 };
         assert!(ease_in.shape(0.5) < 0.5);
         assert_eq!(ease_in.shape(0.0), 0.0);
@@ -1245,14 +1317,26 @@ mod tests {
         ]);
         assert!((l.value_at(480.0).unwrap() - (-6.0)).abs() < 1e-9);
         assert_eq!(l.value_at(1500.0).unwrap(), 0.0, "step holds");
-        assert_eq!(l.value_before(1920.0).unwrap(), 0.0, "arrives at the held value");
-        assert_eq!(l.value_at(1920.0).unwrap(), -6.0, "leaves with the last point of the jump");
+        assert_eq!(
+            l.value_before(1920.0).unwrap(),
+            0.0,
+            "arrives at the held value"
+        );
+        assert_eq!(
+            l.value_at(1920.0).unwrap(),
+            -6.0,
+            "leaves with the last point of the jump"
+        );
         assert_eq!(l.value_at(10_000.0).unwrap(), -6.0);
     }
 
     #[test]
     fn overlay_replaces_a_span_and_keeps_shapes() {
-        let base = lane_pieces(&lane(&[(0, -96.0, Curve::Linear), (3840, 6.0, Curve::Linear)]), 0.0).unwrap();
+        let base = lane_pieces(
+            &lane(&[(0, -96.0, Curve::Linear), (3840, 6.0, Curve::Linear)]),
+            0.0,
+        )
+        .unwrap();
         let over = vec![TickPiece::constant(0.0, f64::INFINITY, 0.25)];
         let merged = overlay(&base, &over, 960.0, 1920.0);
         assert!((pieces_value(&merged, 480.0).unwrap() - 0.125).abs() < 1e-12);
@@ -1281,7 +1365,11 @@ mod tests {
             })
             .collect();
         let thinned = thin(&wobble, &spec, 0.002);
-        assert!(thinned.len() < 200 && thinned.len() > 10, "{}", thinned.len());
+        assert!(
+            thinned.len() < 200 && thinned.len() > 10,
+            "{}",
+            thinned.len()
+        );
         let l = AutomationLane {
             param: AutomationParam::Volume,
             points: thinned,

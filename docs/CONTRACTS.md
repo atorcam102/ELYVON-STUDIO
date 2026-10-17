@@ -76,4 +76,13 @@ this phase does not import, resolve, rewrite or delete media.
 | Meters event | `audio://meters` → `[Meters { master, tracks[], auxes[] }, EngineStats]` | `ChannelMeter { peak[2], rms[2], clip }` linear, post fader; tracks in project order, auxes in mixer order | `mixer.rs` meters test, native E2E |
 | Native commands | `midi_preview`, `mixer_status`, `mixer_reset_clips`, `project_export_stems` | Preview notes are released by the native worker (≤ 4 s) and never recorded | src-tauri/src/commands/mixer.rs |
 
-`app_contracts` reports `project: 4`.
+`app_contracts` reports `project: 5` (schema 5, Phases 10–11).
+
+## Schema 5 automation and editing IPC
+
+| Area | Type / command | Rules | Evidence |
+| --- | --- | --- | --- |
+| Automation edits | `setAutomationMode`, `add/remove/update/moveAutomationPoints`, `removeAutomationLane`, `simplifyAutomation`, `writeAutomation` | `AutomationTarget { channel, region?, param }`; `moveAutomationPoints.deltaValue` is a fraction of the parameter range; `EditOutcome.createdPoints` | `crates/elyvon-project/tests/automation.rs` |
+| Live capture | `automation_touch(channel, param, value, phase)` → `bool` | Only while playing and in Touch/Latch/Write; `false` means "apply as an ordinary edit"; the written data arrives as one `writeAutomation` edit and a `project://view` event when playback stops | native E2E |
+| Editing edits | `slipRegions`, `rippleDelete`, `splitRange` (`EditOutcome.selectedRegions`), `cutRange`, `glueRegions`, `createCrossfade`, `setRegionsReversed`, `setFadeCurve`, `sliceRegion`, `normalizeRegions`, `compTake`, `setCompCrossfade`, `flatten/unflattenComp`, `freezeTrack`, `unfreezeTrack`, `bounceInPlace`, `relinkMediaFiles`, `removeUnusedMedia` | Each is one undo step; frozen material refuses edits | `crates/elyvon-audio/tests/{editing,comping}.rs` |
+| Native commands | `region_normalize`, `region_transients`, `track_freeze`, `track_bounce`, `media_repair`, `media_collect`, `media_unused`, `media_backup_unused(confirm)`, `media_rescan`; `mixer_status.staleFreezes` | Renders refuse to run while playing or with missing media; clean-up needs `confirm: true` and moves files to `.elyvon-backup/` | `tests/media_repair.rs`, native E2E |

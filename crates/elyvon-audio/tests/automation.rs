@@ -37,7 +37,12 @@ fn sine_track(s: &mut Session, freq: f64, amp: f64, seconds: f64) -> TrackId {
 fn dc_track(s: &mut Session, v: f32, seconds: f64) -> TrackId {
     let t = s.audio_track();
     let frames = (seconds * f64::from(RATE)) as usize;
-    s.place(t, 0, &buffer(vec![vec![v; frames], vec![v; frames]], RATE, RATE), "dc");
+    s.place(
+        t,
+        0,
+        &buffer(vec![vec![v; frames], vec![v; frames]], RATE, RATE),
+        "dc",
+    );
     t
 }
 
@@ -129,12 +134,25 @@ fn automating_a_filter_cutoff_changes_the_spectrum() {
     let left = r.channel(0);
     let head = rms(&left[2400..12_000]);
     let tail = rms(&left[100_000..110_000]);
-    assert!(db(head) < db(0.5 / 2f64.sqrt()) - 30.0, "5 kHz is cut at 200 Hz: {}", db(head));
-    assert!((db(tail) - db(0.5 / 2f64.sqrt())).abs() < 1.0, "passes at 20 kHz: {}", db(tail));
+    assert!(
+        db(head) < db(0.5 / 2f64.sqrt()) - 30.0,
+        "5 kHz is cut at 200 Hz: {}",
+        db(head)
+    );
+    assert!(
+        (db(tail) - db(0.5 / 2f64.sqrt())).abs() < 1.0,
+        "passes at 20 kHz: {}",
+        db(tail)
+    );
     // The sweep is monotonic in level (no zipper jumps between steps).
-    let windows: Vec<f64> = (0..20).map(|k| rms(&left[k * 4800..(k + 1) * 4800])).collect();
+    let windows: Vec<f64> = (0..20)
+        .map(|k| rms(&left[k * 4800..(k + 1) * 4800]))
+        .collect();
     // (The first window holds the filter's start-up transient.)
-    assert!(windows[1..].windows(2).all(|w| w[1] >= w[0] * 0.98), "{windows:?}");
+    assert!(
+        windows[1..].windows(2).all(|w| w[1] >= w[0] * 0.98),
+        "{windows:?}"
+    );
 }
 
 /// Every automatable stage at once: volume (Bézier + steps), pan, mute,
@@ -214,7 +232,11 @@ fn busy_session() -> Session {
     points(
         &mut s,
         target(t, AutomationParam::SendLevel { aux: bus }),
-        &[(0, -96.0, Curve::Linear), (6000, 0.0, Curve::Step), (10_000, -20.0, Curve::Linear)],
+        &[
+            (0, -96.0, Curve::Linear),
+            (6000, 0.0, Curve::Step),
+            (10_000, -20.0, Curve::Linear),
+        ],
     );
     points(
         &mut s,
@@ -230,7 +252,11 @@ fn busy_session() -> Session {
     points(
         &mut s,
         target(n, AutomationParam::Mute),
-        &[(0, 0.0, Curve::Step), (3000, 1.0, Curve::Step), (4500, 0.0, Curve::Step)],
+        &[
+            (0, 0.0, Curve::Step),
+            (3000, 1.0, Curve::Step),
+            (4500, 0.0, Curve::Step),
+        ],
     );
     points(
         &mut s,
@@ -241,7 +267,11 @@ fn busy_session() -> Session {
                 param: InsertParam::FilterCutoff,
             },
         ),
-        &[(0, 20.0, Curve::Linear), (8000, 2000.0, Curve::Bezier { c1: 1.0, c2: 1.0 }), (12_000, 30.0, Curve::Linear)],
+        &[
+            (0, 20.0, Curve::Linear),
+            (8000, 2000.0, Curve::Bezier { c1: 1.0, c2: 1.0 }),
+            (12_000, 30.0, Curve::Linear),
+        ],
     );
     points(
         &mut s,
@@ -252,7 +282,11 @@ fn busy_session() -> Session {
                 param: InsertParam::Bypass,
             },
         ),
-        &[(0, 0.0, Curve::Step), (9000, 1.0, Curve::Step), (11_000, 0.0, Curve::Step)],
+        &[
+            (0, 0.0, Curve::Step),
+            (9000, 1.0, Curve::Step),
+            (11_000, 0.0, Curve::Step),
+        ],
     );
     s
 }
@@ -368,7 +402,10 @@ fn thousands_of_points_with_abrupt_changes_stay_click_free_and_land_on_their_fra
         .fold((0, 0.0f32), |a, (i, d)| if d > a.1 { (i, d) } else { a });
     eprintln!("largest step {max_step} at frame {worst} of {}", left.len());
     // 0.5 over the 96-frame de-click ramp, plus float rounding.
-    assert!(max_step <= 0.5 / 96.0 + 1e-4, "largest sample step {max_step}");
+    assert!(
+        max_step <= 0.5 / 96.0 + 1e-4,
+        "largest sample step {max_step}"
+    );
     let map = s.project.transport.tempo_map().unwrap();
     for &(tick, value, _) in pts.iter().step_by(97) {
         let f = map.sample_at_tick(tick, RATE) as usize;
@@ -377,7 +414,11 @@ fn thousands_of_points_with_abrupt_changes_stay_click_free_and_land_on_their_fra
         }
         // The point's own frame carries its value (after the ramp).
         let expected = if value == 0.0 { 0.5 } else { 0.0 };
-        assert!((left[f] - expected).abs() < 1e-6, "tick {tick} frame {f}: {}", left[f]);
+        assert!(
+            (left[f] - expected).abs() < 1e-6,
+            "tick {tick} frame {f}: {}",
+            left[f]
+        );
     }
     eprintln!("2000-point lane, 12 s render with 11 tempo changes: {elapsed:?}");
 }
@@ -387,7 +428,13 @@ fn a_hundred_thousand_points_compile_and_evaluate_quickly() {
     let mut s = Session::new(120.0);
     let t = dc_track(&mut s, 0.5, 60.0);
     let pts: Vec<(u64, f64, Curve)> = (0..100_000u64)
-        .map(|k| (k * 2, -48.0 + 48.0 * ((k as f64) * 0.01).sin().abs(), Curve::Linear))
+        .map(|k| {
+            (
+                k * 2,
+                -48.0 + 48.0 * ((k as f64) * 0.01).sin().abs(),
+                Curve::Linear,
+            )
+        })
         .collect();
     points(&mut s, target(t, AutomationParam::Volume), &pts);
     let lookup = s.lookup();
@@ -407,7 +454,10 @@ fn a_hundred_thousand_points_compile_and_evaluate_quickly() {
     );
     let render_time = started.elapsed();
     assert!(r.report.peak[0] > 0.4);
-    eprintln!("100 000 points: plan {compile:?}, {:.1} s render {render_time:?}", r.report.seconds);
+    eprintln!(
+        "100 000 points: plan {compile:?}, {:.1} s render {render_time:?}",
+        r.report.seconds
+    );
     assert!(compile.as_secs_f64() < 2.0, "plan build {compile:?}");
 }
 
@@ -425,14 +475,21 @@ fn off_mode_ignores_lanes_and_read_mode_plays_them() {
         channel: ChannelRef::Track { id: t },
         mode: AutomationMode::Off,
     });
-    assert!((out(&s, 512).report.peak[0] - 0.5).abs() < 1e-6, "off: static fader");
+    assert!(
+        (out(&s, 512).report.peak[0] - 0.5).abs() < 1e-6,
+        "off: static fader"
+    );
 }
 
 #[test]
 fn region_lanes_override_the_track_lane_inside_their_region_and_move_with_it() {
     let mut s = Session::new(120.0);
     let t = s.audio_track();
-    let b = buffer(vec![vec![0.5; RATE as usize], vec![0.5; RATE as usize]], RATE, RATE);
+    let b = buffer(
+        vec![vec![0.5; RATE as usize], vec![0.5; RATE as usize]],
+        RATE,
+        RATE,
+    );
     let r1 = s.place(t, 0, &b, "a");
     let r2 = s.place(t, 3840, &b, "b");
     points(
@@ -454,8 +511,14 @@ fn region_lanes_override_the_track_lane_inside_their_region_and_move_with_it() {
     });
     let r = out(&s, 512);
     let g = |frame: usize| f64::from(r.samples[frame * 2]);
-    assert!((db(g(10_000)) - (db(0.5) - 6.0)).abs() < 1e-3, "track lane in region 1");
-    assert!((db(g(96_000 + 10_000)) - (db(0.5) - 20.0)).abs() < 1e-3, "region lane in region 2");
+    assert!(
+        (db(g(10_000)) - (db(0.5) - 6.0)).abs() < 1e-3,
+        "track lane in region 1"
+    );
+    assert!(
+        (db(g(96_000 + 10_000)) - (db(0.5) - 20.0)).abs() < 1e-3,
+        "region lane in region 2"
+    );
     let _ = r1;
     s.apply(EditCommand::MoveRegions {
         ids: vec![r2],
@@ -512,10 +575,19 @@ fn touch_overrides_reach_the_callback_without_clicks_and_release_to_the_lane() {
     run(&mut eng, 40, &mut all);
     let left: Vec<f32> = all.iter().step_by(2).copied().collect();
     let lane = 0.5 * 10f32.powf(-6.0 / 20.0);
-    assert!((left[5000] - lane).abs() < 1e-5, "reads the lane before the touch");
+    assert!(
+        (left[5000] - lane).abs() < 1e-5,
+        "reads the lane before the touch"
+    );
     assert!((left[512 * 30] - 0.5).abs() < 1e-5, "touched value (0 dB)");
-    assert!((left[512 * 59] - lane).abs() < 1e-5, "released back to the lane");
-    let max_step = left.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
+    assert!(
+        (left[512 * 59] - lane).abs() < 1e-5,
+        "released back to the lane"
+    );
+    let max_step = left
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(0.0, f32::max);
     assert!(max_step < 0.001, "no click: {max_step}");
     // Stop clears gestures.
     send(&mut handle, -30.0, TouchPhase::Begin);
