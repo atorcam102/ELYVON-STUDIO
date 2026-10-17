@@ -7,6 +7,14 @@ section of each version into the GitHub release and into the update dialog.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-17
+
+### Changed
+
+- Refined desktop chrome: new control-bar and library icons (library, inspector, Smart Controls, search); Automatización and Tomas y audio are compact icon tabs beside Editor de teclado, Partitura and Tempo inteligente.
+- The menu bar is fully keyboard-navigable: Left/Right switch menus, Up/Down/Home/End move within a menu, Escape closes it.
+- Piano-roll, score and smart-tempo toolbars regrouped with Spanish labels; the score view highlights the bars of the selected region and uses clearer staff spacing. Duplicate Pointer/Marquee and Ripple buttons are hidden from the track toolbar (the same tools stay in Herramientas).
+
 ## [0.4.0] - 2026-10-17
 
 ### Added

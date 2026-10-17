@@ -420,7 +420,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     await showEditor("Editor de teclado");
     const canvas = await d.find(".pr__canvas");
     const rect = await d.rect(canvas);
-    await d.clickCss('.piano-tools [title="pencil"]');
+    await d.clickCss('.piano-tools [aria-label="Lápiz (2)"]');
     const click = (dx, dy) =>
       d.cmd("POST", "/actions", {
         actions: [{ type: "pointer", id: "pencil", parameters: { pointerType: "mouse" }, actions: [

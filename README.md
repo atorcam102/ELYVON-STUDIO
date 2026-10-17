@@ -17,9 +17,9 @@
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-![Elyvon Studio: demo session with the arrangement, inspector and control bar](docs/screenshots/0.4.0-windows/02-demo.png)
+![Elyvon Studio: demo session with the arrangement, inspector and control bar](docs/screenshots/0.4.1-windows/02-demo.png)
 
-> **Status: 0.4.0 Windows x64 preview.** Phases 02–11 are implemented and verified by Rust,
+> **Status: 0.4.1 Windows x64 preview.** Phases 02–11 are implemented and verified by Rust,
 > frontend and native end-to-end tests on Windows 11 x64. Listening tests on real hardware, a
 > physical microphone/MIDI-keyboard session and every other platform are still pending, so the
 > phases stay **PARTIAL**. Details: [STATUS](docs/STATUS.md) ·
@@ -29,10 +29,10 @@
 
 | Platform | Installer | |
 | --- | --- | --- |
-| **Windows x64** (64-bit Windows 10/11) | [EXE setup](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.4.0-windows-preview.1/Elyvon-Studio-v0.4.0-windows-x64-setup.exe) | [MSI](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.4.0-windows-preview.1/Elyvon-Studio-v0.4.0-windows-x64.msi) |
+| **Windows x64** (64-bit Windows 10/11) | [EXE setup](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.4.1-windows-preview.1/Elyvon-Studio-v0.4.1-windows-x64-setup.exe) | [MSI](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.4.1-windows-preview.1/Elyvon-Studio-v0.4.1-windows-x64.msi) |
 
-[Release notes](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.4.0-windows-preview.1) ·
-[SHA-256 checksums](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.4.0-windows-preview.1/SHA256SUMS.txt) ·
+[Release notes](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.4.1-windows-preview.1) ·
+[SHA-256 checksums](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.4.1-windows-preview.1/SHA256SUMS.txt) ·
 [all releases](https://github.com/atorcam102/ELYVON-STUDIO/releases)
 
 Install **one** of the two: the EXE is the usual setup wizard; the MSI suits managed
@@ -65,9 +65,9 @@ The [roadmap](docs/ROADMAP.md) lists the next phases.
 
 | | |
 | --- | --- |
-| ![Mixer with an aux bus and real meters](docs/screenshots/0.4.0-windows/11-mixer-bus-meters.png) | ![Piano roll with drawn notes](docs/screenshots/0.4.0-windows/10-piano-roll-drawn.png) |
+| ![Mixer with an aux bus and real meters](docs/screenshots/0.4.1-windows/11-mixer-bus-meters.png) | ![Piano roll with drawn notes](docs/screenshots/0.4.1-windows/10-piano-roll-drawn.png) |
 | Mixer with an aux bus and live meters | Piano roll |
-| ![Automation lane editor](docs/screenshots/0.4.0-windows/12-automation-lane.png) | ![Comp across three takes](docs/screenshots/0.4.0-windows/13-takes-comp.png) |
+| ![Automation lane editor](docs/screenshots/0.4.1-windows/12-automation-lane.png) | ![Comp across three takes](docs/screenshots/0.4.1-windows/13-takes-comp.png) |
 | Automation lane | Comping three takes |
 
 Captured from the real application by the end-to-end suite on Windows 11 x64 —

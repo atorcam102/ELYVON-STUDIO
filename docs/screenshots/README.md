@@ -5,6 +5,7 @@ Each set says how it was captured and what it does **not** demonstrate.
 
 | Folder | Version / phase | Captured with |
 | --- | --- | --- |
+| [`0.4.1-windows/`](0.4.1-windows/) | 0.4.1 — refined chrome (icons, editor toolbars) | `e2e/app.e2e.mjs` against the real debug binary on Windows 11 x64 (tauri-driver + msedgedriver) |
 | [`0.4.0-windows/`](0.4.0-windows/) | 0.4.0 — redesigned chrome, automation, comping | `e2e/app.e2e.mjs` against the real debug binary on Windows 11 x64 (tauri-driver + msedgedriver) |
 | [`phase-10-11-windows/`](phase-10-11-windows/) | Phases 10–11 before the chrome redesign | same, Windows 11 x64 |
 | [`phase-08-09-windows/`](phase-08-09-windows/) | 0.3.0 — piano roll and mixer graph | same, Windows 11 x64 |
