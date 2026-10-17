@@ -8,6 +8,9 @@ crossfades, slip, ripple, marquee, glue, transient slices/markers, normalise, fr
 place, media repair/collect/backed-up clean-up, memory-bounded history) are implemented and
 verified by Rust, frontend and native E2E tests built and run on this Windows x64 laptop.
 Listening tests, a real microphone cycle recording and every other platform remain pending.
+Merged locally into `main` with the chrome redesign; the redesign's automation, follow, tool,
+loop/quantise/transpose, tempo-list and score controls are connected to real features (score is a
+simplified read-only view). Re-verified on `main`: 402 Rust tests, Vitest 50/50, native E2E 17/17.
 Evidence: [audit/PHASE-10-11.md](audit/PHASE-10-11.md).
 
 **Phases 08–09 (2026-10-16, 0.3.0): PARTIAL.** Piano-roll editing (notes, lanes, reversible

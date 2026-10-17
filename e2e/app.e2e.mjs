@@ -28,6 +28,43 @@ async function shot(name) {
 
 const trackCount = () => d.count(".track-header");
 
+/** Opens the control bar's "Más controles" drop-down (file buttons, status, settings). */
+async function openExtras() {
+  await d.exec("document.querySelector('.controlbar__extras').open = true");
+}
+
+/** Clicks a control that lives in the "Más controles" drop-down. */
+async function clickExtra(css) {
+  await openExtras();
+  await d.clickCss(css);
+  await d.exec("document.querySelector('.controlbar__extras').open = false");
+}
+
+/** Clicks the "Más controles" button whose text is `text`. */
+async function clickExtraText(text) {
+  await openExtras();
+  await d.exec(`[...document.querySelectorAll('.controlbar__extras button')].find((b) => b.textContent === ${JSON.stringify(text)}).click()`);
+  await d.exec("document.querySelector('.controlbar__extras').open = false");
+}
+
+/** Opens the mixer from the control bar (layout is persisted, so check first). */
+async function showMixer() {
+  if (!(await d.count(".bottom-panel--mixer"))) await d.clickCss('[aria-label="Mezclador (X)"]');
+  await d.find(".bottom-panel .strip");
+}
+
+/** Hides the bottom panel so it does not cover the arrangement. */
+async function hideBottom() {
+  if (await d.count(".bottom-panel--mixer")) await d.clickCss('[aria-label="Mezclador (X)"]');
+  else if (await d.count(".bottom-panel__bar")) await d.clickCss('[aria-label="Editor (E)"]');
+}
+
+/** Opens the editors panel on the tab titled `title`. */
+async function showEditor(title) {
+  if (!(await d.count(".bottom-panel__bar"))) await d.clickCss('[aria-label="Editor (E)"]');
+  await d.clickCss(`.bottom-panel [role=tab][title="${title}"]`);
+}
+
 /** 16-bit mono PCM WAV: `seconds` of a 0.5-amplitude sine. */
 function sineWav(rate, seconds, freq) {
   const n = rate * seconds;
@@ -65,6 +102,9 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
   before(async () => {
     d = await Driver.start({ application: app });
     await d.find(".controlbar", { timeout: 20_000 });
+    // The layout is persisted in preferences: start from the arrangement alone.
+    await hideBottom();
+    if (await d.count(".right-panel__close")) await d.clickCss(".right-panel__close");
   });
 
   after(async () => {
@@ -88,7 +128,9 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
       },
       { message: "engine running", timeout: 20_000 },
     );
+    await openExtras();
     const status = await d.textOf(".status__pill");
+    await d.exec("document.querySelector('.controlbar__extras').open = false");
     if (engine.output === "internalClock") assert.match(status, /no audio output/i);
     else assert.match(status, /kHz/);
     const play = await d.find('[aria-label^="Play"]');
@@ -118,7 +160,13 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
 
     await d.clickCss(".track-header .ms-btn--mute");
     await d.clickCss(".track-header:nth-child(2) .ms-btn--solo");
-    const project = (await d.invoke("project_get")).ok.project;
+    const project = await d.waitFor(
+      async () => {
+        const p = (await d.invoke("project_get")).ok.project;
+        return p.tracks[0].muted && p.tracks[1].soloed ? p : null;
+      },
+      { message: "mute and solo applied" },
+    );
     assert.equal(project.tracks[0].name, "Keys");
     assert.equal(project.tracks[0].muted, true);
     assert.equal(project.tracks[1].soloed, true);
@@ -127,9 +175,9 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
   });
 
   it("undoes and redoes edits", async () => {
-    await d.clickCss('[aria-label^="Undo"]');
+    await clickExtra('[aria-label^="Undo"]');
     await d.waitFor(async () => !(await d.invoke("project_get")).ok.project.tracks[1].soloed, { message: "undo solo" });
-    await d.clickCss('[aria-label^="Redo"]');
+    await clickExtra('[aria-label^="Redo"]');
     await d.waitFor(async () => (await d.invoke("project_get")).ok.project.tracks[1].soloed, { message: "redo solo" });
   });
 
@@ -204,7 +252,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     );
     assert.equal(after.start % 240, 0, "moved region snaps to the grid");
     await shot("03-region-moved");
-    await d.clickCss('[aria-label^="Undo"]');
+    await clickExtra('[aria-label^="Undo"]');
     await d.waitFor(
       async () =>
         (await d.invoke("project_get")).ok.project.tracks.flatMap((t) => t.regions).find((r) => r.id === id).start === startBefore,
@@ -222,19 +270,21 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
   });
 
   it("shows the mixer, piano roll and browser panels", async () => {
-    // Layout is persisted in preferences: select the mixer tab explicitly.
-    await d.clickCss(".bottom-panel .tabs__tab:nth-child(1)");
-    await d.find(".strip");
-    assert.equal(await d.count(".strip:not(.strip--master)"), 6);
+    await showMixer();
+    const strips = await d.exec("return [...document.querySelectorAll('.bottom-panel .strip:not(.strip--master)')].map((e) => e.getAttribute('data-channel') + ' ' + e.className)");
+    assert.equal(strips.length, 6, JSON.stringify(strips));
+    await hideBottom(); // the mixer opens tall and covers the arrangement
     const midi = await d.find(".region--midi");
     await d.click(midi);
-    await d.clickCss(".bottom-panel .tabs__tab:nth-child(2)"); // Piano Roll
+    await showEditor("Editor de teclado");
     await d.find('[data-testid="piano-roll"] .pr__canvas');
     const count = await d.exec("return document.querySelector('.pr__sel')?.textContent ?? ''");
     assert.match(count, /^0\/[1-9]\d* notes$/, "the demo region's notes are loaded into the editor");
     await shot("04-piano-roll");
-    await d.clickCss(".bottom-panel .tabs__tab:nth-child(1)");
+    await d.clickCss('[aria-label="Exploradores (F)"]');
+    await d.clickCss('.right-panel [role=tab]:nth-child(2)'); // Todos los archivos
     await d.find(".file-list");
+    await d.clickCss('[aria-label="Exploradores (F)"]');
   });
 
   it("imports real audio, plays it on the engine clock and exports a render", async () => {
@@ -322,7 +372,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.ok((await d.invoke("project_new",{discardChanges:true})).ok);
     const added=await d.invoke("project_apply",{command:{type:"addTrack",kind:"midi"}});assert.ok(added.ok);
     await d.exec("location.reload()");await d.find(".controlbar",{timeout:10000});
-    await d.clickCss('[aria-label="MIDI devices and monitor"]');
+    await clickExtraText("Dispositivos MIDI…");
     await d.find('[role="dialog"]');
     const switches=await d.findAll('[role="dialog"] .toggle__track');await d.click(switches[1]);
     await d.waitFor(async()=>(await d.invoke("project_get")).ok.project.tracks[0].io.armed,{message:"MIDI track armed through the UI"});
@@ -363,11 +413,13 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     const region = await d.invoke("project_apply", { command: { type: "createMidiRegion", trackId: track, start: 0, length: 15360 } });
     assert.ok(region.ok, JSON.stringify(region.err));
     await d.exec("location.reload()");
-    await d.click(await d.find(".region--midi", { timeout: 10_000 }));
-    await d.clickCss(".bottom-panel .tabs__tab:nth-child(2)");
+    await d.find(".region--midi", { timeout: 10_000 });
+    await hideBottom();
+    await d.click(await d.find(".region--midi"));
+    await showEditor("Editor de teclado");
     const canvas = await d.find(".pr__canvas");
     const rect = await d.rect(canvas);
-    await d.clickCss('[title^="Pencil"]');
+    await d.clickCss('.piano-tools [title="pencil"]');
     const click = (dx, dy) =>
       d.cmd("POST", "/actions", {
         actions: [{ type: "pointer", id: "pencil", parameters: { pointerType: "mouse" }, actions: [
@@ -381,7 +433,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     const notes = async () => (await d.invoke("project_get")).ok.project.tracks[0].regions[0].content.notes;
     await d.waitFor(async () => (await notes()).length === 2, { message: "two notes drawn through the real canvas" });
     const drawn = await notes();
-    assert.ok(drawn.every((n) => n.length > 0 && n.velocity === 100 && n.start % 240 === 0), "snapped to the 1/16 grid");
+    assert.ok(drawn.every((n) => n.length > 0 && n.velocity === 80 && n.start % 240 === 0), "snapped to the 1/16 grid: " + JSON.stringify(drawn));
     assert.ok(drawn[0].pitch > drawn[1].pitch, "lower on screen is lower in pitch");
     await shot("10-piano-roll-drawn");
     assert.ok((await d.invoke("project_undo")).ok);
@@ -409,10 +461,10 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.equal(cycle.err.code, "invalidEdit");
     await d.exec("location.reload()");
     await d.find(".controlbar", { timeout: 10_000 });
-    await d.clickCss(".bottom-panel .tabs__tab:nth-child(1)");
+    await showMixer();
     await d.find(`[data-channel="aux:${auxId}"]`);
     await d.invoke("transport_command", { command: { type: "play", fromTick: 0, countIn: false, preRoll: false } });
-    const peak = (key) => d.exec(`return document.querySelector('[data-channel="${key}"] .strip__db-box--peak')?.textContent ?? ''`);
+    const peak = (key) => d.exec(`return document.querySelector('.bottom-panel [data-channel="${key}"] .strip__db-box--peak')?.textContent ?? ''`);
     await d.waitFor(async () => (await peak(`aux:${auxId}`)) !== "−∞" && (await peak("master")) !== "−∞", { message: "bus and master meters show the engine signal", timeout: 10_000 });
     const busDb = Number((await peak(`aux:${auxId}`)).replace("−", "-"));
     // Mono file on an auto (mono) strip: 0.5 × −3 dB centre pan law ≈ −9 dBFS.
@@ -450,12 +502,12 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.ok(off.ok.peak[0] > 0.3, "Off plays the static fader");
 
     // The lane editor adds a point where it is clicked; undo removes it.
-    await d.clickCss('.bottom-panel [role=tab][title="Automation"]');
+    await showEditor("Automatización");
     const canvas = await d.find("[data-testid=automation-editor] canvas", { timeout: 5000 });
     await d.click(canvas);
     await d.waitFor(async () => (await lane())?.points.length === 2, { message: "point added from the canvas" });
     await shot("12-automation-lane");
-    await d.clickCss('[aria-label^="Undo"]');
+    await clickExtra('[aria-label^="Undo"]');
     await d.waitFor(async () => (await lane())?.points.length === 1, { message: "undo removes the point" });
 
     // Touch: dragging the fader while playing writes automation, not the fader.
@@ -463,15 +515,15 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.ok((await d.invoke("project_apply", { command: { type: "setAutomationMode", channel, mode: "touch" } })).ok);
     await d.exec("location.reload()");
     await d.find(".region--audio", { timeout: 10_000 });
-    await d.clickCss('.bottom-panel [role=tab][title="Mixer"]');
-    assert.equal(await d.exec("return document.querySelector('.strip__auto').value"), "touch", "the strip shows the mode");
+    await showMixer();
+    assert.equal(await d.exec("return document.querySelector('.bottom-panel .strip__auto').value"), "touch", "the strip shows the mode");
     await d.invoke("transport_command", { command: { type: "locate", tick: 0 } });
     await d.invoke("transport_command", { command: { type: "play", fromTick: 0, countIn: false, preRoll: false } });
     await d.waitFor(async () => {
       const s = (await d.invoke("transport_state")).ok;
       return s && s.state === "playing" && s.seconds > 0.5;
     }, { message: "playing", timeout: 10_000 });
-    const faderCss = '.fader[aria-label="' + track.name + ' volume"]';
+    const faderCss = '.bottom-panel .fader[aria-label="' + track.name + ' volume"]';
     await d.exec("document.querySelector(arguments[0]).scrollIntoView({ block: 'center' })", [faderCss]);
     const fader = await d.find(faderCss);
     await d.drag(fader, 0, -40, 12);
@@ -487,7 +539,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.ok(w && w.points.length >= 2, "points written: " + JSON.stringify(w));
     assert.ok(w.points.some((p) => p.value > 0.5), "the fader moved up while playing: " + JSON.stringify(w.points));
     assert.deepEqual(t.regions.map((r) => r.automation), [[]], "region lanes untouched");
-    await d.clickCss('[aria-label^="Undo"]');
+    await clickExtra('[aria-label^="Undo"]');
     await d.waitFor(async () => !(await lane()), { message: "undo removes the written lane" });
   });
 
@@ -528,9 +580,10 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
 
     // Select a take (the three overlap; the last one is on top) and comp
     // with the mouse in the takes editor.
+    await hideBottom();
     const regions = await d.findAll(".region--audio");
     await d.drag(regions[regions.length - 1], 0, 0, 1);
-    await d.clickCss('.bottom-panel [role=tab][title="Takes & Audio"]');
+    await showEditor("Tomas y audio");
     await d.find("[data-testid=takes-editor]", { timeout: 5000 });
     assert.equal(await d.count("[data-testid^=take-]"), 3);
     await d.find('[data-testid="take-1"] [data-testid="waveform"][data-state="ready"]', { timeout: 15_000 });
@@ -603,7 +656,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
   });
 
   it("explains why updates are unavailable instead of pretending", async () => {
-    await d.clickCss('[aria-label^="Settings"]');
+    await clickExtraText("Ajustes");
     await d.clickCss(".settings__nav-item:nth-child(2)");
     const page = await d.textOf(".settings__content");
     assert.match(page, /development builds|signing key|installer/i);

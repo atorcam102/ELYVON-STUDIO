@@ -1,6 +1,5 @@
 import { useCapture } from "../../state/capture";
 import { InspectorChannels } from "../mixer/Mixer";
-import { pendingControl } from "../topbar/menuActions";
 import type { Project } from "../../bindings/Project";
 import type { Region } from "../../bindings/Region";
 import type { Track } from "../../bindings/Track";
@@ -20,6 +19,7 @@ import { KIND_ICON, KIND_LABEL, TRACK_COLORS } from "../tracks/trackMeta";
 import { useEffect, useState } from "react";
 import type { AutomationMode } from "../../bindings/AutomationMode";
 import type { FadeCurve } from "../../bindings/FadeCurve";
+import type { GridDivision } from "../../bindings/GridDivision";
 import { MODES } from "../../lib/automation";
 import { ipc } from "../../lib/ipc";
 import {
@@ -372,6 +372,19 @@ export function Inspector() {
   const lastRegionId = selection.regionIds[selection.regionIds.length - 1];
   const region = lastRegionId ? project.tracks.flatMap((t) => t.regions).find((r) => r.id === lastRegionId) : undefined;
   const focusTrack = tracks[tracks.length - 1] ?? project.tracks[0];
+  const audio = region?.content.type === "audio" ? region.content : undefined;
+  const midi = region?.content.type === "midi";
+  const quantizeRegion = (value: string) => {
+    if (!region || !midi) return;
+    void useProject.getState().apply({
+      type: "transformNotes",
+      targets: [{ regionId: region.id }],
+      transform: value === "off" ? { type: "unquantize" } : { type: "quantize", grid: { division: value as GridDivision, triplet: false, swing: 0 }, strength: 100 },
+    });
+  };
+  const transposeRegion = (semitones: number) => {
+    if (region && midi && semitones) void useProject.getState().apply({ type: "transformNotes", targets: [{ regionId: region.id }], transform: { type: "transpose", semitones } });
+  };
 
   return (
     <aside className="inspector" aria-label="Inspector">
@@ -380,10 +393,10 @@ export function Inspector() {
           <summary><Icon name="chevronRight" size={15} /><span>Pasaje: <strong>{region?.name ?? "Valores de…por omisión"}</strong></span></summary>
           <div className="inspector-region-options">
             <label>Silenciar: <input type="checkbox" checked={region?.muted ?? false} onChange={e => { if (region) void useProject.getState().apply({ type: "setRegionsMuted", ids: [region.id], muted: e.target.checked }); }} /></label>
-            <label>Bucle: <input type="checkbox" onChange={() => pendingControl("Bucle de pasaje MIDI")} /></label>
-            <label>Cuantizar <select aria-label="Cuantizar pasaje" onChange={() => pendingControl("Cuantización de pasaje")}><option>Desactivado</option><option>Semicorchea</option><option>Corchea</option></select></label>
+            <label title={audio ? (audio.reversed ? "Un pasaje invertido no puede repetirse" : "Repite el archivo hasta el final del pasaje") : "Bucle de pasajes MIDI no disponible"}>Bucle: <input type="checkbox" aria-label="Bucle del pasaje" disabled={!audio || audio.reversed} checked={audio?.looped ?? false} onChange={e => { if (region && audio) void useProject.getState().apply({ type: "setAudioRegion", id: region.id, gainDb: audio.gainDb, fadeIn: audio.fadeIn, fadeOut: audio.fadeOut, looped: e.target.checked }); }} /></label>
+            <label title={midi ? "Cuantiza todas las notas del pasaje (100 %)" : "Solo para pasajes MIDI"}>Cuantizar <select aria-label="Cuantizar pasaje" disabled={!midi} value="" onChange={e => quantizeRegion(e.target.value)}><option value="" disabled hidden>—</option><option value="off">Desactivado</option><option value="sixteenth">Semicorchea</option><option value="eighth">Corchea</option></select></label>
             <label>Q-Swing: <span>—</span></label>
-            <label>Transponer: <span>—</span></label>
+            <label title={midi ? "Transpone todas las notas del pasaje" : "Solo para pasajes MIDI"}>Transponer: <select aria-label="Transponer pasaje" disabled={!midi} value="" onChange={e => transposeRegion(Number(e.target.value))}><option value="" disabled hidden>—</option>{[-12, -1, 1, 12].map(n => <option key={n} value={n}>{n > 0 ? `+${n}` : n}</option>)}</select></label>
             <label>Fuente del tono: <span>Desactivado</span></label>
             <label>Desplaz. de velo… <span>—</span></label>
           </div>

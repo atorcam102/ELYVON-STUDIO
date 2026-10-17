@@ -83,6 +83,34 @@ plan swaps with lanes and Stop.
 Screenshots of the real app: [`docs/screenshots/phase-10-11-windows/`](../screenshots/phase-10-11-windows/)
 (`12-automation-lane.png`, `13-takes-comp.png`).
 
+## Integration into `main` with the chrome redesign
+
+The branch was merged locally into `main` (merge `86b9c13`, no push) on top of the desktop chrome
+redesign (`72e8514`, Spanish menu bar, control bar, side panels, library, score and smart-tempo
+panels), which was committed unchanged first. Conflicts were resolved by keeping both: the bottom
+panel has Editor de teclado, Partitura, Tempo inteligente, Automatización and Tomas y audio; the
+strip's automation slot is the real mode selector; settings accept every tab.
+
+Redesign controls connected to existing features afterwards: toolbar Automatización (opens the
+lane editor), Seguir cursor (the arrangement's follow mode), Herramientas (Puntero, Marquesina,
+ripple); inspector Bucle (audio regions), Cuantizar and Transponer (all notes of the selected MIDI
+region, one undo step each); the Tempo and Compás lists show every tempo and metre change and
+locate on click. Partitura draws a simplified, read-only notation of the selected MIDI region
+(pitch with sharps and ledger lines, position inside each bar, metre changes; no rhythmic
+values, says so in the panel; `scoreModel.test.ts`). Tempo inteligente shows the tempo map at
+the cursor and states that tempo analysis is not available. Controls without a feature behind
+them (Live Loops, Flex, library sounds, Smart Controls assignment, several Edición/Funciones
+menus) keep the redesign's «todavía no disponible» notice.
+
+Verified on `main` on this laptop (Windows x64): `cargo fmt --check`, `cargo clippy -D warnings`,
+`cargo test --workspace` **402 passed**; `npm run check` (tsc, ESLint, Vitest **50/50**); `npm run
+tauri -- build --debug --no-bundle`; native E2E **17/17** after moving the selectors to the
+Spanish chrome (Undo, status and settings now live in «Más controles»; the mixer opens from
+Mezclador (X); the inspector also shows a channel strip, so mixer queries are scoped to the
+bottom panel; the piano-roll pencil uses the reference default velocity 80; the suite starts
+from a clean layout because the layout is persisted). CSS edits made by the parallel UI session
+after the build were not part of this verification.
+
 ## Platform matrix
 
 | Target | Built | Tested |

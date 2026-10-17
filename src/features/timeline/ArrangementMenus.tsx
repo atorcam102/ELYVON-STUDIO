@@ -3,6 +3,7 @@ import { pendingControl } from "../topbar/menuActions";
 import { Menu, type MenuEntry } from "../../components/Popover";
 import { useMenu } from "../../components/useMenu";
 import { useProject } from "../../state/project";
+import { useTransport } from "../../state/transport";
 import { useUi } from "../../state/ui";
 import {
   addTrack,
@@ -44,6 +45,35 @@ function ToolbarMenu({
   );
 }
 
+/** Arrangement tool and ripple mode, behind the reference toolbar's tool button. */
+function ToolsMenu() {
+  const menu = useMenu();
+  const tool = useUi((s) => s.tool);
+  const ripple = useUi((s) => s.ripple);
+  const entries: MenuEntry[] = [
+    { id: "pointer", label: `${tool === "pointer" ? "✓ " : ""}Puntero`, icon: "pointer", onSelect: () => useUi.getState().setTool("pointer") },
+    { id: "marquee", label: `${tool === "marquee" ? "✓ " : ""}Marquesina`, icon: "grid", onSelect: () => useUi.getState().setTool("marquee") },
+    "separator",
+    { id: "ripple", label: `${ripple ? "✓ " : ""}Edición en cadena (ripple)`, onSelect: () => useUi.getState().setRipple(!ripple) },
+  ];
+  return (
+    <>
+      <button
+        type="button"
+        className="arrangement-menu"
+        title="Herramientas"
+        aria-haspopup="menu"
+        aria-expanded={!!menu.at}
+        onClick={(e) => menu.openBelow(e.currentTarget)}
+      >
+        <Icon name={tool === "marquee" ? "grid" : "pointer"} size={16} />
+        <Icon name="chevronDown" size={10} />
+      </button>
+      {menu.at && <Menu at={menu.at} entries={entries} onClose={menu.close} />}
+    </>
+  );
+}
+
 /** Presents existing editor commands in the compact reference toolbar. */
 export function ArrangementMenus() {
   const view = useProject((s) => s.view);
@@ -51,6 +81,8 @@ export function ArrangementMenus() {
   const setLayout = useUi((s) => s.setLayout);
   const selected = useUi((s) => s.selection.trackIds.length > 0 || s.selection.regionIds.length > 0);
   const regions = useUi((s) => s.selection.regionIds.length > 0);
+  const follow = useTransport((s) => s.follow);
+  const automationOpen = layout.bottomVisible && layout.bottomTab === "automation";
   const edit: MenuEntry[] = [
     {
       id: "undo",
@@ -149,10 +181,10 @@ export function ArrangementMenus() {
         <Icon name="tracks" size={14} />
       </button>
       <div className="arrangement-extra-tools">
-        <button className="arrangement-menu" title="Automatización" onClick={() => pendingControl("Automatización")}><Icon name="automation" size={18} /></button>
+        <button className={`arrangement-menu${automationOpen ? " is-blue" : ""}`} title="Automatización" aria-pressed={automationOpen} onClick={() => setLayout(automationOpen ? { bottomVisible: false } : { bottomVisible: true, bottomTab: "automation" })}><Icon name="automation" size={18} /></button>
         <button className="arrangement-menu" title="Flex" onClick={() => pendingControl("Flex Pitch/Time")}><Icon name="waveform" size={18} /></button>
-        <button className="arrangement-menu" title="Seguir cursor" onClick={() => pendingControl("Seguir cursor")}><Icon name="follow" size={17} /></button>
-        <button className="arrangement-menu" title="Herramientas" onClick={() => pendingControl("Herramientas")}><Icon name="pointer" size={16} /><Icon name="chevronDown" size={10} /></button>
+        <button className={`arrangement-menu${follow ? " is-blue" : ""}`} title="Seguir cursor" aria-pressed={follow} onClick={() => useTransport.getState().setFollow(!follow)}><Icon name="follow" size={17} /></button>
+        <ToolsMenu />
         <button className="arrangement-menu" title="Herramienta secundaria" onClick={() => pendingControl("Herramienta secundaria")}><Icon name="plus" size={17} /><Icon name="chevronDown" size={10} /></button>
       </div>
     </div>

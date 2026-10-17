@@ -13,6 +13,7 @@ section of each version into the GitHub release and into the update dialog.
 - Takes and comping: drag across takes in the new Takes & Audio editor; crossfades centred on each boundary; flatten and unflatten without touching the takes.
 - Non-destructive editing: reverse, fade shapes (equal power, linear, S-curve), editable crossfades, slip, ripple delete, marquee split/delete, glue, slices and markers at transients, normalise, phase-locked group edits, bounce in place and track freeze.
 - Project media dialog: find moved files by content, rescan, collect media into the project folder, remove unused pool entries and move unused project files to a backup folder after confirmation.
+- Redesigned desktop chrome (Spanish menu bar, control bar, side panels, library, score and smart-tempo panels) merged with the automation and comping work: the Automatización and Tomas y audio tabs sit beside Editor de teclado, Partitura and Tempo inteligente; the mixer strip's automation slot is the real mode selector; the toolbar's Automatización, Seguir cursor and Herramientas (Puntero, Marquesina, ripple) buttons work; the inspector's Bucle, Cuantizar and Transponer act on the selected region; the Tempo and Compás lists show every tempo and metre change; Partitura draws a simplified, read-only notation of the selected MIDI region (pitch and position; no rhythmic values). Controls without a feature behind them still say they are not available.
 
 ### Changed
 
