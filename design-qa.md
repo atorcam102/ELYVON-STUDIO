@@ -1,45 +1,55 @@
-# Revisión del diseño aplicado a la aplicación principal
+# Revisión visual — 17 de octubre de 2026
 
-## Alcance
+## Alcance y coordinación
 
-El diseño del frontend se ha aplicado al punto de entrada nativo `src/main.tsx` → `src/App.tsx`, sin sustituir la aplicación por la página `/reference.html`. Se conservan los estados de proyecto, comandos IPC, guardado, edición, mute, solo, volumen, paneles y preferencias existentes.
+Se han aplicado las referencias a la aplicación principal React/Tauri. La previsualización `?design-preview&region` usa una sesión de diseño solo en DEV; no simula un motor de audio conectado.
 
-## Evidencia renderizada
+El rediseño quedó conservado en `72e8514` y fusionado con el backend en `86b9c13`. Claude confirmó en `.local/agent-coordination.md` que se ocupa de conectar funciones y de la comprobación nativa. Codex conserva CSS de referencia, AppMenu, iconos y QA. No se han restaurado archivos ni eliminado sus modificaciones.
 
-- Referencia visual: las capturas aportadas en la conversación y el frontend de referencia conservado en `src/reference/`.
-- Aplicación principal antes: `.local/native-before.png`.
-- Aplicación principal después: `.local/native-final.png`.
-- Biblioteca e inspector: `.local/native-library-inspector.png`.
-- Escritorio compacto: `.local/native-1080.png` y `.local/native-960.png`.
-- Navegador: Chromium real mediante Playwright, con el mock oficial de IPC de Tauri y un proyecto de prueba. No se sustituye el componente App ni se añade un mock al código de producción.
-- Viewports: 1440 × 900, 1080 × 700 y 960 × 600 CSS px, densidad 1.
+## Comparación renderizada
 
-## Superficies comprobadas
+Referencias: las 20 capturas originales aportadas por el usuario. Se compara su distribución teniendo en cuenta el estiramiento horizontal indicado; no se aplica una transformación que deforme la UI.
 
-- Tipografía: Arial/Helvetica, texto compacto de 8–11 px, LCD con reloj de 15 px y cifras tabulares.
-- Composición: transporte gris claro, herramientas del arreglo, cabeceras de 44 px, biblioteca a la izquierda del inspector y del arreglo, mezclador con una sola barra superior.
-- Colores: superficies grafito, regiones con el color real de cada pista, efectos azules, entradas de instrumento verdes y controles de pan verdes.
-- Iconos: Phosphor en los componentes de la aplicación principal; se mantienen los nombres y las propiedades accesibles de los controles.
-- Datos: nombres, colores, notas MIDI, niveles y comandos proceden del proyecto. Los slots FX siguen deshabilitados. Las ilustraciones de audio se limitan a las regiones sin archivo de sesiones demo y se rotulan como tales. No se simula audio real.
+Evidencia en `.local/design-qa-2026-10-17/`:
 
-## Correcciones durante la revisión
+- `mixer-comparison.png`: referencia y aplicación juntas a una escala de comparación aproximada de 1280 × 800. La referencia muestra un panel menos expandido y corta el extremo inferior de los canales.
+- `mixer-expanded.png`: panel abierto al máximo; controles superiores visibles.
+- `mixer-minimum.png`: mismo recorrido de fader con recorte superior.
+- `library-inspector.png`, `inspector.png`, `events.png`, `files.png`, `piano.png`, `score.png`, `tempo.png`, `menu-edit.png`, `menu-window.png`: revisión de superficies del rediseño. Estas últimas capturas preceden a la conexión funcional final de Claude.
 
-- Se corrigió un desplazamiento de 12 px que recortaba la forma de onda ilustrativa.
-- Se limitó la altura máxima del mezclador para mantener visible el arreglo a 960 × 600.
-- Se compactaron los slots y las separaciones del mezclador en ventanas de hasta 720 px de alto.
-- Se comprobó que la biblioteca, el inspector y el arreglo quedan ordenados de izquierda a derecha, en x = 0, 236 y 452 px en el caso de prueba.
+## Correcciones verificadas
 
-## Validación funcional
+- Faders de altura fija: fila de 208 px, recorrido efectivo de 181 px. No se comprimen al reducir el mezclador.
+- Todos los canales anclados abajo, incluidos Deluxe Classic y Stereo Out. Sus controles se recortan por arriba de forma uniforme.
+- A 1280 × 800, panel máximo de 620 px; ambos ajustes superiores quedan dentro del panel. No se reproduce el exceso de altura que impedía verlos.
+- Arrastre: mínimo de 180 px; cierre tras otros 48 px hacia abajo. Comprobado con arrastre real; se limpia el estado de redimensionado al cerrar.
+- El selector real de automatización ocupa el ancho y la altura del slot; mantiene colores diferenciados para Touch/Latch/Write.
+- Herramientas Puntero/Marquesina/Ripple siguen accesibles desde el menú conectado por Claude. Se ocultaron sus controles duplicados, que desplazaban el zoom.
+- Menús españoles con ancho acorde a las referencias, límites de ventana y desplazamiento vertical. Biblioteca, inspector, panel lateral, piano, partitura y tempo siguen el reparto de superficies de las capturas.
 
-- TypeScript, lint y compilación de producción: correctos.
-- Vitest: 31 pruebas aprobadas.
-- Verificado sobre la entrada principal: selección de pistas, comandos IPC de mute y solo, volumen por teclado, añadir pista desde Functions, cambio a piano roll y regreso al mezclador, apertura/cierre de biblioteca e inspector.
-- Sin errores `pageerror` en Chromium.
-- Los controles del transporte permanecen dentro de la ventana mínima de 960 px.
-- No se ha ejecutado el binario Windows localmente; su compilación corresponde a CI.
+## Validación
 
-## Límite de la comparación
+- Vitest: 48/48 pruebas, 8 archivos, sobre la versión fusionada.
+- Compilación de producción y lint: correctos después de que Claude retirase un import sobrante durante su edición. `git diff --check` sin errores de espacios.
+- Las seis pruebas locales Windows x64 de preferencias pasaron antes de la fusión. No equivalen a verificar el motor o el binario de la nueva integración; Claude se encarga de esa comprobación.
 
-La integración y el funcionamiento de los controles han sido comprobados. La equivalencia estricta píxel a píxel con las imágenes originales sigue sin certificarse: no se dispone aquí de sus archivos normalizados para una comparación conjunta a escala idéntica, y el contenido real del proyecto difiere de la sesión de las capturas.
+## Límites pendientes
 
-**final result: blocked** — únicamente para certificar la igualdad visual exacta; los checks de integración anteriores pasan.
+No se certifica igualdad píxel a píxel. Quedan diferencias de iconos, controles propios del motor, marca de la aplicación y datos de la sesión. Algunas funciones que el usuario pidió presentar aún no están implementadas y lo indican al activarlas. La partitura y el tempo están recibiendo datos reales por parte de Claude; su validación final nativa queda en su trabajo.
+
+## Segunda pasada — editores y menús
+
+Comparación conjunta inspeccionada en `piano-comparison.png` y `score-comparison.png`, con las referencias 5 y 6 normalizadas aproximadamente al estiramiento indicado. Capturas finales: `piano-final.png`, `score-final.png`, `tempo-refined.png`; prueba compacta: `editor-compact.png` (960 × 720).
+
+- Se restauraron las tres pestañas principales, centradas y del mismo ancho. Automatización y Tomas/audio conservan accesos de icono con nombre accesible a la derecha.
+- Barra del piano organizada por grupos, con herramientas en menú, zoom horizontal y vertical reales, controles MIDI y seguimiento del cursor. Se mantienen sus estados y callbacks de edición.
+- Ajustados pesos tipográficos, espaciados, selector de escala, checkbox e iconos de la biblioteca/barra superior. El texto CONSERVAR ya no tiene un borde de botón ajeno a la referencia.
+- Partitura: barra propia completa, tres botones de vista, claves mayores, más separación de pentagramas, resaltado limitado a los compases reales del pasaje, compás vacío representado y regla con subdivisiones. El canvas se redibuja al cambiar su altura. Se conserva scoreModel y el cálculo real de posición y altura de las notas.
+- Tempo inteligente: barra simplificada y LCD centrado, sin botones superpuestos. Se conservan los valores reales del mapa de tempo y el aviso de análisis no disponible.
+- Menús: apertura con flechas, cambio entre menús con izquierda/derecha, Home/End, cierre con Escape y foco correcto. Verificado en una ventana de 960 px, incluido el scroll al último elemento.
+
+Verificación final: TypeScript y build correctos; ESLint sin errores; Vitest **50/50 en 9 archivos**; recarga limpia sin errores de consola. Probados Borrador/Lápiz, zoom vertical, pestañas principales y acceso a Automatización. Los archivos del backend y bindings de Claude no se han editado.
+
+P3 restantes: iconos de biblioteca que aproximan los originales, diferencias de fuente entre macOS/Windows, la marca Elyvon, información real del proyecto y el aviso de notación simplificada. No se certifica identidad píxel a píxel de toda la aplicación.
+
+**final result: passed** para esta iteración visual de editores, menús y conservación del mixer. La equivalencia 1:1 estricta de toda la aplicación sigue sin certificarse.

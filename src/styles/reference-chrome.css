@@ -69,6 +69,7 @@
 .lcd__number { font-size:15px; font-weight:600; color:#c2cede; min-width:0; width:100%; }
 .lcd__labels { display:flex; flex-direction:column; gap:0; font-size:8px; margin-top:0; line-height:11px; color:#66768d; }
 .lcd__tap { color:#c2cede; font-size:8px; font-weight:600; }
+.lcd__tap { border:0; padding:0; background:none; line-height:11px; }
 .lcd__meta { padding:3px 8px; gap:2px; min-width:74px; }
 .lcd__btn { font-size:14px; color:#c4cfde; font-weight:600; line-height:19px; }
 .lcd__btn--sub { font-size:13px; }
@@ -87,6 +88,9 @@
 .arrangement-view-selected { display:grid; place-items:center; height:22px; width:37px; background:#286eb0; color:white; border:1px solid #333; border-radius:0 5px 5px 0; }
 .arrangement-extra-tools { display:flex; gap:3px; margin-left:10px; }
 .timeline__toolbar-right { margin-left:auto; gap:7px; padding:0; flex:none; }
+/* These controls remain available in the connected Herramientas menu. */
+.timeline__toolbar > .timeline__tools,
+.timeline__toolbar > .timeline__ripple { display:none; }
 .timeline__toolbar .hint { font-size:11px; margin:0; padding:0 5px; max-width:120px; background:#3b3b3b; }
 .timeline__toolbar .hint select { width:70px; }
 .timeline__toolbar .zoom-slider { width:72px; }
@@ -182,6 +186,9 @@
 .strip--master .strip__fx { height:59px; }
 .strip .slot--group { background:#505050; color:#202020; }
 .strip .strip__read { color:#72e978; background:#666; border:1px solid #4b4b4b; }
+.strip .strip__auto { width:100%; margin:0; padding:0 4px; text-align:center; }
+.strip .strip__auto:is(.is-touch,.is-latch) { background:#b88c31; color:#fff; }
+.strip .strip__auto.is-write { background:#ad3b46; color:#fff; }
 .strip .slot--output { background:#666; color:#eee; }
 .strip__flags { position:absolute; top:0; right:4px; opacity:0; }
 .strip:hover .strip__flags { opacity:1; }
@@ -201,8 +208,14 @@
 .strip__name { height:24px; min-height:24px; background:none; color:#ddd; font-size:11px; font-weight:600; margin:0 -15px; border:0; text-shadow:none; }
 .bottom-panel { outline:1px solid #81bded; outline-offset:-1px; }
 .bottom-panel__bar { height:38px; background:#454545; justify-content:center; border-bottom:1px solid #3e3e3e; }
+.bottom-panel__bar { position:relative; }
+.bottom-panel__additional { position:absolute; right:34px; display:flex; gap:1px; }
+.bottom-panel__additional > button { display:grid; place-items:center; width:28px; height:23px; padding:0; color:#ccc; background:#3b3b3b; border:1px solid #393939; border-radius:4px; }
+.bottom-panel__additional > button.is-on { background:#286eb0; color:white; }
+.bottom-panel__bar > .icon-btn { position:absolute; right:7px; }
 .bottom-panel__bar > .segmented { width:min(650px,74%); display:flex; }
 .bottom-panel__bar > .segmented > button { flex:1; }
+.bottom-panel__bar > .segmented > button { text-align:center; justify-content:center; }
 .segmented { background:#3a3a3a; border-radius:6px; }
 .segmented > button { height:23px; font-size:13px; font-weight:600; border-radius:5px; padding:0 15px; }
 .segmented > button.is-on { background:#286eb0; color:#f3f3f3; box-shadow:0 0 0 1px #2e4054; }
@@ -216,6 +229,31 @@
 .panel-tools .is-gold { background:#b69127; }
 .reference-piano { display:grid; grid-template-columns:250px minmax(0,1fr); grid-template-rows:37px minmax(0,1fr); height:100%; }
 .piano-tools { grid-column:1 / -1; grid-row:1; overflow:hidden; }
+.piano-tools { gap:10px; container-type:inline-size; }
+.editor-menu-group,.editor-button-group { display:flex; align-items:center; gap:1px; flex:none; }
+.editor-menu-group > button,.editor-button-group > button { display:flex; align-items:center; justify-content:center; gap:9px; height:23px; color:#e0e0e0; background:#5a5a5a; border:1px solid #3b3b3b; border-radius:5px; font-size:13px; font-weight:600; white-space:nowrap; }
+.editor-menu-group > button { padding:0 13px; }
+.editor-menu-group > button:nth-child(1) { min-width:100px; }
+.editor-menu-group > button:nth-child(2) { min-width:120px; }
+.editor-menu-group > button:nth-child(3) { min-width:144px; }
+.editor-menu-group > button + button { border-top-left-radius:0; border-bottom-left-radius:0; }
+.editor-menu-group > button:has(+button) { border-top-right-radius:0; border-bottom-right-radius:0; }
+.editor-button-group > button { width:39px; padding:0; }
+.editor-tool-group > button:first-child { width:52px; }
+.editor-audition-group > button { width:35px; }
+.editor-audition-group > button:first-child { border-radius:5px 0 0 5px; }
+.editor-audition-group > button:last-child { border-radius:0 5px 5px 0; }
+.editor-button-group > button:hover,.editor-menu-group > button:hover { filter:brightness(1.12); }
+.editor-zoom { display:flex; align-items:center; gap:5px; padding:0 7px; height:22px; background:#3b3b3b; border-radius:4px; flex:none; color:#a5a5a5; }
+.editor-zoom input[type=range] { width:58px; }
+.piano-tools > .editor-snap { width:40px; padding:0; flex:none; }
+.piano-inspector label,.piano-inspector__row select,.piano-inspector__row > span { font-weight:600; }
+.piano-inspector__row > span { flex:1; display:flex; align-items:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.piano-inspector__row select[aria-label="Activar escala"] { flex:0 0 70px; }
+.piano-inspector__check input { appearance:none; width:17px; height:17px; background:#606060; border:1px solid #4c4c4c; border-radius:4px; margin:0; }
+.piano-inspector__check input:checked { appearance:auto; accent-color:#286eb0; }
+@container (max-width:1100px) { .editor-zoom--vertical { display:none; } .piano-tools { gap:6px; } }
+@container (max-width:850px) { .editor-audition-group > button:first-child { display:none; } .editor-button-group > button { width:30px; } .editor-menu-group > button { padding-inline:8px; } }
 .piano-inspector { grid-column:1; grid-row:2 / 5; background:#565656; min-height:0; overflow:auto; }
 .piano-inspector header { display:flex; align-items:center; gap:17px; height:44px; padding:0 13px; background:#454545; color:#eee; }
 .piano-inspector header > .icon { color:#38ce41; }
@@ -239,12 +277,26 @@
 .reference-piano.has-advanced-tools.has-controller-lane { grid-template-rows:37px auto minmax(0,1fr) auto; }
 .reference-piano.has-advanced-tools.has-controller-lane .pr__lane { grid-row:4; }
 .score-editor { display:flex; flex-direction:column; height:100%; background:#c2c2b7; }
+.editor-tools--score { gap:1px; overflow-x:auto; overflow-y:hidden; }
+.editor-tools--score > button { padding-inline:10px; flex:none; }
+.editor-tools--score .editor-button-group { margin-inline:7px; }
+.score-view-buttons { gap:0; }
+.score-view-buttons > button { border-radius:0; }
+.score-view-buttons > button:first-child { border-radius:5px 0 0 5px; }
+.score-view-buttons > button:last-child { border-radius:0 5px 5px 0; }
+.editor-tools--score > .toolbar-space { min-width:12px; }
+.editor-tools--tempo > button:nth-child(3) { margin-left:10px; }
+.editor-tools--tempo > .toolbar-space { min-width:330px; }
+.editor-tools--tempo { overflow:auto; }
 .score-ruler { display:flex; height:43px; padding-left:153px; background:#363636; color:#ddd; flex:none; }
+.score-ruler { position:relative; }
+.score-ruler > button { position:absolute; left:70px; top:11px; display:grid; place-items:center; width:40px; height:22px; color:#ddd; border:1px solid #3b3b3b; border-radius:5px; background:#595959; }
 .score-ruler span { flex:1; border-left:1px solid #666; padding-left:4px; font-size:14px; }
+.score-ruler span { position:relative; background:repeating-linear-gradient(to right,#777 0 1px,transparent 1px 25%); background-size:100% 13px; background-position:left bottom; background-repeat:no-repeat; }
 .score-editor canvas { width:100%; flex:1; min-height:0; }
 .smart-tempo { position:relative; height:100%; display:flex; flex-direction:column; background:#303030; }
 .smart-tempo > .panel-tools { height:44px; }
-.smart-tempo__display { position:absolute; top:4px; left:38%; display:flex; border-radius:5px; background:#343434; color:#ddd; height:35px; }
+.smart-tempo__display { position:absolute; top:4px; left:50%; transform:translateX(-50%); display:flex; border-radius:5px; background:#343434; color:#ddd; height:35px; pointer-events:none; }
 .smart-tempo__display > span { font-size:18px; line-height:19px; text-align:center; border-right:1px solid #424242; padding:0 15px; font-weight:600; }
 .smart-tempo__display small { display:block; font-size:8px; line-height:11px; color:#888; }
 .smart-tempo__overview { height:47px; flex:none; background:#0d2d15; border-top:1px solid #50a955; border-bottom:1px solid #87bd8a; }
@@ -338,5 +390,8 @@ input[type=range]:not(.mini-fader):not(.track-pan)::-webkit-slider-thumb { appea
 .piano-inspector input[type=range] { margin-top:7px; margin-bottom:12px; }
 .piano-inspector section { padding:13px 22px; }
 .piano-inspector section:first-of-type { padding-bottom:4px; }
+.piano-inspector section:first-of-type input[type=range] { margin-bottom:6px; }
+.piano-inspector section:nth-of-type(2) { padding-block:10px; }
+.piano-inspector section:nth-of-type(2) .piano-inspector__row { margin-bottom:7px; }
 @media(max-width:1150px) { .controlbar { grid-template-columns:auto 1fr auto; } }
 @media(max-width:900px) { .reference-piano { grid-template-columns:210px minmax(0,1fr); } }

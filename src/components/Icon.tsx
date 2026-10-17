@@ -68,9 +68,23 @@ import {
   Link,
   Path,
   CaretDoubleRight,
+  ArrowsInLineVertical,
+  ArrowsInLineHorizontal,
+  Gauge,
+  ToggleLeft,
+  Stack,
+  MagnifyingGlass,
+  TrayArrowDown,
 } from "@phosphor-icons/react";
 
 const glyphs = {
+  collapseVertical: ArrowsInLineVertical,
+  catchPlayhead: ArrowsInLineHorizontal,
+  smartControls: Gauge,
+  inspector: ToggleLeft,
+  library: Stack,
+  search: MagnifyingGlass,
+  trayDownload: TrayArrowDown,
   power: Power,
   list: List,
   note: Note,

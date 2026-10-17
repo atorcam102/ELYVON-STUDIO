@@ -77,7 +77,7 @@ function ViewButtons() {
   return (
     <div className="cb-group" role="group" aria-label="View">
       <CbButton
-        icon="settings"
+        icon="smartControls"
         tone="view"
         label="Smart Controls (B)"
         active={layout.bottomVisible && layout.bottomTab === "smartControls"}
@@ -493,10 +493,10 @@ export function TopBar() {
     {chrome.controlsVisible && <header className="controlbar">
       <div className="controlbar__side">
         <div className="cb-group" role="group" aria-label="Biblioteca e inspector">
-          <CbButton icon="project" tone="view" label="Biblioteca (Y)" active={layout.browserVisible} onClick={() => setLayout({ browserVisible: !layout.browserVisible })} />
-          <CbButton icon="panelLeft" tone="view" label="Inspector (I)" active={layout.inspectorVisible} onClick={() => setLayout({ inspectorVisible: !layout.inspectorVisible })} />
+          <CbButton icon="library" tone="view" label="Biblioteca (Y)" active={layout.browserVisible} onClick={() => setLayout({ browserVisible: !layout.browserVisible })} />
+          <CbButton icon="inspector" tone="view" label="Inspector (I)" active={layout.inspectorVisible} onClick={() => setLayout({ inspectorVisible: !layout.inspectorVisible })} />
           <CbButton icon="help" label="Ayuda rápida" onClick={() => pendingControl("Ayuda rápida")} />
-          <CbButton icon="download" label="Biblioteca de sonidos" onClick={() => setLayout({ browserVisible: true })} />
+          <CbButton icon="trayDownload" label="Biblioteca de sonidos" onClick={() => setLayout({ browserVisible: true })} />
         </div>
         <ViewButtons />
       </div>

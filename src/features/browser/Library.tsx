@@ -13,7 +13,7 @@ export function Library() {
   return <aside className="sound-library" aria-label="Biblioteca">
     <div className="sound-library__heading"><strong>Biblioteca</strong><button onClick={() => setCategory(null)}>Todos los sonidos <Icon name="chevronDown" size={12} /></button></div>
     <div className="sound-library__patch">{track?.name ?? "Todos los sonidos"}</div>
-    <label className="sound-library__search"><Icon name="zoomIn" size={15} /><input aria-label="Buscar sonidos" placeholder="Buscar sonidos" value={search} onChange={e => setSearch(e.target.value)} /></label>
+    <label className="sound-library__search"><Icon name="search" size={15} /><input aria-label="Buscar sonidos" placeholder="Buscar sonidos" value={search} onChange={e => setSearch(e.target.value)} /></label>
     <div className="sound-library__categories">
       {category && <button onClick={() => setCategory(null)}><Icon name="chevronUp" size={12} />{category}</button>}
       {(category ? ["Default", "Bright", "Classic", "Soft"] : categories).filter(c => c.toLowerCase().includes(search.toLowerCase())).map(c => <button key={c} onClick={() => category ? pendingControl(`${category}: ${c}`) : setCategory(c)}>{c}<Icon name="chevronRight" size={13} /></button>)}

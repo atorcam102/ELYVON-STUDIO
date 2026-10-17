@@ -1,4 +1,5 @@
 import { IconButton } from "../../components/Button";
+import { Icon } from "../../components/Icon";
 import { useUi, type BottomTab } from "../../state/ui";
 import { Mixer } from "../mixer/Mixer";
 import { AutomationEditor } from "./AutomationEditor";
@@ -24,7 +25,7 @@ export function BottomPanel() {
     >
       {tab !== "mixer" && <div className="bottom-panel__bar">
         <div className="segmented" role="tablist" aria-label="Editors">
-          {TABS.map((t) => (
+          {TABS.slice(0, 3).map((t) => (
             <button
               key={t.id}
               type="button"
@@ -37,6 +38,12 @@ export function BottomPanel() {
               {t.label}
             </button>
           ))}
+        </div>
+        <div className="bottom-panel__additional" role="tablist" aria-label="Más editores">
+          {TABS.slice(3).map(t => <button key={t.id} type="button" role="tab" aria-label={t.label} title={t.label}
+            aria-selected={t.id === tab} className={t.id === tab ? "is-on" : ""} onClick={() => setLayout({ bottomTab: t.id })}>
+            <Icon name={t.id === "automation" ? "automation" : "waveform"} size={18} />
+          </button>)}
         </div>
         <IconButton
           icon="close"
