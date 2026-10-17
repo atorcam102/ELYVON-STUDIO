@@ -13,4 +13,10 @@ linkVolume: boolean,
 /**
  * Pan changes move every member by the same amount.
  */
-linkPan: boolean, linkMute: boolean, linkSolo: boolean, };
+linkPan: boolean, linkMute: boolean, linkSolo: boolean, 
+/**
+ * Region edits (split, trim, move, slip, delete, mute) on one member apply
+ * to the regions of the other members with the same position and length,
+ * keeping multitrack recordings phase-locked (schema 5).
+ */
+linkEdit: boolean, };

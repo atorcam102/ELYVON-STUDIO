@@ -8,7 +8,7 @@ import type { Layout } from "../bindings/Layout";
 import type { Project } from "../bindings/Project";
 import { clampZoom, DEFAULT_PX_PER_QUARTER } from "../lib/geometry";
 
-export type BottomTab = "mixer" | "pianoRoll" | "audioEditor";
+export type BottomTab = "mixer" | "pianoRoll" | "audioEditor" | "automation";
 export type BrowserTab = "files" | "loops" | "instruments" | "plugins";
 export type { SettingsSection } from "./uiContract";
 

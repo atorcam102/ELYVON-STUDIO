@@ -20,6 +20,7 @@ use rubato::{Fft, FixedSync, Resampler};
 use serde::Serialize;
 use ts_rs::TS;
 
+pub mod repair;
 pub use decode::{Decoded, SUPPORTED_EXTENSIONS, decode_file, fingerprint};
 pub use peaks::PeakPyramid;
 
@@ -159,6 +160,15 @@ impl MediaBuffer {
             .copied()
             .unwrap_or(left);
         [left, right]
+    }
+
+    /// [`Self::sample`] for reversed playback (reads ahead backwards).
+    #[inline]
+    pub fn sample_reverse(&self, frame: usize) -> [f32; 2] {
+        match &self.stream {
+            Some(stream) => stream.sample_reverse(frame as u64),
+            None => self.sample(frame),
+        }
     }
 
     pub fn prefetch(&self, start: u64, frames: usize) -> Result<(), MediaError> {

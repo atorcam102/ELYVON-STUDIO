@@ -245,6 +245,8 @@ pub struct AuxChannel {
     pub muted: bool,
     pub soloed: bool,
     pub strip: StripRouting,
+    #[serde(default)]
+    pub automation: crate::automation::ChannelAutomation,
 }
 
 impl AuxChannel {
@@ -261,6 +263,7 @@ impl AuxChannel {
                 format: ChannelFormat::Stereo,
                 ..StripRouting::default()
             },
+            automation: crate::automation::ChannelAutomation::default(),
         }
     }
 }
@@ -279,6 +282,11 @@ pub struct MixGroup {
     pub link_pan: bool,
     pub link_mute: bool,
     pub link_solo: bool,
+    /// Region edits (split, trim, move, slip, delete, mute) on one member apply
+    /// to the regions of the other members with the same position and length,
+    /// keeping multitrack recordings phase-locked (schema 5).
+    #[serde(default)]
+    pub link_edit: bool,
 }
 
 /// A named set of tracks shown together (and collapsible) in the mixer.
@@ -299,6 +307,7 @@ pub struct MasterChannel {
     pub volume_db: f64,
     pub muted: bool,
     pub inserts: Vec<InsertSlot>,
+    pub automation: crate::automation::ChannelAutomation,
 }
 
 impl Default for MasterChannel {
@@ -307,6 +316,7 @@ impl Default for MasterChannel {
             volume_db: 0.0,
             muted: false,
             inserts: Vec::new(),
+            automation: crate::automation::ChannelAutomation::default(),
         }
     }
 }

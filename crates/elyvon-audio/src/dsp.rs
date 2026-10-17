@@ -7,6 +7,7 @@
 //! `adopt`, which only swaps buffers — the replaced plan is freed later on
 //! the control thread.
 
+use elyvon_project::automation::InsertParam;
 use elyvon_project::mixer::{FilterMode, Processor};
 
 use crate::gain::db_to_gain;
@@ -170,6 +171,8 @@ struct Limiter {
     len: usize,
     index: u64,
     gain: f32,
+    /// Automated bypass amount: 0 limits, 1 passes the delayed signal.
+    pass: f32,
 }
 
 impl Limiter {
@@ -186,6 +189,7 @@ impl Limiter {
             len: 0,
             index: 0,
             gain: 1.0,
+            pass: 0.0,
         }
     }
 
@@ -252,8 +256,9 @@ impl Limiter {
             self.at = (self.at + 1) % self.delay.len();
             (out[0], out[1])
         };
-        *l = dl * self.gain;
-        *r = dr * self.gain;
+        let g = self.gain + (1.0 - self.gain) * self.pass;
+        *l = dl * g;
+        *r = dr * g;
         self.index += 1;
     }
 }
@@ -266,7 +271,12 @@ enum Kind {
         swap: bool,
         mono: bool,
     },
-    Filter(Biquad),
+    Filter {
+        biquad: Biquad,
+        mode: FilterMode,
+        cutoff: f64,
+        q: f64,
+    },
     Limiter(Box<Limiter>),
 }
 
@@ -278,13 +288,19 @@ enum Fade {
     Out,
 }
 
-/// A prepared insert processor.
+//// A prepared insert processor.
 #[derive(Debug, Clone)]
 pub struct Insert {
     pub id: elyvon_project::mixer::InsertId,
     pub bypass: bool,
     kind: Kind,
     fade: Fade,
+    rate: u32,
+    /// Bypass is automated: the processor always runs and its output is
+    /// blended with the dry signal by `amount` (0 processed … 1 dry).
+    automated_bypass: bool,
+    amount: f32,
+    amount_target: f32,
 }
 
 impl Insert {
@@ -309,9 +325,12 @@ impl Insert {
                 swap,
                 mono,
             },
-            Processor::Filter { mode, cutoff_hz, q } => {
-                Kind::Filter(Biquad::new(mode, cutoff_hz, q, rate))
-            }
+            Processor::Filter { mode, cutoff_hz, q } => Kind::Filter {
+                biquad: Biquad::new(mode, cutoff_hz, q, rate),
+                mode,
+                cutoff: cutoff_hz,
+                q,
+            },
             Processor::Limiter {
                 ceiling_db,
                 lookahead_ms,
@@ -328,6 +347,58 @@ impl Insert {
             bypass,
             kind,
             fade: Fade::None,
+            rate,
+            automated_bypass: false,
+            amount: f32::from(u8::from(bypass)),
+            amount_target: f32::from(u8::from(bypass)),
+        }
+    }
+
+    /// Lets automation drive the bypass as a continuous dry/processed blend
+    /// (the look-ahead latency is then always present).
+    pub fn set_bypass_automated(&mut self) {
+        self.automated_bypass = true;
+        self.bypass = false;
+    }
+
+    /// Sets an automated parameter for the next processed span. Real-time
+    /// safe: filter coefficients are recomputed in place, state is kept.
+    pub fn automate(&mut self, param: InsertParam, value: f32) {
+        match (param, &mut self.kind) {
+            (InsertParam::Bypass, _) => self.amount_target = value.clamp(0.0, 1.0),
+            (InsertParam::TrimGain, Kind::Trim(g)) => {
+                let v = db_to_gain(f64::from(value)) as f32;
+                g.target = (v, v);
+            }
+            (
+                InsertParam::FilterCutoff | InsertParam::FilterQ,
+                Kind::Filter {
+                    biquad,
+                    mode,
+                    cutoff,
+                    q,
+                },
+            ) => {
+                let v = f64::from(value);
+                let changed = if param == InsertParam::FilterCutoff {
+                    std::mem::replace(cutoff, v) != v
+                } else {
+                    std::mem::replace(q, v) != v
+                };
+                if changed {
+                    let z = biquad.z;
+                    *biquad = Biquad::new(*mode, *cutoff, *q, self.rate);
+                    biquad.z = z;
+                }
+            }
+            (InsertParam::LimiterCeiling, Kind::Limiter(l)) => {
+                l.ceiling = db_to_gain(f64::from(value)) as f32;
+            }
+            (InsertParam::LimiterRelease, Kind::Limiter(l)) => {
+                let frames = (f64::from(value) * f64::from(self.rate) / 1000.0).max(1.0);
+                l.release = (1.0 - (-1.0 / frames).exp()) as f32;
+            }
+            _ => {}
         }
     }
 
@@ -349,13 +420,17 @@ impl Insert {
     /// Takes over the running state of the same insert in the old graph.
     pub fn adopt(&mut self, old: &mut Insert) {
         self.fade = match (old.bypass, self.bypass) {
+            _ if self.automated_bypass || old.automated_bypass => Fade::None,
             (true, false) => Fade::In,
             (false, true) => Fade::Out,
             _ => Fade::None,
         };
+        if self.automated_bypass && old.automated_bypass {
+            self.amount = old.amount;
+        }
         match (&mut self.kind, &mut old.kind) {
             (Kind::Trim(a), Kind::Trim(b)) => a.adopt(b),
-            (Kind::Filter(a), Kind::Filter(b)) => a.z = b.z,
+            (Kind::Filter { biquad: a, .. }, Kind::Filter { biquad: b, .. }) => a.z = b.z,
             (Kind::Limiter(a), Kind::Limiter(b)) => a.adopt(b),
             _ => {}
         }
@@ -363,6 +438,9 @@ impl Insert {
 
     /// Processes interleaved stereo `buf` in place. Real-time safe.
     pub fn process(&mut self, buf: &mut [f32]) {
+        if self.automated_bypass {
+            return self.process_blended(buf);
+        }
         let fade = std::mem::replace(&mut self.fade, Fade::None);
         if fade == Fade::None {
             if !self.bypass {
@@ -383,6 +461,93 @@ impl Insert {
                 let t = ((at + i) / 2 + 1) as f32 / n as f32;
                 let wet = if fade == Fade::In { t } else { 1.0 - t };
                 *w = *d + (*w - *d) * wet;
+            }
+            at = end;
+        }
+    }
+
+    /// Processes with per-frame automated trim gain (dB) and/or bypass
+    /// amount (0 processed … 1 dry), so the result does not depend on how
+    /// a span is split. Real-time safe.
+    pub fn process_levels(&mut self, buf: &mut [f32], trim_db: Option<&[f32]>, bypass: Option<&[f32]>) {
+        if trim_db.is_none() && bypass.is_none() {
+            return self.process(buf);
+        }
+        self.fade = Fade::None;
+        let at = |s: Option<&[f32]>, i: usize, default: f32| s.and_then(|s| s.get(i)).copied().unwrap_or(default);
+        let static_amount = self.amount_target;
+        if let Kind::Limiter(l) = &mut self.kind {
+            for (i, f) in buf.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+                l.pass = at(bypass, i, static_amount).clamp(0.0, 1.0);
+                let (a, b) = f.split_at_mut(1);
+                l.process(&mut a[0], &mut b[0]);
+            }
+            self.amount = l.pass;
+            return;
+        }
+        let mut dry = [0.0f32; 128];
+        let mut start = 0;
+        while start < buf.len() {
+            let end = (start + dry.len()).min(buf.len());
+            let piece = &mut buf[start..end];
+            dry[..piece.len()].copy_from_slice(piece);
+            match (&mut self.kind, trim_db) {
+                (Kind::Trim(g), Some(levels)) => {
+                    for (j, f) in piece.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+                        let v = levels.get(start / 2 + j).copied().unwrap_or(0.0);
+                        let k = db_to_gain(f64::from(v)) as f32;
+                        f[0] *= k;
+                        f[1] *= k;
+                    }
+                    let last = levels.get(end / 2 - 1).copied().unwrap_or(0.0);
+                    let k = db_to_gain(f64::from(last)) as f32;
+                    *g = Smoothed::new((k, k));
+                }
+                _ => self.run(piece),
+            }
+            if bypass.is_some() || self.automated_bypass {
+                for (j, (w, d)) in piece.iter_mut().zip(&dry).enumerate() {
+                    let x = at(bypass, (start + j) / 2, static_amount).clamp(0.0, 1.0);
+                    *w += (*d - *w) * x;
+                }
+            }
+            start = end;
+        }
+        if let Some(b) = bypass {
+            self.amount = b.last().copied().unwrap_or(self.amount);
+            self.amount_target = self.amount;
+        }
+    }
+
+    /// Automated bypass: ramps the dry amount from its last value to the
+    /// target over `buf`.
+    fn process_blended(&mut self, buf: &mut [f32]) {
+        let (from, to) = (self.amount, self.amount_target);
+        self.amount = to;
+        let n = (buf.len() / 2).max(1) as f32;
+        if let Kind::Limiter(l) = &mut self.kind {
+            // The dry path must stay behind the same look-ahead delay: blend
+            // the limiter's gain towards unity instead of the signals.
+            for (i, f) in buf.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+                l.pass = from + (to - from) * (i + 1) as f32 / n;
+                let (a, b) = f.split_at_mut(1);
+                l.process(&mut a[0], &mut b[0]);
+            }
+            return;
+        }
+        if from == 0.0 && to == 0.0 {
+            return self.run(buf);
+        }
+        let mut dry = [0.0f32; 128];
+        let mut at = 0;
+        while at < buf.len() {
+            let end = (at + dry.len()).min(buf.len());
+            let piece = &mut buf[at..end];
+            dry[..piece.len()].copy_from_slice(piece);
+            self.run(piece);
+            for (i, (w, d)) in piece.iter_mut().zip(&dry).enumerate() {
+                let x = from + (to - from) * ((at + i) / 2 + 1) as f32 / n;
+                *w += (*d - *w) * x;
             }
             at = end;
         }
@@ -420,7 +585,7 @@ impl Insert {
                     f[1] = r;
                 }
             }
-            Kind::Filter(b) => {
+            Kind::Filter { biquad: b, .. } => {
                 for f in buf.as_chunks_mut::<2>().0.iter_mut() {
                     f[0] = b.run(0, f[0]);
                     f[1] = b.run(1, f[1]);

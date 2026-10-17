@@ -20,6 +20,8 @@
 //! pre-allocated lock-free SPSC queues (`rtrb`); replaced plans travel back to
 //! the control thread to be freed there. See `docs/ARCHITECTURE.md`.
 
+pub mod analysis;
+pub mod automation;
 pub mod contracts;
 pub mod device;
 pub mod dsp;

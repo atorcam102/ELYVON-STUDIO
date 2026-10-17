@@ -151,6 +151,8 @@ pub fn validate(project: &Project) -> Result<(), ValidationError> {
             ));
         }
         validate_track(&tp, track, &media)?;
+        crate::comp::validate_track(&tp, track)?;
+        crate::comp::validate_freeze(&tp, track, &media)?;
         crate::mixer::validate_strip(&format!("{tp}.strip"), &track.strip)?;
         for (ri, region) in track.regions.iter().enumerate() {
             if !region_ids.insert(region.id) {
@@ -161,7 +163,8 @@ pub fn validate(project: &Project) -> Result<(), ValidationError> {
             }
         }
     }
-    crate::mixer::validate_mixer(project)
+    crate::mixer::validate_mixer(project)?;
+    crate::automation::validate_project(project)
 }
 
 /// Validates the media pool and returns its ids.
@@ -294,8 +297,16 @@ fn validate_track(
                 gain_db,
                 fade_in,
                 fade_out,
+                looped,
+                reversed,
                 ..
             } => {
+                if *looped && *reversed {
+                    return Err(ValidationError::new(
+                        format!("{rp}.content.reversed"),
+                        "a region cannot be both looped and reversed",
+                    ));
+                }
                 if let Some(id) = id
                     && !media.contains(id)
                 {
@@ -429,6 +440,7 @@ mod tests {
             length: 960,
             muted: false,
             content: RegionContent::audio(None),
+            automation: Vec::new(),
         });
         assert!(validate(&p).unwrap_err().message.contains("not allowed"));
     }
@@ -450,6 +462,7 @@ mod tests {
                     ..MidiNote::new(200, 100, 0, 10)
                 }],
             },
+            automation: Vec::new(),
         });
         assert!(validate(&p).unwrap_err().path.ends_with("pitch"));
     }

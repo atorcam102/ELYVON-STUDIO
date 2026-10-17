@@ -38,6 +38,7 @@ fn replace_session(
         s.view()
     };
     state.clear_recovery();
+    state.automation.discard();
     if let Some(path) = recent {
         remember_recent(app, path);
     }

@@ -469,3 +469,174 @@ fn mixer_graph_instruments_and_swaps_never_allocate() {
     );
     handle.poll();
 }
+
+#[test]
+fn automation_envelopes_and_live_overrides_never_allocate() {
+    use elyvon_audio::automation::{ParamOverride, StripKey};
+    use elyvon_project::automation::{
+        AutomationMode, AutomationParam, AutomationTarget, Curve, InsertParam, PointSpec,
+    };
+    use elyvon_project::automation_record::TouchPhase;
+    use elyvon_project::mixer::{ChannelRef, FilterMode, Processor, Send};
+    const RATE: u32 = 48_000;
+    let mut s = Session::new(120.0);
+    let t = s.audio_track();
+    let tone = buffer(vec![sine(440.0, 0.5, RATE, 96_000)], RATE, RATE);
+    s.place(t, 0, &tone, "tone");
+    let track = ChannelRef::Track { id: t };
+    let aux = s
+        .apply(EditCommand::AddAux {
+            name: Some("Verb".into()),
+            sources: vec![],
+        })
+        .created_auxes[0];
+    s.apply(EditCommand::SetSend {
+        channel: track,
+        target: aux,
+        send: Some(Send {
+            target: aux,
+            level_db: -6.0,
+            pre_fader: false,
+            muted: false,
+        }),
+    });
+    let mut ids = Vec::new();
+    for p in [
+        Processor::Trim { gain_db: 0.0 },
+        Processor::Filter {
+            mode: FilterMode::LowPass,
+            cutoff_hz: 3000.0,
+            q: 0.7,
+        },
+        Processor::Limiter {
+            ceiling_db: -3.0,
+            lookahead_ms: 5.0,
+            release_ms: 50.0,
+        },
+    ] {
+        ids.push(
+            s.apply(EditCommand::AddInsert {
+                channel: track,
+                processor: p,
+                index: None,
+            })
+            .created_inserts[0],
+        );
+    }
+    let lanes: Vec<(ChannelRef, AutomationParam)> = vec![
+        (track, AutomationParam::Volume),
+        (track, AutomationParam::Pan),
+        (track, AutomationParam::Mute),
+        (track, AutomationParam::SendLevel { aux }),
+        (
+            track,
+            AutomationParam::Insert {
+                id: ids[0],
+                param: InsertParam::TrimGain,
+            },
+        ),
+        (
+            track,
+            AutomationParam::Insert {
+                id: ids[1],
+                param: InsertParam::FilterCutoff,
+            },
+        ),
+        (
+            track,
+            AutomationParam::Insert {
+                id: ids[2],
+                param: InsertParam::Bypass,
+            },
+        ),
+        (ChannelRef::Aux { id: aux }, AutomationParam::Volume),
+        (ChannelRef::Master, AutomationParam::Volume),
+    ];
+    for (channel, param) in &lanes {
+        let spec = param.spec();
+        s.apply(EditCommand::AddAutomationPoints {
+            target: AutomationTarget {
+                channel: *channel,
+                region: None,
+                param: *param,
+            },
+            points: (0..40)
+                .map(|k| PointSpec {
+                    tick: k * 200,
+                    value: if k % 2 == 0 { spec.min } else { spec.max.min(spec.min + 30.0) },
+                    curve: Some(if k % 3 == 0 {
+                        Curve::Step
+                    } else {
+                        Curve::Bezier { c1: 0.2, c2: 0.9 }
+                    }),
+                })
+                .collect(),
+        });
+    }
+    s.apply(EditCommand::SetAutomationMode {
+        channel: track,
+        mode: AutomationMode::Touch,
+    });
+    s.apply(EditCommand::SetLoop {
+        enabled: true,
+        start: 0,
+        end: 7680,
+    });
+    let lookup = s.lookup();
+    let (mut handle, mut eng) = engine::create(RATE, 512, build_plan(&s.project, &lookup, RATE, 1));
+    let mut out = vec![0.0f32; 512 * 2];
+    let mut midi = elyvon_audio::engine::NoMidi;
+    handle.send(TransportCommand::Play {
+        from_tick: Some(0),
+        count_in: false,
+        pre_roll: false,
+    });
+    let key = StripKey::Track(t.0.as_u128());
+    for round in 0..8u32 {
+        let phase = match round % 3 {
+            0 => TouchPhase::Begin,
+            1 => TouchPhase::Move,
+            _ => TouchPhase::End,
+        };
+        for param in [AutomationParam::Volume, AutomationParam::SendLevel { aux }] {
+            handle.send_override(ParamOverride {
+                strip: key,
+                param,
+                value: -f64::from(round),
+                phase,
+            });
+        }
+        for _ in 0..40 {
+            guarded(|| eng.process(&mut out, 2, &mut midi));
+        }
+        // Lane edits while playing swap the plan.
+        let mut edited = s.project.clone();
+        elyvon_project::edit::apply(
+            &mut edited,
+            &EditCommand::AddAutomationPoints {
+                target: AutomationTarget {
+                    channel: track,
+                    region: None,
+                    param: AutomationParam::Volume,
+                },
+                points: vec![PointSpec {
+                    tick: 100 + u64::from(round),
+                    value: -3.0,
+                    curve: None,
+                }],
+            },
+        )
+        .unwrap();
+        handle.publish(build_plan(&edited, &lookup, RATE, 2 + u64::from(round)));
+        guarded(|| eng.process(&mut out, 2, &mut midi));
+        handle.poll();
+    }
+    handle.send(TransportCommand::Stop);
+    for _ in 0..4 {
+        guarded(|| eng.process(&mut out, 2, &mut midi));
+    }
+    assert!(out.iter().all(|v| v.is_finite()));
+    assert_eq!(ALLOCS.load(Ordering::Relaxed), 0, "allocations in the audio callback");
+    assert_eq!(FREES.load(Ordering::Relaxed), 0, "frees in the audio callback");
+    handle.poll();
+}

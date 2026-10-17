@@ -31,6 +31,10 @@ import type { CaptureResult } from "../bindings/CaptureResult";
 import type { RecordedTake } from "../bindings/RecordedTake";
 import type { MixerStatus } from "../bindings/MixerStatus";
 import type { StemsReport } from "../bindings/StemsReport";
+import type { AutomationParam } from "../bindings/AutomationParam";
+import type { ChannelRef } from "../bindings/ChannelRef";
+import type { RepairResult } from "../bindings/RepairResult";
+import type { TouchPhase } from "../bindings/TouchPhase";
 export type { IpcError };
 
 export function isIpcError(e: unknown): e is IpcError {
@@ -121,6 +125,25 @@ export const ipc = {
     render: (path: string, metronome: boolean, startTick?: number, endTick?: number) =>
       call<RenderReport>("project_render", { path, startTick: startTick ?? null, endTick: endTick ?? null, metronome }),
     exportStems: (directory: string) => call<StemsReport>("project_export_stems", { directory }),
+  },
+  automation: {
+    /** A control gesture; `true` when it was written as automation. */
+    touch: (channel: ChannelRef, param: AutomationParam, value: number, phase: TouchPhase) =>
+      call<boolean>("automation_touch", { channel, param, value, phase }),
+  },
+  editing: {
+    normalize: (ids: string[], targetDb: number) => call<ApplyResult>("region_normalize", { ids, targetDb }),
+    transients: (id: string, sensitivity: number) => call<number[]>("region_transients", { id, sensitivity }),
+    freeze: (id: string) => call<ApplyResult>("track_freeze", { id }),
+    bounce: (trackId: string, regionIds: string[] | null, includeFader: boolean, muteSources: boolean) =>
+      call<ApplyResult>("track_bounce", { trackId, regionIds, includeFader, muteSources }),
+  },
+  repair: {
+    search: (directory: string) => call<RepairResult>("media_repair", { directory }),
+    collect: () => call<SessionView>("media_collect"),
+    unused: () => call<string[]>("media_unused"),
+    backupUnused: (confirm: boolean) => call<string>("media_backup_unused", { confirm }),
+    rescan: () => call<MediaStatus[]>("media_rescan"),
   },
   mixer: {
     status: () => call<MixerStatus>("mixer_status"),

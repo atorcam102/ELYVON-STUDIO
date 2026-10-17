@@ -518,6 +518,7 @@ pub(crate) fn add_group(
         link_pan: false,
         link_mute: true,
         link_solo: true,
+        link_edit: false,
     };
     let id = group.id;
     outcome.created_groups.push(id);

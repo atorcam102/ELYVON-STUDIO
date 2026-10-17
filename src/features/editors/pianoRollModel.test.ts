@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Project } from "../../bindings/Project";
-import { defaultStrip, emptyMixer } from "../../lib/mixerDefaults";
+import { defaultAutomation, defaultStrip, emptyMixer } from "../../lib/mixerDefaults";
 import {
   collectRoll,
   createdKeys,
@@ -33,6 +33,7 @@ function project(noteCount = 3): Project {
     length: 3840 * 4,
     muted: false,
     content: { type: "midi" as const, notes },
+    automation: [],
   });
   return {
     id: "p",
@@ -68,6 +69,9 @@ function project(noteCount = 3): Project {
         volumeDb: 0,
         pan: 0,
         regions: [region("a", 0), region("b", 3840 * 8)],
+        automation: defaultAutomation(),
+        freeze: null,
+        comps: [],
       },
     ],
   };

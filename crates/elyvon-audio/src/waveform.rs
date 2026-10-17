@@ -27,6 +27,7 @@ pub fn region_columns(
         offset,
         gain_db,
         looped,
+        reversed,
         ..
     } = &region.content
     else {
@@ -38,6 +39,9 @@ pub fn region_columns(
     let region_start = region.start as f64;
     let region_end = region.end() as f64;
     let start_secs = map.seconds_at(region_start);
+    // Reversed regions read their source span from the top down.
+    let span = elyvon_project::timeline_edit::abs_frame(map, region.end(), media.info.sample_rate)
+        - elyvon_project::timeline_edit::abs_frame(map, region.start, media.info.sample_rate);
     let from = from_tick.max(region_start);
     let to = to_tick.min(region_end);
     let mut out = Vec::with_capacity(columns);
@@ -49,8 +53,16 @@ pub fn region_columns(
             out.push([(0.0, 0.0); 2]);
             continue;
         }
-        let fa = *offset as f64 + (map.seconds_at(ta) - start_secs) * rate;
-        let fb = *offset as f64 + (map.seconds_at(tb) - start_secs) * rate;
+        let (ea, eb) = (
+            (map.seconds_at(ta) - start_secs) * rate,
+            (map.seconds_at(tb) - start_secs) * rate,
+        );
+        let (fa, fb) = if *reversed {
+            let top = (*offset + span) as f64;
+            (top - eb, top - ea)
+        } else {
+            (*offset as f64 + ea, *offset as f64 + eb)
+        };
         let (a, b) = (
             fa.floor() as u64,
             (fb.ceil() as u64).max(fa.floor() as u64 + 1),

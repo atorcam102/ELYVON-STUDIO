@@ -260,6 +260,27 @@ impl DiskStream {
             self.request(frame.saturating_add(PAGE_FRAMES as u64));
             self.request(frame.saturating_add(2 * PAGE_FRAMES as u64));
         }
+        self.read(frame)
+    }
+
+    /// Like [`Self::sample`] for playback that moves backwards (reversed
+    /// regions): reads ahead towards the start of the file.
+    pub fn sample_reverse(&self, frame: u64) -> [f32; 2] {
+        if frame >= self.cache.frames {
+            return [0.0; 2];
+        }
+        if self.cache.read_ahead.load(SeqCst) && frame.is_multiple_of(256) {
+            if let Some(f) = frame.checked_sub(PAGE_FRAMES as u64) {
+                self.request(f);
+            }
+            if let Some(f) = frame.checked_sub(2 * PAGE_FRAMES as u64) {
+                self.request(f);
+            }
+        }
+        self.read(frame)
+    }
+
+    fn read(&self, frame: u64) -> [f32; 2] {
         let index = frame / PAGE_FRAMES as u64;
         let Some(page) = self.find_page(index) else {
             self.request(frame);

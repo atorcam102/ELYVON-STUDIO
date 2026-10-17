@@ -9,7 +9,12 @@ use elyvon_core::{Color, Key, MeterChange, Tempo, TempoChange, Ticks, TimeSignat
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::automation::{
+    self as au, AutomationMode, AutomationPoint, AutomationTarget, AutomationWrite, PointSpec,
+};
 use crate::error::EditError;
+use crate::model::FadeCurve;
+use crate::region_edit::{self as re, MediaRelink, RegionGain};
 use crate::midi_edit::{
     self as me, ControllerLane, LanePoint, NoteEdge, NoteSpec, NoteTarget, NoteTransform,
 };
@@ -365,6 +370,152 @@ pub enum EditCommand {
     SetPanLaw {
         law: PanLaw,
     },
+    // ---- Automation (Phase 10) ----
+    SetAutomationMode {
+        channel: ChannelRef,
+        mode: AutomationMode,
+    },
+    /// Adds points (creating the lane when needed).
+    AddAutomationPoints {
+        target: AutomationTarget,
+        points: Vec<PointSpec>,
+    },
+    RemoveAutomationPoints {
+        target: AutomationTarget,
+        ids: Vec<u32>,
+    },
+    /// Replaces the listed points (matched by id).
+    UpdateAutomationPoints {
+        target: AutomationTarget,
+        points: Vec<AutomationPoint>,
+    },
+    /// Moves points in time and by a fraction of the value range; `copy`
+    /// leaves the originals (duplicate).
+    MoveAutomationPoints {
+        target: AutomationTarget,
+        ids: Vec<u32>,
+        #[ts(type = "number")]
+        delta_ticks: i64,
+        delta_value: f64,
+        copy: bool,
+    },
+    RemoveAutomationLane {
+        target: AutomationTarget,
+    },
+    /// Removes points within `tolerance` (fraction of the range) of a line.
+    SimplifyAutomation {
+        target: AutomationTarget,
+        tolerance: f64,
+    },
+    /// Range replacements captured during playback (one undo step).
+    WriteAutomation {
+        writes: Vec<AutomationWrite>,
+    },
+    // ---- Non-destructive editing, takes and comping (Phase 11) ----
+    /// Moves the audio (or notes) inside regions without moving the regions.
+    SlipRegions {
+        ids: Vec<RegionId>,
+        #[ts(type = "number")]
+        delta_ticks: i64,
+    },
+    /// Deletes regions and closes the gaps on their tracks.
+    RippleDelete {
+        ids: Vec<RegionId>,
+    },
+    /// Marquee: splits the tracks' regions at the range edges and reports
+    /// the regions inside (`selectedRegions`).
+    SplitRange {
+        track_ids: Vec<TrackId>,
+        #[ts(type = "number")]
+        start: Ticks,
+        #[ts(type = "number")]
+        end: Ticks,
+    },
+    /// Marquee delete, optionally closing the gap.
+    CutRange {
+        track_ids: Vec<TrackId>,
+        #[ts(type = "number")]
+        start: Ticks,
+        #[ts(type = "number")]
+        end: Ticks,
+        ripple: bool,
+    },
+    GlueRegions {
+        ids: Vec<RegionId>,
+    },
+    CreateCrossfade {
+        left: RegionId,
+        right: RegionId,
+        length_ms: f64,
+    },
+    SetRegionsReversed {
+        ids: Vec<RegionId>,
+        reversed: bool,
+    },
+    SetFadeCurve {
+        ids: Vec<RegionId>,
+        curve: FadeCurve,
+    },
+    /// Splits a region at several positions (e.g. detected transients).
+    SliceRegion {
+        id: RegionId,
+        #[ts(type = "Array<number>")]
+        positions: Vec<Ticks>,
+    },
+    /// Region gains measured by the engine's normaliser.
+    NormalizeRegions {
+        gains: Vec<RegionGain>,
+    },
+    /// Plays `[start, end)` of a take folder from `take`.
+    CompTake {
+        track_id: TrackId,
+        folder: RegionId,
+        take: u32,
+        #[ts(type = "number")]
+        start: Ticks,
+        #[ts(type = "number")]
+        end: Ticks,
+    },
+    SetCompCrossfade {
+        track_id: TrackId,
+        folder: RegionId,
+        crossfade_ms: f64,
+    },
+    /// Consolidates a comp into ordinary regions (takes are kept).
+    FlattenComp {
+        track_id: TrackId,
+        folder: RegionId,
+    },
+    UnflattenComp {
+        track_id: TrackId,
+        folder: RegionId,
+    },
+    /// Plays a pre-rendered file (rendered by the shell) instead of the
+    /// track's regions and inserts.
+    FreezeTrack {
+        id: TrackId,
+        media: MediaAsset,
+        #[ts(type = "number")]
+        start: Ticks,
+    },
+    UnfreezeTrack {
+        id: TrackId,
+    },
+    /// Places a rendered file on a new track below `source_track`.
+    BounceInPlace {
+        asset: MediaAsset,
+        #[ts(type = "number")]
+        start: Ticks,
+        source_track: TrackId,
+        regions: Vec<RegionId>,
+        mute_sources: bool,
+    },
+    /// Relinks several pool entries at once (repair, collect media).
+    RelinkMediaFiles {
+        items: Vec<MediaRelink>,
+    },
+    /// Drops pool entries no region uses (the files stay on disk).
+    RemoveUnusedMedia,
 }
 
 /// Where an imported file goes.
@@ -490,6 +641,35 @@ impl EditCommand {
             Self::RemoveFolder { .. } => "Delete Folder",
             Self::SetTrackFolder { .. } => "Move to Folder",
             Self::SetPanLaw { .. } => "Change Pan Law",
+            Self::SetAutomationMode { .. } => "Change Automation Mode",
+            Self::AddAutomationPoints { .. } => "Add Automation",
+            Self::RemoveAutomationPoints { .. } => "Delete Automation",
+            Self::UpdateAutomationPoints { .. } => "Edit Automation",
+            Self::MoveAutomationPoints { copy: true, .. } => "Copy Automation",
+            Self::MoveAutomationPoints { .. } => "Move Automation",
+            Self::RemoveAutomationLane { .. } => "Delete Automation Lane",
+            Self::SimplifyAutomation { .. } => "Simplify Automation",
+            Self::WriteAutomation { .. } => "Write Automation",
+            Self::SlipRegions { .. } => "Slip Regions",
+            Self::RippleDelete { .. } => "Ripple Delete",
+            Self::SplitRange { .. } => "Split at Range",
+            Self::CutRange { ripple: true, .. } => "Ripple Delete Range",
+            Self::CutRange { .. } => "Delete Range",
+            Self::GlueRegions { .. } => "Glue Regions",
+            Self::CreateCrossfade { .. } => "Crossfade",
+            Self::SetRegionsReversed { .. } => "Reverse",
+            Self::SetFadeCurve { .. } => "Change Fade Shape",
+            Self::SliceRegion { .. } => "Slice Region",
+            Self::NormalizeRegions { .. } => "Normalize",
+            Self::CompTake { .. } => "Comp Take",
+            Self::SetCompCrossfade { .. } => "Comp Crossfade",
+            Self::FlattenComp { .. } => "Flatten Comp",
+            Self::UnflattenComp { .. } => "Unflatten Comp",
+            Self::FreezeTrack { .. } => "Freeze Track",
+            Self::UnfreezeTrack { .. } => "Unfreeze Track",
+            Self::BounceInPlace { .. } => "Bounce in Place",
+            Self::RelinkMediaFiles { .. } => "Relink Audio Files",
+            Self::RemoveUnusedMedia => "Remove Unused Audio Files",
         }
     }
 }
@@ -508,10 +688,16 @@ pub struct EditOutcome {
     pub created_inserts: Vec<InsertId>,
     pub created_groups: Vec<GroupId>,
     pub created_folders: Vec<FolderId>,
+    /// Automation point ids, within the edited lane.
+    pub created_points: Vec<u32>,
+    /// Regions the UI should select (e.g. inside a marquee range).
+    pub selected_regions: Vec<RegionId>,
 }
 
 impl EditOutcome {
     fn merge(&mut self, other: EditOutcome) {
+        self.created_points.extend(other.created_points);
+        self.selected_regions.extend(other.selected_regions);
         self.created_tracks.extend(other.created_tracks);
         self.created_regions.extend(other.created_regions);
         self.created_markers.extend(other.created_markers);
@@ -537,6 +723,8 @@ pub(crate) fn apply_with_backup(
     backup: Project,
 ) -> Result<(EditOutcome, Project), EditError> {
     let result = apply_inner(project, cmd).and_then(|o| {
+        settle(project);
+        crate::comp::check_frozen(&backup, project)?;
         validate(project)?;
         Ok(o)
     });
@@ -547,6 +735,13 @@ pub(crate) fn apply_with_backup(
             Err(e)
         }
     }
+}
+
+/// Keeps derived data consistent after an edit: automation of removed sends
+/// and inserts, comps of deleted takes.
+fn settle(project: &mut Project) {
+    au::prune(project);
+    crate::comp::prune(project);
 }
 
 pub(crate) fn invalid(msg: impl Into<String>) -> EditError {
@@ -718,6 +913,7 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
                 length: *length,
                 muted: false,
                 content: RegionContent::Midi { notes: Vec::new() },
+                automation: Vec::new(),
             };
             outcome.created_regions.push(region.id);
             track.regions.push(region);
@@ -729,10 +925,17 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
             delta_ticks,
             track_offset,
         } => {
-            move_regions(project, ids, *delta_ticks, *track_offset)?;
+            // Phase-locked partners follow moves in time (not across tracks).
+            let ids = if *track_offset == 0 {
+                re::phase_locked(project, ids)
+            } else {
+                ids.clone()
+            };
+            move_regions(project, &ids, *delta_ticks, *track_offset)?;
             extend_length_to_content(project);
         }
         EditCommand::RemoveRegions { ids } => {
+            let ids = &re::phase_locked(project, ids);
             for id in ids {
                 project
                     .find_region(*id)
@@ -860,6 +1063,7 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
                     length,
                     muted: false,
                     content: RegionContent::Midi { notes },
+                    automation: Vec::new(),
                 };
                 outcome.created_regions.push(region.id);
                 track.regions.push(region);
@@ -899,23 +1103,7 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
             track_id,
             folder,
             take,
-        } => {
-            let track = track_mut(project, *track_id)?;
-            if !track.regions.iter().any(|r| {
-                r.capture
-                    .as_ref()
-                    .is_some_and(|c| c.folder == *folder && c.take == *take)
-            }) {
-                return Err(invalid("take does not exist"));
-            }
-            for region in &mut track.regions {
-                if let Some(c) = &region.capture
-                    && c.folder == *folder
-                {
-                    region.muted = c.take != *take;
-                }
-            }
-        }
+        } => crate::comp::select_take(project, *track_id, *folder, *take)?,
         EditCommand::ImportAudio { assets, placements } => {
             tl::import_audio(project, assets, placements, &mut outcome)?;
             extend_length_to_content(project);
@@ -930,10 +1118,13 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
             asset.info = info.clone();
         }
         EditCommand::SplitRegions { ids, at } => {
-            tl::split_regions(project, ids, *at, &mut outcome)?;
+            let ids = re::phase_locked(project, ids);
+            tl::split_regions(project, &ids, *at, &mut outcome)?;
         }
         EditCommand::TrimRegion { id, start, end } => {
-            tl::trim_region(project, *id, *start, *end)?;
+            for id in re::phase_locked(project, &[*id]) {
+                tl::trim_region(project, id, *start, *end)?;
+            }
             extend_length_to_content(project);
         }
         EditCommand::DuplicateRegions { ids } => {
@@ -949,7 +1140,7 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
             extend_length_to_content(project);
         }
         EditCommand::SetRegionsMuted { ids, muted } => {
-            for id in ids {
+            for id in &re::phase_locked(project, ids) {
                 let (ti, ri) = project
                     .find_region(*id)
                     .ok_or(EditError::UnknownRegion(*id))?;
@@ -1025,6 +1216,7 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
                 }
                 outcome.merge(apply_inner(project, c)?);
                 // Later edits rely on the invariants of the earlier ones.
+                settle(project);
                 validate(project)?;
             }
         }
@@ -1083,6 +1275,116 @@ fn apply_inner(project: &mut Project, cmd: &EditCommand) -> Result<EditOutcome, 
         EditCommand::RemoveFolder { id } => mx::remove_folder(project, *id)?,
         EditCommand::SetTrackFolder { ids, folder } => mx::set_track_folder(project, ids, *folder)?,
         EditCommand::SetPanLaw { law } => project.mixer.pan_law = *law,
+        EditCommand::SetAutomationMode { channel, mode } => au::set_mode(project, *channel, *mode)?,
+        EditCommand::AddAutomationPoints { target, points } => {
+            outcome.created_points = au::add_points(project, target, points)?;
+        }
+        EditCommand::RemoveAutomationPoints { target, ids } => au::remove_points(project, target, ids)?,
+        EditCommand::UpdateAutomationPoints { target, points } => {
+            au::update_points(project, target, points)?
+        }
+        EditCommand::MoveAutomationPoints {
+            target,
+            ids,
+            delta_ticks,
+            delta_value,
+            copy,
+        } => {
+            outcome.created_points =
+                au::move_points(project, target, ids, *delta_ticks, *delta_value, *copy)?;
+        }
+        EditCommand::RemoveAutomationLane { target } => au::remove_lane(project, target)?,
+        EditCommand::SimplifyAutomation { target, tolerance } => {
+            au::simplify(project, target, *tolerance)?
+        }
+        EditCommand::WriteAutomation { writes } => {
+            if writes.is_empty() || writes.len() > au::limits::MAX_WRITES {
+                return Err(invalid("an automation write holds 1–4096 ranges"));
+            }
+            for w in writes {
+                au::write(project, w)?;
+            }
+        }
+        EditCommand::SlipRegions { ids, delta_ticks } => {
+            let ids = re::phase_locked(project, ids);
+            re::slip(project, &ids, *delta_ticks)?;
+        }
+        EditCommand::RippleDelete { ids } => {
+            let ids = re::phase_locked(project, ids);
+            re::ripple_delete(project, &ids)?;
+        }
+        EditCommand::SplitRange {
+            track_ids,
+            start,
+            end,
+        } => {
+            outcome.selected_regions =
+                re::split_range(project, track_ids, *start, *end, &mut outcome)?;
+        }
+        EditCommand::CutRange {
+            track_ids,
+            start,
+            end,
+            ripple,
+        } => re::cut_range(project, track_ids, *start, *end, *ripple, &mut outcome)?,
+        EditCommand::GlueRegions { ids } => {
+            outcome.selected_regions = vec![re::glue(project, ids)?];
+        }
+        EditCommand::CreateCrossfade {
+            left,
+            right,
+            length_ms,
+        } => re::create_crossfade(project, *left, *right, *length_ms)?,
+        EditCommand::SetRegionsReversed { ids, reversed } => {
+            re::set_reversed(project, ids, *reversed)?
+        }
+        EditCommand::SetFadeCurve { ids, curve } => re::set_fade_curve(project, ids, *curve)?,
+        EditCommand::SliceRegion { id, positions } => {
+            re::slice(project, *id, positions, &mut outcome)?
+        }
+        EditCommand::NormalizeRegions { gains } => re::set_gains(project, gains)?,
+        EditCommand::CompTake {
+            track_id,
+            folder,
+            take,
+            start,
+            end,
+        } => crate::comp::comp_take(project, *track_id, *folder, *take, *start, *end)?,
+        EditCommand::SetCompCrossfade {
+            track_id,
+            folder,
+            crossfade_ms,
+        } => crate::comp::set_crossfade(project, *track_id, *folder, *crossfade_ms)?,
+        EditCommand::FlattenComp { track_id, folder } => {
+            crate::comp::flatten(project, *track_id, *folder, &mut outcome)?
+        }
+        EditCommand::UnflattenComp { track_id, folder } => {
+            crate::comp::unflatten(project, *track_id, *folder)?
+        }
+        EditCommand::FreezeTrack { id, media, start } => {
+            crate::comp::freeze(project, *id, media, *start)?
+        }
+        EditCommand::UnfreezeTrack { id } => crate::comp::unfreeze(project, *id)?,
+        EditCommand::BounceInPlace {
+            asset,
+            start,
+            source_track,
+            regions,
+            mute_sources,
+        } => {
+            re::bounce_in_place(
+                project,
+                asset,
+                *start,
+                *source_track,
+                regions,
+                *mute_sources,
+                &mut outcome,
+            )?;
+            extend_length_to_content(project);
+        }
+        EditCommand::RelinkMediaFiles { items } => re::relink_all(project, items)?,
+        EditCommand::RemoveUnusedMedia => re::remove_unused_media(project)?,
     }
     Ok(outcome)
 }
