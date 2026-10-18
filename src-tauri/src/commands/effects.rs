@@ -215,6 +215,18 @@ pub async fn effect_preset_delete(app: AppHandle, kind: EffectKind, name: String
 pub struct EqResponse {
     pub sample_rate: u32,
     pub freqs: Vec<f64>,
+    /// Total response including the output gain.
+    pub db: Vec<f64>,
+    /// Each active band's own response (no output gain).
+    pub bands: Vec<EqBandCurve>,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EqBandCurve {
+    /// Band index 0…7.
+    pub band: u8,
     pub db: Vec<f64>,
 }
 
@@ -235,10 +247,18 @@ pub async fn effect_eq_response(
         .collect();
     let values = ParamValues::from_map(EffectKind::ParametricEq, &params);
     let db = elyvon_audio::fx::eq_response_db(&values, rate, &freqs);
+    let bands = elyvon_audio::fx::eq_band_responses_db(&values, rate, &freqs)
+        .into_iter()
+        .map(|(band, db)| EqBandCurve {
+            band: band as u8,
+            db,
+        })
+        .collect();
     Ok(EqResponse {
         sample_rate: rate,
         freqs,
         db,
+        bands,
     })
 }
 

@@ -241,3 +241,285 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ---- Parametric equaliser window ---- */
+
+.peq-window .dialog__body {
+  padding: 0;
+}
+
+.peq {
+  display: flex;
+  flex-direction: column;
+  background: #262a30;
+  color: #d9e2ea;
+  font-size: 12px;
+  user-select: none;
+}
+
+.peq__top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.peq__power {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #50606f;
+  background: #3a424b;
+  color: #9fb0bf;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.peq__power.is-on {
+  background: #2f74c8;
+  border-color: #4a8fe0;
+  color: #fff;
+}
+
+.peq__presetbox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.peq__preset {
+  min-width: 280px;
+  background: #343a42;
+  color: inherit;
+  border: 1px solid #48525d;
+  border-radius: 5px;
+  padding: 3px 8px;
+  font: inherit;
+}
+
+.peq__commands {
+  display: flex;
+  gap: 2px;
+}
+
+.peq__commands button,
+.peq__bottom button,
+.peq__save button {
+  background: #343a42;
+  color: #c9d4de;
+  border: 1px solid #424b55;
+  border-radius: 4px;
+  padding: 2px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.peq__commands button:disabled,
+.peq__bottom button:disabled,
+.peq__save button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.peq__commands button.is-on,
+.peq__bottom button.is-on {
+  background: #2f74c8;
+  border-color: #4a8fe0;
+  color: #fff;
+}
+
+.peq__spacer {
+  flex: 1;
+}
+
+.peq__scale select,
+.peq__bottom select {
+  margin-left: 6px;
+  background: #343a42;
+  color: inherit;
+  border: 1px solid #48525d;
+  border-radius: 4px;
+  font: inherit;
+  padding: 1px 4px;
+}
+
+.peq__save {
+  display: flex;
+  gap: 6px;
+  padding: 0 14px 8px 62px;
+}
+
+.peq__save input {
+  width: 240px;
+  background: #1c2127;
+  color: inherit;
+  border: 1px solid #48525d;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font: inherit;
+}
+
+.peq__display {
+  background: #0c1724;
+  border-top: 1px solid #1d2c3c;
+  border-bottom: 1px solid #1d2c3c;
+}
+
+.peq__glyphs {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  padding-top: 6px;
+}
+
+.peq__glyph {
+  justify-self: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.peq__glyph.is-selected {
+  border-color: #33475c;
+  background: #15263a;
+}
+
+.peq__graph {
+  display: block;
+  width: 100%;
+  height: 300px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.is-bypassed .peq__graph {
+  opacity: 0.55;
+}
+
+.peq__values {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr) 58px;
+  padding-right: 0;
+}
+
+.peq__band {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 0 4px;
+  border-radius: 4px;
+}
+
+.peq__band--gain {
+  justify-content: flex-start;
+}
+
+.peq__gain-label {
+  color: #9fb3c6;
+  font-size: 12px;
+  padding-bottom: 2px;
+}
+
+.peq-value {
+  background: none;
+  border: none;
+  color: #c9d4de;
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 4px;
+  cursor: ns-resize;
+  border-radius: 3px;
+}
+
+.peq-value:focus-visible {
+  outline: 1px solid #4a8fe0;
+}
+
+.peq-value.is-dim {
+  color: #566d82;
+}
+
+.peq-value__input {
+  width: 76px;
+  text-align: center;
+  background: #1c2127;
+  color: #fff;
+  border: 1px solid #4a8fe0;
+  border-radius: 3px;
+  font: inherit;
+}
+
+.peq__type {
+  margin-top: 2px;
+  max-width: 124px;
+  background: transparent;
+  color: #6f879c;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font: inherit;
+  font-size: 11px;
+}
+
+.peq__type:hover,
+.peq__type:focus {
+  border-color: #33475c;
+}
+
+.peq__bottom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: #101d2c;
+}
+
+.peq__bottom sup {
+  font-size: 8px;
+}
+
+.peq__latency {
+  color: #6f879c;
+  font-size: 11px;
+}
+
+.peq__name {
+  text-align: center;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 8px 0 10px;
+  color: #eef3f7;
+}
+
+/* Mixer strip thumbnail of the strip's equaliser */
+.eq-mini {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Insert areas grow with the fullest strip (see Mixer.tsx --fx-height). */
+.mixer__strips .strip__fx,
+.mixer__strips .mixer-labels__stack .mixer-labels__fx {
+  height: var(--fx-height, 34px);
+  min-height: var(--fx-height, 34px);
+}
+
+.mixer__strips .strip--master .strip__fx {
+  height: calc(59px + var(--fx-extra, 0px));
+  min-height: calc(59px + var(--fx-extra, 0px));
+}
+
+/* The faders give up the height the insert areas gain, so the strip keeps
+   fitting the panel and the label column stays aligned. */
+.mixer__strips .strip__fader-row,
+.mixer__strips .mixer-labels__stack .mixer-labels__fader {
+  height: max(120px, calc(208px - var(--fx-extra, 0px)));
+  min-height: max(120px, calc(208px - var(--fx-extra, 0px)));
+  max-height: max(120px, calc(208px - var(--fx-extra, 0px)));
+  flex-basis: max(120px, calc(208px - var(--fx-extra, 0px)));
+}

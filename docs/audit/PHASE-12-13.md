@@ -30,7 +30,7 @@ effect, presets, A/B, sidechains, gain-reduction meters, a spectrum analyser and
 | Engine integration | `dsp.rs` wraps effects as inserts (click-free bypass, automation, latency, `ringing`, GR); `engine.rs` passes the tempo map, sidechain key buffers, economy flag and analyser tap; `plan.rs` assigns key slots, orders tracks so key sources run first and keeps muted key sources alive; `transport.rs` lock-free GR meters, analyser slot, DSP load and economy flag; `spectrum.rs` FFT analyser on the control side |
 | Determinism | Effects run 16-frame control chunks aligned to the absolute timeline frame; a chunk cut by the end of a callback resumes in the next one (`Bank::enter`), so output is **bit-identical** for any block size, also while parameters glide. Synchronised LFOs take their phase from the musical position; free LFOs re-anchor after a locate |
 | IPC | `effects_catalog`, `effect_presets`, `effect_preset_save`, `effect_preset_delete`, `effect_eq_response`, `effect_details`, `analyzer_select`, `analyzer_spectrum`; `Meters.reduction`, `EngineStats.dspLoad/economy` ([CONTRACTS](../CONTRACTS.md)) |
-| UI | `src/features/effects/EffectEditor.tsx`: generic controls from the catalogue (slider + typed value, choices, switches), EQ graph with the engine's exact curve over the measured spectrum and draggable bands, GR meter, sidechain source, factory/user presets (save, load, delete), A/B, latency and tail; mixer insert menu lists the native effects by category; effect parameters appear in the automation lanes (`src/lib/automation.ts`) |
+| UI | `src/features/effects/EffectEditor.tsx`: generic controls from the catalogue (slider + typed value, choices, switches), GR meter, sidechain source, factory/user presets (save, load, delete), A/B, latency and tail. `EqWindow.tsx`: the equaliser window — power (bypass), preset menu with previous/next and "save as", Comparar (A/B), Copiar/Pegar, Deshacer/Rehacer (this equaliser's own history), gain scale; a row of band-shape buttons (toggle a band); one graph with every band's own response as a coloured area, the total curve, handles on each band's curve (drag: frequency and gain, or Q for cuts; wheel: Q), the selected band's column and the measured spectrum behind (0 … −60 dBFS scale on the left); per-band values below (frequency, gain or slope, Q, type) edited by vertical drag, arrows or typing; output gain on the right; Analizador toggle and Procesado estéreo/medio/lateral. "Acoplar Q" and "HQ" are shown disabled ("no disponible"). The mixer strip's EQ slot shows the real curve in miniature and opens (or adds) the equaliser. The layout is functionally inspired by common DAW equalisers but drawn with Elyvon's own palette, shapes and names. Mixer insert menu lists the native effects by category; effect parameters appear in the automation lanes (`src/lib/automation.ts`) |
 | Demo | The generated demo session now carries effects from the factory presets: drum EQ, keys EQ + chorus + dotted-eighth delay, bass compressor keyed by the drums, vocal EQ + compressor + plate reverb |
 
 ## Phase 12 — equaliser and dynamics
@@ -85,7 +85,7 @@ control thread.
 | `npm ci` | pass |
 | `cargo fmt --all -- --check` | pass |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | pass |
-| `cargo test --workspace --locked --no-fail-fast` | **484 passed, 0 failed** (402 at 0.4.1) |
+| `cargo test --workspace --locked --no-fail-fast` | **486 passed, 0 failed** (402 at 0.4.1) |
 | `npm run typecheck`, `npm run lint` | pass |
 | `npm test` (Vitest) | **56/56 pass** (6 new in `src/lib/effects.test.ts`) |
 | `npm run tauri -- build --debug --no-bundle` | pass (`x86_64-pc-windows-msvc`, debug) |
@@ -125,9 +125,12 @@ first second while callbacks overrun. These are single measurements, not a bench
 Screenshots captured from the real application by the native end-to-end suite:
 [14 — compressor editor with live gain reduction](../screenshots/phase-12-13-windows/14-effect-compressor.png)
 (−40 dB threshold typed in the editor; the meter shows the engine's reduction while playing),
-[15 — equaliser editor](../screenshots/phase-12-13-windows/15-effect-eq.png) (band 4 at +12 dB,
-440 Hz: the curve is computed by the core from the engine's biquads; the filled area is the
-track's spectrum measured off the audio thread, peaking at the 440 Hz tone).
+[15 — equaliser window](../screenshots/phase-12-13-windows/15-effect-eq.png) (high-pass at 40 Hz,
+low shelf −6 dB, bell +12 dB at 440 Hz, bell −7.5 dB at 2.5 kHz, high shelf +6 dB: every
+coloured area and the white total curve come from the core's biquad sections; the light area
+behind is the track's spectrum measured off the audio thread, peaking at the 440 Hz tone),
+[16 — mixer strip](../screenshots/phase-12-13-windows/16-strip-eq-thumbnail.png) (the EQ slot
+draws the strip's real curve; the insert areas of all strips grow with the fullest one and the faders give up that height, so strips keep fitting and stay aligned).
 
 ## Platform matrix
 
@@ -151,6 +154,9 @@ differ in the last bits between targets (the golden test uses tolerances for tha
 - Key signals are not latency-aligned with their destination when the source path has more
   plug-in latency than the destination.
 - Platforms other than Windows x64 were not built.
+- The native end-to-end suite runs the app with the same identifier as an installed copy, so it
+  shares its preferences; it now forces a known layout at start and restores the original
+  preferences at the end.
 - The main checkout also contains another agent's uncommitted UI work (a reference "Channel
   EQ" window drawing fixed curves, a project chooser shown at start-up). It is not part of this
   branch; with it applied the native E2E suite cannot start (a modal dialog covers the control

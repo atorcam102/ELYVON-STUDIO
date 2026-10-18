@@ -278,7 +278,8 @@ and toggles are stepped; logarithmic parameters interpolate on a log scale. Para
 rebuild the processor (convolution space and IR length, distortion oversampling) are not
 automatable.
 
-**Filters** add `"mode": "bandPass"` and `"notch"`.
+The equaliser's `processing` key (0 stereo, 1 mid, 2 side) selects which signal its bands
+process. **Filters** add `"mode": "bandPass"` and `"notch"`.
 
 **Presets** (user files, `<app data>/presets/<kind>/<name>.elyvonpreset`):
 `{ "format": "elyvon-effect-preset", "version": 1, "kind", "name", "params": { key: number } }`.

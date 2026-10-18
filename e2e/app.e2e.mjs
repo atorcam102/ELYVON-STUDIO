@@ -19,6 +19,8 @@ const shots = process.env.E2E_SCREENSHOTS;
 const work = mkdtempSync(join(tmpdir(), "elyvon-e2e-"));
 
 let d;
+/** The user's preferences before the run (the suite shares them with an installed app). */
+let originalSettings = null;
 
 async function shot(name) {
   if (!shots) return;
@@ -102,7 +104,13 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
   before(async () => {
     d = await Driver.start({ application: app });
     await d.find(".controlbar", { timeout: 20_000 });
-    // The layout is persisted in preferences: start from the arrangement alone.
+    // The layout is persisted in preferences: start every run from the same
+    // one (no inspector, browser or bottom panel) and restore them afterwards.
+    originalSettings = (await d.invoke("settings_get")).ok;
+    const layout = { ...originalSettings.layout, inspectorVisible: false, browserVisible: false, bottomVisible: false, bottomHeight: 600 };
+    await d.invoke("settings_set", { settings: { ...originalSettings, layout } });
+    await d.exec("location.reload()");
+    await d.find(".controlbar", { timeout: 20_000 });
     await hideBottom();
     if (await d.count(".right-panel__close")) await d.clickCss(".right-panel__close");
   });
@@ -111,6 +119,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     // Close a clean test-owned document so the unsaved-work guard is respected.
     try {
       await d?.invoke("project_save", { path: join(work, "final-session.elyvon") });
+      if (originalSettings) await d?.invoke("settings_set", { settings: originalSettings });
     } finally {
       assert.deepEqual(await d?.stop(), [], "final test process exits without a forced kill");
     }
@@ -702,6 +711,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     const eqParams = Object.fromEntries(catalog.find((e) => e.kind === "parametricEq").params.map((p) => [p.key, p.default]));
     eqParams.b4Gain = 12;
     eqParams.b4Freq = 440;
+    Object.assign(eqParams, { b1On: 1, b1Freq: 40, b2Gain: -6, b2Freq: 120, b6Gain: -7.5, b6Freq: 2500, b6Q: 0.7, b7Gain: 6, b7Freq: 7000 });
     const added = await d.invoke("project_apply", { command: { type: "addInsert", channel: { type: "track", id: track }, processor: { type: "effect", kind: "parametricEq", params: eqParams }, index: null } });
     assert.ok(added.ok, JSON.stringify(added.err));
     const curve = (await d.invoke("effect_eq_response", { params: eqParams, points: 64 })).ok;
@@ -711,8 +721,12 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     await d.exec("location.reload()");
     await d.find(".controlbar", { timeout: 10_000 });
     await showMixer();
-    await d.exec(`[...document.querySelectorAll('${strip} .slot--fx')].find((b) => b.textContent.includes('EQ')).click()`);
-    await d.find(".fx-editor .fx-eq__graph");
+    // The strip's EQ slot shows the curve in miniature and opens the equaliser.
+    await d.find(`${strip} .strip__eq .eq-mini`);
+    await shot("16-strip-eq-thumbnail");
+    await d.clickCss(`${strip} .strip__eq`);
+    await d.find(".fx-editor .peq__graph");
+    assert.match(await d.textOf(".fx-editor .peq__name"), /Ecualizador paramétrico/);
     await d.invoke("transport_command", { command: { type: "play", fromTick: 0, countIn: false, preRoll: false } });
     const spectrum = await d.waitFor(async () => {
       const s = (await d.invoke("analyzer_spectrum")).ok;

@@ -13,6 +13,7 @@ use super::{Bank, CONTROL, FxContext, Ramp, db};
 
 pub const MAX_SECTIONS: usize = 4;
 const OUTPUT: usize = EQ_BANDS * EQ_BAND_PARAMS;
+const PROCESSING: usize = OUTPUT + 1;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct BandSpec {
@@ -181,6 +182,13 @@ impl ParametricEq {
             }
             let fades = self.fades;
             let g = self.gain_ramp;
+            // 0: both channels; 1: the mid signal; 2: the side signal.
+            let mode = self.bank.get(PROCESSING).round() as usize;
+            let channels: &[usize] = match mode {
+                0 => &[0, 1],
+                1 => &[0],
+                _ => &[1],
+            };
             for (i, f) in buf[off * 2..(off + n) * 2]
                 .as_chunks_mut::<2>()
                 .0
@@ -188,8 +196,14 @@ impl ParametricEq {
                 .enumerate()
             {
                 let j = c.idx(i);
-                for (ch, s) in f.iter_mut().enumerate() {
-                    let mut x = f64::from(*s);
+                let (l, r) = (f64::from(f[0]), f64::from(f[1]));
+                let mut v = if mode == 0 {
+                    [l, r]
+                } else {
+                    [0.5 * (l + r), 0.5 * (l - r)]
+                };
+                for &ch in channels {
+                    let mut x = v[ch];
                     for (band, fade) in self.bands.iter_mut().zip(&fades) {
                         if band.identity || (fade.from == 0.0 && fade.to == 0.0) {
                             continue;
@@ -201,8 +215,16 @@ impl ParametricEq {
                         let m = f64::from(fade.at(j, c.len));
                         x += (y - x) * m;
                     }
-                    *s = (x * f64::from(g.at(j, c.len))) as f32;
+                    v[ch] = x;
                 }
+                let (ol, or) = if mode == 0 {
+                    (v[0], v[1])
+                } else {
+                    (v[0] + v[1], v[0] - v[1])
+                };
+                let k = f64::from(g.at(j, c.len));
+                f[0] = (ol * k) as f32;
+                f[1] = (or * k) as f32;
             }
             for band in &mut self.bands {
                 for s in band.sections.iter_mut().take(band.count) {
@@ -240,6 +262,25 @@ impl ParametricEq {
         };
         self.gain = self.gain_ramp.to;
     }
+}
+
+/// Response in dB of each active band (without the output gain), for the
+/// editor's per-band areas: `(band index, dB per frequency)`.
+pub fn band_responses_db(p: &ParamValues, rate: u32, freqs: &[f64]) -> Vec<(usize, Vec<f64>)> {
+    (0..EQ_BANDS)
+        .filter(|b| p.get(b * EQ_BAND_PARAMS) >= 0.5)
+        .map(|b| {
+            let (c, n) = sections(&spec(|i| p.get(i), b), rate);
+            let db = freqs
+                .iter()
+                .map(|&f| {
+                    let m: f64 = c.iter().take(n).map(|s| s.magnitude(f, rate)).product();
+                    20.0 * m.max(1e-12).log10()
+                })
+                .collect();
+            (b, db)
+        })
+        .collect()
 }
 
 /// Magnitude response in dB of the equaliser described by `p` at each of
@@ -337,6 +378,58 @@ mod tests {
                 (at_cutoff + 3.01).abs() < 0.1,
                 "Butterworth −3 dB: {at_cutoff}"
             );
+        }
+    }
+
+    #[test]
+    fn mid_and_side_processing_touch_only_their_component() {
+        let rate = 48_000;
+        let m = map(120.0);
+        let boost = |processing: f64| {
+            slot(
+                EffectKind::ParametricEq,
+                &[
+                    ("b4Gain", 12.0),
+                    ("b4Freq", 1_000.0),
+                    ("processing", processing),
+                ],
+            )
+        };
+        // A mono (pure mid) and an anti-phase (pure side) 1 kHz tone.
+        let mono = sine(1_000.0, rate, 24_000, 0.1);
+        let side: Vec<f32> = mono.chunks(2).flat_map(|f| [f[0], -f[1]]).collect();
+        let gain = |s: &elyvon_project::effects::EffectSlot, x: &[f32]| {
+            let out = run(&mut Effect::new(s, rate), x, rate, 128, &m);
+            20.0 * f64::from(rms(&out[24_000..]) / rms(&x[24_000..])).log10()
+        };
+        assert!((gain(&boost(0.0), &mono) - 12.0).abs() < 0.1);
+        assert!(
+            (gain(&boost(1.0), &mono) - 12.0).abs() < 0.1,
+            "mid boosts mono"
+        );
+        assert!(
+            gain(&boost(1.0), &side).abs() < 0.01,
+            "mid leaves the side alone"
+        );
+        assert!(
+            (gain(&boost(2.0), &side) - 12.0).abs() < 0.1,
+            "side boosts anti-phase"
+        );
+        assert!(
+            gain(&boost(2.0), &mono).abs() < 0.01,
+            "side leaves the mid alone"
+        );
+        // Per-band curves add up to the drawn total (minus the output gain).
+        let s = slot(
+            EffectKind::ParametricEq,
+            &[("b3Gain", 5.0), ("b6Gain", -4.0), ("outputDb", 2.0)],
+        );
+        let f = [100.0, 250.0, 1_000.0, 6_000.0];
+        let total = response_db(&s.params, rate, &f);
+        let bands = band_responses_db(&s.params, rate, &f);
+        for (k, t) in total.iter().enumerate() {
+            let sum: f64 = bands.iter().map(|(_, db)| db[k]).sum::<f64>() + 2.0;
+            assert!((sum - t).abs() < 1e-9);
         }
     }
 

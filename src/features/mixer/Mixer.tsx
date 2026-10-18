@@ -24,6 +24,8 @@ import { useUi } from "../../state/ui";
 import { pendingControl } from "../topbar/menuActions";
 import { EffectEditor } from "../effects/EffectEditor";
 import { effectMenuEntries } from "../effects/effectMenu";
+import { EqThumbnail } from "../effects/EqThumbnail";
+import { cachedCatalog, newSlot } from "../../lib/effects";
 import { effectInfo } from "../../lib/effects";
 import type { AutomationMode } from "../../bindings/AutomationMode";
 import type { AutomationParam } from "../../bindings/AutomationParam";
@@ -555,6 +557,17 @@ const ChannelStrip = memo(function ChannelStrip({
         { id: "new", label: "New Group (links volume, mute, solo)", onSelect: () => void apply({ type: "addGroup", members: [c] }) },
       ],
     });
+  /** The strip's first parametric equaliser, shown in the EQ slot. */
+  const stripEq = strip.inserts.find((s) => s.processor.type === "effect" && s.processor.kind === "parametricEq");
+  const openEq = () => {
+    if (stripEq) return setFxEditing(stripEq.id);
+    const info = cachedCatalog().find((e) => e.kind === "parametricEq");
+    if (!info || strip.inserts.length >= 8) return;
+    void apply({ type: "addInsert", channel: c, processor: { type: "effect", ...newSlot(info) }, index: 0 }).then((r) => {
+      const id = r?.createdInserts[0];
+      if (id) setFxEditing(id);
+    });
+  };
   const insertMenu = (e: React.MouseEvent) =>
     setMenu({
       at: at(e),
@@ -581,7 +594,19 @@ const ChannelStrip = memo(function ChannelStrip({
       data-channel={key}
     >
       <button className="slot strip__setting" type="button" onClick={() => pendingControl("Ajuste de canal")}>{c.type === "track" ? strip.name : "Ajuste"}</button>
-      <button className="strip__eq" type="button" onClick={insertMenu}>Ecualizador</button>
+      <button
+        className="strip__eq"
+        type="button"
+        disabled={disabledAudio}
+        title={stripEq ? "Abrir el ecualizador del canal (clic derecho: añadir efecto)" : "Añadir y abrir un ecualizador paramétrico (clic derecho: añadir efecto)"}
+        onClick={openEq}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          insertMenu(e);
+        }}
+      >
+        {stripEq && stripEq.processor.type === "effect" ? <EqThumbnail params={stripEq.processor.params} bypass={stripEq.bypass} /> : "Ecualizador"}
+      </button>
       <button className="slot strip__midi-fx" type="button" onClick={() => pendingControl("Efectos MIDI")}>Efectos MIDI</button>
       <div className="slot slot--input" title={strip.kindLabel === "Test Tone" ? "Built-in test instrument (sine + harmonic, ADSR); not a production synthesizer" : strip.kindLabel}>
         {strip.kindLabel === "Test Tone" ? "Instrumento" : strip.kindLabel === "Master" ? <Icon name="link" size={13} /> : strip.kindLabel}
@@ -822,6 +847,10 @@ export function Mixer() {
   const visible = tracks.filter((s, i) => !hidden.includes(project.tracks[i]!.kind) && (scope !== "Sencillo" || (s.channel.type === "track" && selection.trackIds.includes(s.channel.id))));
   const folderOf = (s: StripModel) => (s.channel.type === "track" ? project.tracks.find((t) => t.id === (s.channel as { id: string }).id)?.folder ?? null : null);
   const loose = visible.filter((s) => !folderOf(s));
+  // Every strip's insert area (and its label) is as tall as the fullest one,
+  // so rows stay aligned however many effects a channel has.
+  const fxRows = Math.max(1, ...[...tracks, ...auxes, master].map((s) => s.inserts.length + (s.inserts.length < 8 ? 1 : 0)));
+  const fxStyle = { "--fx-height": `${34 + (fxRows - 1) * 21}px`, "--fx-extra": `${(fxRows - 1) * 21}px` } as React.CSSProperties;
   const exportStems = async () => {
     const dir = await openDialog({ directory: true, title: "Export stems to folder" });
     if (typeof dir !== "string") return;
@@ -918,7 +947,7 @@ export function Mixer() {
         <button className="arrangement-menu is-blue" title="Canales verticales" onClick={() => pendingControl("Disposición de canales")}><Icon name="sliders" size={17} /></button>
       </div>
       <div className="mixer__body">
-        <div className="mixer__strips">
+        <div className="mixer__strips" style={fxStyle}>
           <div className="mixer-labels" aria-hidden><div className="mixer-labels__stack"><span>Ajuste</span><span className="mixer-labels__eq">Ecualizador</span><span>Efectos MIDI</span><span>Entrada</span><span className="mixer-labels__fx">Efectos de audio</span><span>Envíos</span><span>Salida</span><span>Agrupar</span><span>Automatización</span><span className="mixer-labels__pan">Pan</span><span>dB</span><span className="mixer-labels__fader" /><span className="mixer-labels__footer" /></div></div>
           {project.tracks.length === 0 && auxes.length === 0 && <p className="mixer__empty">Add tracks to see their channel strips.</p>}
           {loose.map(strip)}

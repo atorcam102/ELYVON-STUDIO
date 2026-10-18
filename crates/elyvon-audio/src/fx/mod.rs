@@ -29,7 +29,7 @@ mod utility;
 
 pub mod convolution;
 
-pub use eq::response_db as eq_response_db;
+pub use eq::{band_responses_db as eq_band_responses_db, response_db as eq_response_db};
 
 use elyvon_core::PPQ;
 use elyvon_core::tempo::TempoMap;

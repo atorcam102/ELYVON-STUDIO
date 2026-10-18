@@ -282,11 +282,18 @@ macro_rules! band {
     };
 }
 
+/// What the equaliser processes: both channels, the mid (L+R) or the side
+/// (L−R) signal (index stored in `processing`).
+pub const EQ_PROCESSING: &[&str] = &["Estéreo", "Medio (M)", "Lateral (S)"];
+
+/// Equaliser parameters after the bands: output gain, processing.
+const EQ_EXTRA: usize = 2;
+
 const fn flatten_eq(
     bands: [[ParamDef; EQ_BAND_PARAMS]; EQ_BANDS],
-    output: ParamDef,
-) -> [ParamDef; EQ_BANDS * EQ_BAND_PARAMS + 1] {
-    let mut out = [output; EQ_BANDS * EQ_BAND_PARAMS + 1];
+    extra: [ParamDef; EQ_EXTRA],
+) -> [ParamDef; EQ_BANDS * EQ_BAND_PARAMS + EQ_EXTRA] {
+    let mut out = [extra[0]; EQ_BANDS * EQ_BAND_PARAMS + EQ_EXTRA];
     let mut b = 0;
     while b < EQ_BANDS {
         let mut p = 0;
@@ -296,11 +303,15 @@ const fn flatten_eq(
         }
         b += 1;
     }
-    out[EQ_BANDS * EQ_BAND_PARAMS] = output;
+    let mut e = 0;
+    while e < EQ_EXTRA {
+        out[EQ_BANDS * EQ_BAND_PARAMS + e] = extra[e];
+        e += 1;
+    }
     out
 }
 
-static EQ: [ParamDef; EQ_BANDS * EQ_BAND_PARAMS + 1] = flatten_eq(
+static EQ: [ParamDef; EQ_BANDS * EQ_BAND_PARAMS + EQ_EXTRA] = flatten_eq(
     [
         band!("1", false, eq_type::HIGH_PASS, 30.0, 0.707),
         band!("2", true, eq_type::LOW_SHELF, 100.0, 0.707),
@@ -311,7 +322,10 @@ static EQ: [ParamDef; EQ_BANDS * EQ_BAND_PARAMS + 1] = flatten_eq(
         band!("7", true, eq_type::HIGH_SHELF, 10_000.0, 0.707),
         band!("8", false, eq_type::LOW_PASS, 18_000.0, 0.707),
     ],
-    ParamDef::lin("outputDb", "Salida", ParamUnit::Db, -24.0, 24.0, 0.0),
+    [
+        ParamDef::lin("outputDb", "Salida", ParamUnit::Db, -24.0, 24.0, 0.0),
+        ParamDef::choice("processing", "Procesado", EQ_PROCESSING, 0).fixed(),
+    ],
 );
 
 const DETECTORS: &[&str] = &["Pico", "RMS"];
@@ -1665,7 +1679,8 @@ mod tests {
                 .validate()
                 .expect("defaults are valid");
         }
-        assert_eq!(EQ.len(), 49);
+        assert_eq!(EQ.len(), 50);
+        assert_eq!(EffectKind::ParametricEq.index_of("outputDb"), Some(48));
         assert_eq!(EffectKind::ParametricEq.index_of("b3Freq"), Some(2 * 6 + 2));
         assert_eq!(DIVISIONS.len(), 17);
         assert!((division_quarters(7) - 0.75).abs() < 1e-12);

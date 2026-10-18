@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChannelRef } from "../../bindings/ChannelRef";
 import type { EffectDetails } from "../../bindings/EffectDetails";
 import type { EffectInfo } from "../../bindings/EffectInfo";
@@ -9,19 +9,8 @@ import type { PresetEntry } from "../../bindings/PresetEntry";
 import type { Project } from "../../bindings/Project";
 import type { Spectrum } from "../../bindings/Spectrum";
 import { Dialog } from "../../components/Dialog";
-import {
-  bandParamVisible,
-  clampParam,
-  effectInfo,
-  effectsIpc,
-  eqBands,
-  formatParam,
-  fromPosition,
-  loadCatalog,
-  paramValue,
-  plainParams,
-  toPosition,
-} from "../../lib/effects";
+import { clampParam, effectInfo, effectsIpc, formatParam, fromPosition, loadCatalog, paramValue, toPosition } from "../../lib/effects";
+import { EqWindow } from "./EqWindow";
 import { notify, notifyError } from "../../state/notifications";
 import { useProject } from "../../state/project";
 import { useTransport } from "../../state/transport";
@@ -152,154 +141,6 @@ function ValueField({ p, value, onCommit, disabled }: { p: EffectParamInfo; valu
   );
 }
 
-const BAND_COLORS = ["#8aa7c0", "#e09a2c", "#d6d23a", "#59d65a", "#2fd3b0", "#63bdea", "#b98af0", "#8aa7c0"];
-
-/**
- * Equaliser display: the exact response of the current setting computed in
- * Rust (the same biquads the engine runs) over the channel's measured
- * spectrum (analysed off the audio thread). Dragging a band's handle moves
- * its frequency and gain.
- */
-function EqGraph({ slot, info, spectrum, onBand }: { slot: EffectSlot; info: EffectInfo; spectrum: Spectrum | null; onBand: (band: number, freq: number, gain: number) => void }) {
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const [curve, setCurve] = useState<{ freqs: number[]; db: number[] } | null>(null);
-  const [drag, setDrag] = useState<{ band: number; freq: number; gain: number } | null>(null);
-  const bands = useMemo(() => eqBands(info), [info]);
-  // The drawn parameters include a handle being dragged.
-  const params = useMemo(() => {
-    if (!drag) return slot.params;
-    return { ...slot.params, [`b${drag.band + 1}Freq`]: drag.freq, [`b${drag.band + 1}Gain`]: drag.gain };
-  }, [slot.params, drag]);
-  useEffect(() => {
-    let alive = true;
-    effectsIpc
-      .eqResponse(params, 256)
-      .then((r) => alive && setCurve({ freqs: r.freqs, db: r.db }))
-      .catch(() => alive && setCurve(null));
-    return () => {
-      alive = false;
-    };
-  }, [params]);
-  const range = 24;
-  useEffect(() => {
-    const el = canvas.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    el.width = Math.max(1, rect.width * dpr);
-    el.height = Math.max(1, rect.height * dpr);
-    const ctx = el.getContext("2d");
-    if (!ctx) return;
-    ctx.scale(dpr, dpr);
-    const w = rect.width;
-    const h = rect.height;
-    const x = (hz: number) => (Math.log(hz / 20) / Math.log(1000)) * w;
-    const y = (db: number) => h / 2 - (db / range) * (h / 2 - 8);
-    ctx.fillStyle = "#11171d";
-    ctx.fillRect(0, 0, w, h);
-    ctx.lineWidth = 1;
-    ctx.font = "10px system-ui, sans-serif";
-    for (const hz of [50, 100, 200, 500, 1000, 2000, 5000, 10000]) {
-      ctx.strokeStyle = "#1f2a35";
-      ctx.beginPath();
-      ctx.moveTo(x(hz), 0);
-      ctx.lineTo(x(hz), h);
-      ctx.stroke();
-      ctx.fillStyle = "#6f8496";
-      ctx.fillText(hz >= 1000 ? `${hz / 1000}k` : String(hz), x(hz) + 2, h - 4);
-    }
-    for (const db of [-18, -12, -6, 0, 6, 12, 18]) {
-      ctx.strokeStyle = db === 0 ? "#3d5468" : "#1f2a35";
-      ctx.beginPath();
-      ctx.moveTo(0, y(db));
-      ctx.lineTo(w, y(db));
-      ctx.stroke();
-      ctx.fillStyle = "#6f8496";
-      ctx.fillText(`${db > 0 ? "+" : ""}${db}`, 2, y(db) - 2);
-    }
-    // Measured spectrum (dBFS, −90 … 0 mapped to the bottom half).
-    if (spectrum) {
-      ctx.beginPath();
-      spectrum.freqs.forEach((f, i) => {
-        const level = Math.max(-90, spectrum.db[i] ?? -140);
-        const py = h - ((level + 90) / 90) * (h * 0.9);
-        if (i === 0) ctx.moveTo(x(f), py);
-        else ctx.lineTo(x(f), py);
-      });
-      ctx.lineTo(w, h);
-      ctx.lineTo(0, h);
-      ctx.closePath();
-      ctx.fillStyle = "rgba(99, 189, 234, 0.16)";
-      ctx.fill();
-    }
-    if (curve) {
-      ctx.beginPath();
-      curve.freqs.forEach((f, i) => {
-        const py = y(Math.max(-range * 1.5, Math.min(range * 1.5, curve.db[i] ?? 0)));
-        if (i === 0) ctx.moveTo(x(f), py);
-        else ctx.lineTo(x(f), py);
-      });
-      ctx.strokeStyle = "#e8eef3";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-    bands.forEach((band, b) => {
-      const on = (params[`b${b + 1}On`] ?? 0) >= 0.5;
-      const type = Math.round(params[`b${b + 1}Type`] ?? 2);
-      const freq = params[`b${b + 1}Freq`] ?? 1000;
-      const gain = bandParamVisible(type, "b1Gain") ? (params[`b${b + 1}Gain`] ?? 0) : 0;
-      ctx.beginPath();
-      ctx.arc(x(freq), y(gain), 6, 0, Math.PI * 2);
-      ctx.fillStyle = BAND_COLORS[b] ?? "#fff";
-      ctx.globalAlpha = on ? 1 : 0.3;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = "#11171d";
-      ctx.fillText(String(b + 1), x(freq) - 3, y(gain) + 3.5);
-      void band;
-    });
-  }, [curve, spectrum, bands, params]);
-  const fromPointer = (e: PointerEvent<HTMLCanvasElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    const freq = 20 * Math.pow(1000, Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)));
-    const gain = ((r.height / 2 - (e.clientY - r.top)) / (r.height / 2 - 8)) * range;
-    return { freq: Math.round(Math.min(20000, Math.max(20, freq))), gain: Math.round(Math.min(24, Math.max(-24, gain)) * 10) / 10 };
-  };
-  const nearest = (freq: number) => {
-    let best = 0;
-    let dist = Infinity;
-    bands.forEach((_, b) => {
-      const d = Math.abs(Math.log(freq / (slot.params[`b${b + 1}Freq`] ?? 1000)));
-      if (d < dist) {
-        dist = d;
-        best = b;
-      }
-    });
-    return best;
-  };
-  return (
-    <canvas
-      ref={canvas}
-      className="fx-eq__graph"
-      role="img"
-      aria-label="Respuesta del ecualizador calculada por el motor y espectro medido; arrastra un punto para mover su banda"
-      onPointerDown={(e) => {
-        e.currentTarget.setPointerCapture(e.pointerId);
-        const p = fromPointer(e);
-        setDrag({ band: nearest(p.freq), ...p });
-      }}
-      onPointerMove={(e) => {
-        if (drag) setDrag({ band: drag.band, ...fromPointer(e) });
-      }}
-      onPointerUp={() => {
-        if (drag) onBand(drag.band, drag.freq, drag.gain);
-        setDrag(null);
-      }}
-      onPointerCancel={() => setDrag(null)}
-    />
-  );
-}
-
 /** Horizontal gain-reduction meter (0 … 40 dB). */
 function ReductionMeter({ db }: { db: number | null }) {
   const v = Math.min(40, Math.max(0, db ?? 0));
@@ -323,6 +164,7 @@ export function EffectEditor({ channel, insertId, onClose }: { channel: ChannelR
   const [details, setDetails] = useState<EffectDetails | null>(null);
   const [spectrum, setSpectrum] = useState<Spectrum | null>(null);
   const [presetName, setPresetName] = useState("");
+  const [analyzer, setAnalyzer] = useState(true);
   const inserts = project ? insertsOf(project, channel) : [];
   const index = inserts.findIndex((s) => s.id === insertId);
   const slot = inserts[index];
@@ -349,7 +191,7 @@ export function EffectEditor({ channel, insertId, onClose }: { channel: ChannelR
   // Spectrum of this channel, analysed off the audio thread.
   const channelKey = JSON.stringify(channel);
   useEffect(() => {
-    if (kind !== "parametricEq") return;
+    if (kind !== "parametricEq" || !analyzer) return;
     const c = JSON.parse(channelKey) as ChannelRef;
     void effectsIpc.analyzerSelect(c).catch(() => undefined);
     const timer = window.setInterval(() => {
@@ -359,7 +201,7 @@ export function EffectEditor({ channel, insertId, onClose }: { channel: ChannelR
       window.clearInterval(timer);
       void effectsIpc.analyzerSelect(null).catch(() => undefined);
     };
-  }, [kind, channelKey]);
+  }, [kind, channelKey, analyzer]);
 
   const reduction = useReduction(project, channel, Math.max(0, index));
 
@@ -381,10 +223,18 @@ export function EffectEditor({ channel, insertId, onClose }: { channel: ChannelR
 
   const title = `${info?.label ?? kind} — ${channelName(project, channel)} · inserto ${index + 1}`;
   const presetOptions = presets.map((p, i) => ({ id: `${p.source}:${i}`, p }));
+  const latency = details ? `Latencia: ${details.latencyFrames} muestras · ${details.sampleRate} Hz` : "";
+  if (kind === "parametricEq" && info) {
+    return (
+      <Dialog open title={`${channelName(project, channel)} · inserto ${index + 1}`} onClose={onClose} width={1060} className="fx-editor peq-window">
+        <EqWindow info={info} slot={current} bypass={slot.bypass} commit={commit} presets={presets} setPresets={setPresets} spectrum={analyzer ? spectrum : null} analyzer={analyzer} setAnalyzer={setAnalyzer} latency={latency} />
+      </Dialog>
+    );
+  }
   const tracks = project.tracks.filter((t) => !(channel.type === "track" && t.id === channel.id) && t.kind !== "midi");
 
   return (
-    <Dialog open title={title} onClose={onClose} width={kind === "parametricEq" ? 900 : 640} className="fx-editor">
+    <Dialog open title={title} onClose={onClose} width={640} className="fx-editor">
       <div className="fx-editor__bar">
         <button type="button" className={`fx-btn${slot.bypass ? "" : " is-on"}`} aria-pressed={!slot.bypass} onClick={() => commit(current, !slot.bypass)} title="Bypass sin clics (fundido de un bloque)">
           {slot.bypass ? "Desactivado" : "Activo"}
@@ -499,10 +349,7 @@ export function EffectEditor({ channel, insertId, onClose }: { channel: ChannelR
         </div>
       )}
       {!info && <p className="fx-editor__empty">Cargando parámetros del motor…</p>}
-      {info && kind === "parametricEq" && (
-        <EqEditor info={info} slot={current} spectrum={spectrum} setParam={setParam} commit={commit} />
-      )}
-      {info && kind !== "parametricEq" && (
+      {info && (
         <div className="fx-grid">
           {info.params.map((p) => (
             <ParamControl key={p.key} p={p} value={paramValue(current, p)} onCommit={(v) => setParam(p.key, v)} />
@@ -516,41 +363,3 @@ export function EffectEditor({ channel, insertId, onClose }: { channel: ChannelR
   );
 }
 
-function EqEditor({ info, slot, spectrum, setParam, commit }: { info: EffectInfo; slot: EffectSlot; spectrum: Spectrum | null; setParam: (key: string, v: number) => void; commit: (s: EffectSlot) => void }) {
-  const bands = eqBands(info);
-  return (
-    <div className="fx-eq">
-      <EqGraph
-        slot={slot}
-        info={info}
-        spectrum={spectrum}
-        onBand={(b, freq, gain) => {
-          const type = Math.round(slot.params[`b${b + 1}Type`] ?? 2);
-          const params = { ...slot.params, [`b${b + 1}Freq`]: freq, [`b${b + 1}On`]: 1 };
-          if (bandParamVisible(type, "b1Gain")) params[`b${b + 1}Gain`] = gain;
-          commit({ ...slot, params });
-        }}
-      />
-      <div className="fx-eq__bands">
-        {bands.map((band, b) => {
-          const type = Math.round(paramValue(slot, band[1]!));
-          return (
-            <fieldset key={b} className="fx-eq__band" style={{ borderTopColor: BAND_COLORS[b] }}>
-              <legend>Banda {b + 1}</legend>
-              {band
-                .filter((p) => bandParamVisible(type, p.key))
-                .map((p) => (
-                  <ParamControl key={p.key} p={{ ...p, label: p.label.replace(/^Banda \d+ /, "") }} value={paramValue(slot, p)} onCommit={(v) => setParam(p.key, v)} />
-                ))}
-            </fieldset>
-          );
-        })}
-      </div>
-      <div className="fx-grid">
-        {plainParams(info).map((p) => (
-          <ParamControl key={p.key} p={p} value={paramValue(slot, p)} onCommit={(v) => setParam(p.key, v)} />
-        ))}
-      </div>
-    </div>
-  );
-}
