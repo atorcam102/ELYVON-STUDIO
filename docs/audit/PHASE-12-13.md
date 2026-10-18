@@ -1,10 +1,11 @@
 # Phases 12–13 — Native effects: EQ and dynamics; creative effects and utilities
 
 Date: 2026-10-18. Branch `fases-12-13` (from `main` at `5da3f44`, release 0.4.1), project
-schema 6, application version unchanged (0.4.1). **Overall: PARTIAL** — every software
-acceptance test below passes on Windows x64 (Rust, Vitest and the native end-to-end suite
-against the real binary), but nothing was listened to on speakers or headphones and no other
-target platform was built.
+schema 6, application version 0.5.0. **Overall: PARTIAL** — every software acceptance test
+below passes on Windows x64 (Rust, Vitest and the native end-to-end suite against the real
+binary) and the user confirmed on 2026-10-18 that the audio works when listening on his Windows
+laptop. macOS ARM64 and Ubuntu x64 are built and tested in CI on request (see *Platform
+matrix*); they and the remaining targets have not been tried on a device.
 
 ## Environment (the user's laptop, local only)
 
@@ -144,8 +145,9 @@ differ in the last bits between targets (the golden test uses tolerances for tha
 
 ## Limitations and pending work
 
-- **No listening test** on speakers or headphones; audible quality (reverb density, pitch
-  shifter artefacts, distortion character) is unverified by ear.
+- Listening: the user confirmed that the audio works on his Windows laptop (2026-10-18). There
+  is no recorded per-effect listening protocol; character judgements (reverb density, pitch
+  shifter artefacts, distortion) remain subjective and unrecorded.
 - The pitch shifter is a simple two-tap time-domain design: it modulates the output at
   |ratio − 1| / window (sidebands), moves formants and may double transients.
 - No user impulse-response files; the five IRs are synthesised. No third-party plug-ins.

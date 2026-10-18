@@ -1,0 +1,99 @@
+name: Build selected platforms
+
+# Manual only: tests and builds unsigned installers for the platforms asked
+# for and uploads them as workflow artifacts. It never publishes a release and
+# never runs on push; Windows x64 installers are built on the maintainer's
+# laptop (see docs/RELEASES.md).
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit, branch or tag to build
+        required: true
+        default: main
+      platforms:
+        description: "Comma-separated: macos-arm64, ubuntu-amd64, ubuntu-arm64, macos-intel"
+        required: true
+        default: macos-arm64,ubuntu-amd64
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  NODE_VERSION: "22"
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - id: matrix
+        name: Selected platforms
+        env:
+          PLATFORMS: ${{ github.event.inputs.platforms }}
+        run: |
+          node -e '
+            const all = {
+              "macos-arm64": { label: "macos-arm64", runner: "macos-latest", target: "aarch64-apple-darwin", bundles: "app,dmg" },
+              "macos-intel": { label: "macos-intel", runner: "macos-15-intel", target: "x86_64-apple-darwin", bundles: "app,dmg" },
+              "ubuntu-amd64": { label: "ubuntu-amd64", runner: "ubuntu-22.04", target: "x86_64-unknown-linux-gnu", bundles: "deb,appimage" },
+              "ubuntu-arm64": { label: "ubuntu-arm64", runner: "ubuntu-22.04-arm", target: "aarch64-unknown-linux-gnu", bundles: "deb,appimage" },
+            };
+            const wanted = process.env.PLATFORMS.split(",").map((s) => s.trim()).filter(Boolean);
+            const unknown = wanted.filter((w) => !all[w]);
+            if (unknown.length || !wanted.length) { console.error("unknown platforms: " + unknown.join(", ")); process.exit(1); }
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, "matrix=" + JSON.stringify({ include: wanted.map((w) => all[w]) }) + "\n");
+          '
+
+  build:
+    name: Test and build ${{ matrix.label }}
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.ref }}
+      - uses: ./.github/actions/setup-build
+        with:
+          target: ${{ matrix.target }}
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Frontend checks and build
+        run: |
+          npm run typecheck
+          npm test
+          npm run build
+
+      - name: Rust tests (native target of the runner)
+        run: cargo test --workspace --locked
+
+      - name: Build unsigned installers
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then export APPLE_SIGNING_IDENTITY="-"; fi
+          npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} \
+            --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Collect, rename and hash
+        shell: bash
+        env:
+          UPDATER_ARTIFACTS: "0"
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          cargo build --release --locked -p elyvon-update --bin elyvon-release
+          node scripts/collect-artifacts.mjs --target ${{ matrix.target }} --version "$VERSION" --out release-artifacts
+          cd release-artifacts && shasum -a 256 * | tee SHA256SUMS-${{ matrix.label }}.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.label }}
+          path: release-artifacts
+          retention-days: 14
+          if-no-files-found: error

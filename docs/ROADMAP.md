@@ -63,8 +63,9 @@ Parametric EQ, compressor, gate/expander, utilities and test generator; delay, a
 convolution reverbs, chorus, flanger, phaser, tremolo, rotary, distortion with oversampling,
 bitcrusher and pitch shifter. Parameter tables with stable automation indices, versioned
 presets, A/B, sidechains, GR meters, analyser, latency compensation, bit-identical bounce.
-Evidence: [audit/PHASE-12-13.md](audit/PHASE-12-13.md). Pending: listening on hardware, user IR
-files, a production pitch shifter, other platforms.
+Evidence: [audit/PHASE-12-13.md](audit/PHASE-12-13.md). Audio confirmed by ear on Windows x64.
+Pending: user IR files, a production pitch shifter, device tests on macOS/Linux and the other
+platforms.
 
 ## Later — Instruments and editing
 

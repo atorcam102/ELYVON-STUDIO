@@ -13,8 +13,9 @@ tremolo/auto-pan, rotary speaker, distortion with 2×/4× oversampling, bitcrush
 pitch shifter — with versioned presets, A/B, automation of every non-structural parameter,
 latency compensation, tails after stop and an economy path under overload. Bounces are
 bit-identical to live playback at any block size; the callback allocates nothing. Verified by
-Rust, Vitest and native E2E tests built and run on this Windows x64 laptop on branch
-`fases-12-13`. Listening tests and every other platform remain pending. Evidence:
+Rust, Vitest and native E2E tests built and run on this Windows x64 laptop; the user confirmed
+by ear that the audio works on that laptop. Released as 0.5.0 (schema 6). macOS ARM64 and
+Ubuntu x64 builds come from a manually started CI workflow; no device test on them. Evidence:
 [audit/PHASE-12-13.md](audit/PHASE-12-13.md).
 
 **Phases 10–11 (2026-10-17, schema 5): PARTIAL.** Sample-accurate mix automation (track/region

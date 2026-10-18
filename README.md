@@ -19,11 +19,10 @@
 
 ![Elyvon Studio: demo session with the arrangement, inspector and control bar](docs/screenshots/0.4.1-windows/02-demo.png)
 
-> **Status: 0.4.1 Windows x64 preview** (phases 12–13, native effects, on branch `fases-12-13`,
-> not released yet). Phases 02–13 are implemented and verified by Rust,
-> frontend and native end-to-end tests on Windows 11 x64. Listening tests on real hardware, a
-> physical microphone/MIDI-keyboard session and every other platform are still pending, so the
-> phases stay **PARTIAL**. Details: [STATUS](docs/STATUS.md) ·
+> **Status: 0.5.0 preview** (native effects, phases 12–13). Phases 02–13 are implemented and verified by Rust,
+> frontend and native end-to-end tests on Windows 11 x64, where the audio has been confirmed by
+> ear. A physical microphone/MIDI-keyboard session and device tests on every other platform are
+> still pending, so the phases stay **PARTIAL**. Details: [STATUS](docs/STATUS.md) ·
 > [feature matrix](docs/FEATURE_MATRIX.md) · [phase audits](docs/audit/README.md).
 
 ## Download

@@ -888,7 +888,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "elyvon-audio"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "cpal",
  "elyvon-core",
@@ -907,7 +907,7 @@ dependencies = [
 
 [[package]]
 name = "elyvon-core"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -918,7 +918,7 @@ dependencies = [
 
 [[package]]
 name = "elyvon-project"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "elyvon-core",
  "serde",
@@ -931,7 +931,7 @@ dependencies = [
 
 [[package]]
 name = "elyvon-studio"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "elyvon-audio",
  "elyvon-core",
@@ -954,7 +954,7 @@ dependencies = [
 
 [[package]]
 name = "elyvon-update"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "base64 0.22.1",
  "minisign-verify",
