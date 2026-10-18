@@ -86,6 +86,7 @@ pub fn run() {
             let path = app.path();
             let paths = AppPaths {
                 config_dir: path.app_config_dir()?,
+                presets_dir: path.app_data_dir()?.join("presets"),
                 recovery_dir: path.app_data_dir()?.join("recovery"),
                 log_dir: path.app_log_dir()?,
                 home_dir: path.home_dir().ok(),
@@ -188,6 +189,14 @@ pub fn run() {
             commands::mixer::mixer_reset_clips,
             commands::mixer::mixer_status,
             commands::mixer::project_export_stems,
+            commands::effects::effects_catalog,
+            commands::effects::effect_presets,
+            commands::effects::effect_preset_save,
+            commands::effects::effect_preset_delete,
+            commands::effects::effect_eq_response,
+            commands::effects::effect_details,
+            commands::effects::analyzer_select,
+            commands::effects::analyzer_spectrum,
             commands::editing::automation_touch,
             commands::editing::region_normalize,
             commands::editing::region_transients,

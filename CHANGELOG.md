@@ -7,6 +7,16 @@ section of each version into the GitHub release and into the update dialog.
 
 ## [Unreleased]
 
+### Added
+
+- Native effects (Phases 12–13), all processed in Rust: an 8-band parametric equaliser (high/low-pass 12–48 dB/oct, shelves, bells, band-pass, notch) whose editor draws the engine's exact response over a spectrum measured off the audio thread; a compressor (threshold, ratio, attack, release, soft knee, make-up and auto make-up, peak/RMS detector, parallel mix, sidechain high-pass, external sidechain from another track) and a gate/expander, both with gain-reduction meters; a stereo utility (gain, balance, width, bass mono, DC blocker, polarity, swap); a test generator (white/pink noise, sine, logarithmic sweep); a stereo delay synchronised to the tempo map (ping-pong, tape wow/flutter and saturation, protected feedback); an original algorithmic reverb with freeze; a convolution reverb with five impulse responses synthesised by Elyvon; chorus, flanger, phaser, tremolo/auto-pan, a rotary speaker, distortion with 2×/4× oversampling, a bitcrusher and a simple pitch shifter.
+- Effect editor in the mixer: every parameter with its unit, original factory presets plus user presets (versioned files), A/B comparison, latency and tail information, sidechain source; every change is one undo step and every non-structural parameter can be automated.
+- Band-pass and notch modes for the Filter insert; gain-reduction meter for the limiter.
+
+### Changed
+
+- Project schema 6 (schema 1–5 files migrate on open). Delay and reverb tails keep ringing after the transport stops. Expensive effects switch to an economy path while the audio callback is overloaded (live playback only).
+
 ## [0.4.1] - 2026-10-17
 
 ### Changed

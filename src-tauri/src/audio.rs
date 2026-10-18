@@ -49,6 +49,8 @@ struct Inner {
     tap: TapTempo,
     meter_reader: elyvon_audio::transport::MeterReader,
     epoch: Instant,
+    /// Effect-editor spectrum (reads the engine's analyser queue).
+    analyzer: Option<elyvon_audio::spectrum::SpectrumAnalyzer>,
 }
 
 struct LoadJob {
@@ -91,6 +93,7 @@ impl AudioService {
                 tap: TapTempo::default(),
                 meter_reader: elyvon_audio::transport::MeterReader::default(),
                 epoch: Instant::now(),
+                analyzer: None,
             }),
             store: Mutex::new(MediaStore::new(
                 Project::DEFAULT_SAMPLE_RATE,
@@ -146,6 +149,7 @@ impl AudioService {
         inner.output = None;
         inner.handle = None;
         inner.plan = None;
+        inner.analyzer = None;
         inner.meter_reader = elyvon_audio::transport::MeterReader::default();
         inner.requested_rate = project_rate;
         let mut device_error = None;
@@ -155,7 +159,9 @@ impl AudioService {
             match device::negotiate(settings.output_device.as_deref(), project_rate, buffer) {
                 Ok((negotiated, format)) => {
                     let rate = negotiated.config.sample_rate;
-                    let (handle, eng) = engine::create(rate, MAX_BLOCK, PlaybackPlan::empty(rate));
+                    let (handle, mut eng) =
+                        engine::create(rate, MAX_BLOCK, PlaybackPlan::empty(rate));
+                    eng.set_realtime(true);
                     let shared = Arc::clone(handle.shared());
                     match device::start(&negotiated, format, eng, shared) {
                         Ok(output) => started = Some((handle, output)),
@@ -166,8 +172,9 @@ impl AudioService {
             }
         }
         let (handle, output) = started.unwrap_or_else(|| {
-            let (handle, eng) =
+            let (handle, mut eng) =
                 engine::create(project_rate, MAX_BLOCK, PlaybackPlan::empty(project_rate));
+            eng.set_realtime(true);
             let output = device::start_internal_clock(eng, project_rate, INTERNAL_BLOCK);
             (handle, output)
         });
@@ -193,6 +200,10 @@ impl AudioService {
             },
             output: output.kind,
         };
+        let mut handle = handle;
+        inner.analyzer = handle
+            .take_analyzer()
+            .map(elyvon_audio::spectrum::SpectrumAnalyzer::new);
         inner.handle = Some(handle);
         inner.output = Some(output);
         drop(inner);
@@ -425,6 +436,24 @@ impl AudioService {
         if let Some(h) = lock(&self.inner).handle.as_ref() {
             h.shared().reset_clips();
         }
+    }
+
+    /// Feeds the spectrum analyser from meter slot `slot` (`None`: off).
+    pub fn select_analyzer(&self, slot: Option<usize>) {
+        let mut inner = lock(&self.inner);
+        if let Some(h) = inner.handle.as_ref() {
+            h.shared().set_analyzer_slot(slot);
+        }
+        if let Some(a) = inner.analyzer.as_mut() {
+            a.reset();
+        }
+    }
+
+    /// The latest spectrum of the selected strip.
+    pub fn spectrum(&self) -> Option<elyvon_audio::spectrum::Spectrum> {
+        let mut inner = lock(&self.inner);
+        let rate = inner.handle.as_ref()?.sample_rate();
+        inner.analyzer.as_mut().map(|a| a.read(rate))
     }
 
     /// Insert latency compensated on the current graph's longest path.

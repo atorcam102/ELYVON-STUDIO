@@ -86,3 +86,18 @@ this phase does not import, resolve, rewrite or delete media.
 | Live capture | `automation_touch(channel, param, value, phase)` → `bool` | Only while playing and in Touch/Latch/Write; `false` means "apply as an ordinary edit"; the written data arrives as one `writeAutomation` edit and a `project://view` event when playback stops | native E2E |
 | Editing edits | `slipRegions`, `rippleDelete`, `splitRange` (`EditOutcome.selectedRegions`), `cutRange`, `glueRegions`, `createCrossfade`, `setRegionsReversed`, `setFadeCurve`, `sliceRegion`, `normalizeRegions`, `compTake`, `setCompCrossfade`, `flatten/unflattenComp`, `freezeTrack`, `unfreezeTrack`, `bounceInPlace`, `relinkMediaFiles`, `removeUnusedMedia` | Each is one undo step; frozen material refuses edits | `crates/elyvon-audio/tests/{editing,comping}.rs` |
 | Native commands | `region_normalize`, `region_transients`, `track_freeze`, `track_bounce`, `media_repair`, `media_collect`, `media_unused`, `media_backup_unused(confirm)`, `media_rescan`; `mixer_status.staleFreezes` | Renders refuse to run while playing or with missing media; clean-up needs `confirm: true` and moves files to `.elyvon-backup/` | `tests/media_repair.rs`, native E2E |
+
+## Schema 6 native effects IPC (Phases 12–13)
+
+`app_contracts` reports `project: 6`; the IPC contract stays 2 (additions only).
+
+| Area | Type / command | Rules | Evidence |
+| --- | --- | --- | --- |
+| Effect inserts | `Processor::Effect(EffectSlot)` through `addInsert`/`setInsert` | `setInsert` keeps the effect kind; params by key, clamped; sidechain validated (no self-key, no track cycle, ≤ 16 key tracks) | `elyvon-project/src/effects.rs` tests, `elyvon-audio/tests/effects.rs` |
+| Catalogue | `effects_catalog` → `EffectInfo[]` (`kind, label, short, category, hasSidechain, params: EffectParamInfo[]`) | `EffectParamInfo.index` is the automation index (append-only) | native E2E (16 effects) |
+| Presets | `effect_presets(kind)` → `PresetEntry[]` (factory first, then user files sorted by name); `effect_preset_save(kind, name, params)` (atomic write, same name replaces); `effect_preset_delete(kind, name)` (user files only) | File names are sanitised (letters, digits, space, `-`, `_`); unreadable/newer files are skipped and logged | `presets_reopen_and_reproduce_the_same_audio`, preset tests |
+| Equaliser curve | `effect_eq_response(params, points)` → `{ sampleRate, freqs, db }` | Exact magnitude of the engine's biquad sections at the engine rate, 20 Hz … 20 kHz log-spaced | `measured_sweep_matches_the_drawn_response` |
+| Details | `effect_details(slot)` → `{ sampleRate, latencyFrames, latencyMs, tailSeconds \| null }` | Latency is what the mixer compensates | `reported_latency_*` tests |
+| Analyser | `analyzer_select(channel \| null)`; `analyzer_spectrum()` → `Spectrum { sampleRate, freqs[120], db[120] } \| null` | Post-fader mono of the selected strip; FFT (8192, Hann) on the control side; samples are dropped when the queue is full | `spectrum.rs` test, native E2E |
+| Meters | `Meters.reduction: InsertReduction[]` (`strip: master \| track{index} \| aux{index}`, `index`, `reductionDb`) | Largest gain reduction since the previous reading, only for inserts that reduced (compressor, gate, limiter) | `external_sidechain_ducks_the_keyed_track`, native E2E |
+| Engine stats | `EngineStats.dspLoad`, `EngineStats.economy` | Load = callback time / callback duration; economy = convolution reduced to its first second while overloaded (real-time output only) | `economy_mode_shortens_the_tail` |

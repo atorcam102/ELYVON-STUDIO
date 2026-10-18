@@ -140,7 +140,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     const view = await d.invoke("project_get");
     assert.equal(view.ok.dirty, false);
     const contracts = await d.invoke("app_contracts");
-    assert.deepEqual(contracts.ok, { ipc: 2, project: 5, audio: 1, jobs: 1 });
+    assert.deepEqual(contracts.ok, { ipc: 2, project: 6, audio: 1, jobs: 1 });
     await shot("01-empty");
   });
 
@@ -198,7 +198,7 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.ok(saved.ok.path.endsWith("session.elyvon"));
     const file = JSON.parse(readFileSync(saved.ok.path, "utf8"));
     assert.equal(file.format, "elyvon-studio-project");
-    assert.equal(file.schemaVersion, 5);
+    assert.equal(file.schemaVersion, 6);
     assert.equal(file.project.tracks[0].name, "Keys");
 
     const fresh = await d.invoke("project_new", { discardChanges: false });
@@ -654,6 +654,87 @@ describe("Elyvon Studio", { timeout: 120_000 }, () => {
     assert.ok(reopened.ok, JSON.stringify(reopened.err));
     assert.equal(reopened.ok.project.tracks[0].comps[0].segments.length, 3);
     assert.deepEqual(readFileSync(join(moved, "take2.wav")), sineWav(48_000, 2, 330), "sources never modified");
+  });
+
+  it("adds native effects in the mixer, edits them, meters gain reduction and renders them", async () => {
+    assert.ok((await d.invoke("project_new", { discardChanges: true })).ok);
+    const wav = join(work, "fx-tone.wav");
+    writeFileSync(wav, sineWav(48_000, 3, 440));
+    const imported = await d.invoke("media_import", { paths: [wav], trackId: null, start: 0, layout: "newTracks" });
+    assert.ok(imported.ok, JSON.stringify(imported.err));
+    const track = imported.ok.view.project.tracks[0].id;
+    const catalog = (await d.invoke("effects_catalog")).ok;
+    assert.equal(catalog.length, 16, "every native effect is described by the core");
+    await d.waitFor(async () => (await d.invoke("media_status")).ok.every((m) => m.state.state === "ready"), { message: "media decoded", timeout: 15_000 });
+    const dry = (await d.invoke("project_render", { path: join(work, "fx-dry.wav"), startTick: null, endTick: null, metronome: false })).ok;
+    await d.exec("location.reload()");
+    await d.find(".controlbar", { timeout: 10_000 });
+    await showMixer();
+    const strip = `.bottom-panel [data-channel="track:${track}"]`;
+    await d.clickCss(`${strip} .slot--add`);
+    await d.waitFor(async () => d.exec("return [...document.querySelectorAll('[role=menuitem]')].some((b) => b.textContent.includes('Compresor'))"), { message: "native effects in the insert menu" });
+    await d.exec("[...document.querySelectorAll('[role=menuitem]')].find((b) => b.textContent.includes('Compresor')).click()");
+    await d.find(".fx-editor");
+    assert.match(await d.textOf(".fx-editor .dialog__header"), /Compresor/);
+    // Type a threshold into the value field: one undoable setInsert.
+    const threshold = "[...document.querySelectorAll('.fx-editor .fx-param')].find((p) => p.textContent.startsWith('Umbral'))";
+    await d.waitFor(async () => d.exec(`return !!${threshold}`), { message: "the editor shows the catalogue parameters" });
+    await d.exec(`${threshold}.querySelector('.fx-param__value').click()`);
+    const input = await d.find(".fx-editor .fx-param__input");
+    await d.type(input, "-40\uE007");
+    const comp = await d.waitFor(async () => {
+      const p = (await d.invoke("project_get")).ok.project.tracks[0].strip.inserts[0]?.processor;
+      return p?.type === "effect" && p.params.thresholdDb === -40 ? p : null;
+    }, { message: "threshold edited through the editor" });
+    assert.equal(comp.kind, "compressor");
+    await d.invoke("transport_command", { command: { type: "play", fromTick: 0, countIn: false, preRoll: false } });
+    const gr = await d.waitFor(async () => {
+      const v = Number(await d.exec("return document.querySelector('.fx-editor .fx-gr')?.getAttribute('aria-valuenow') ?? '0'"));
+      return v > 10 ? v : null;
+    }, { message: "the gain-reduction meter shows the engine's compressor", timeout: 10_000 });
+    // Inserts run before the fader: a 0.5 (−6 dBFS) sine over a −40 dB
+    // threshold at 4:1 is reduced by (−6 + 40) × 3/4 = 25.5 dB.
+    assert.ok(gr > 23 && gr < 27, `gain reduction ${gr} dB`);
+    await shot("14-effect-compressor");
+    await d.invoke("transport_command", { command: { type: "stop" } });
+    await d.keys("\uE00C");
+    // An equaliser added from the core; its editor draws the engine's curve.
+    const eqParams = Object.fromEntries(catalog.find((e) => e.kind === "parametricEq").params.map((p) => [p.key, p.default]));
+    eqParams.b4Gain = 12;
+    eqParams.b4Freq = 440;
+    const added = await d.invoke("project_apply", { command: { type: "addInsert", channel: { type: "track", id: track }, processor: { type: "effect", kind: "parametricEq", params: eqParams }, index: null } });
+    assert.ok(added.ok, JSON.stringify(added.err));
+    const curve = (await d.invoke("effect_eq_response", { params: eqParams, points: 64 })).ok;
+    const at440 = curve.db[curve.freqs.findIndex((f) => f >= 440)];
+    assert.ok(at440 > 10 && at440 <= 12.01, `drawn gain near 440 Hz ${at440}`);
+    // The edit went through IPC directly: reload the view from the core.
+    await d.exec("location.reload()");
+    await d.find(".controlbar", { timeout: 10_000 });
+    await showMixer();
+    await d.exec(`[...document.querySelectorAll('${strip} .slot--fx')].find((b) => b.textContent.includes('EQ')).click()`);
+    await d.find(".fx-editor .fx-eq__graph");
+    await d.invoke("transport_command", { command: { type: "play", fromTick: 0, countIn: false, preRoll: false } });
+    const spectrum = await d.waitFor(async () => {
+      const s = (await d.invoke("analyzer_spectrum")).ok;
+      return s && Math.max(...s.db) > -40 ? s : null;
+    }, { message: "the analyser measures the track off the audio thread", timeout: 10_000 });
+    const loudest = spectrum.freqs[spectrum.db.indexOf(Math.max(...spectrum.db))];
+    assert.ok(loudest > 380 && loudest < 520, `spectrum peak at ${loudest} Hz`);
+    await shot("15-effect-eq");
+    await d.invoke("transport_command", { command: { type: "stop" } });
+    await d.keys("\uE00C");
+    // Offline render: EQ (+12 dB at 440 Hz) after the compressor changes the level measurably.
+    const wet = (await d.invoke("project_render", { path: join(work, "fx-wet.wav"), startTick: null, endTick: null, metronome: false })).ok;
+    assert.ok(Math.abs(wet.rms[0] - dry.rms[0]) > 0.01, `dry ${dry.rms[0]} wet ${wet.rms[0]}`);
+    // Undo removes the equaliser in one step; saving keeps the compressor setting.
+    assert.ok((await d.invoke("project_undo")).ok);
+    const file = join(work, "effects.elyvon");
+    assert.ok((await d.invoke("project_save", { path: file })).ok);
+    const reopened = await d.invoke("project_open", { path: file, discardChanges: false });
+    const kept = reopened.ok.project.tracks[0].strip.inserts;
+    assert.equal(kept.length, 1);
+    assert.equal(kept[0].processor.params.thresholdDb, -40);
+    await hideBottom();
   });
 
   it("explains why updates are unavailable instead of pretending", async () => {

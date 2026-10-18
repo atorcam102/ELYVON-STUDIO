@@ -1,4 +1,4 @@
-# Formato de proyecto `.elyvon` (esquema 5)
+# Formato de proyecto `.elyvon` (esquema 6)
 
 Un proyecto de Elyvon Studio es un único archivo JSON UTF-8 con extensión
 `.elyvon`. Describe la canción (pistas, regiones, ajustes) y **referencia** los
@@ -254,3 +254,32 @@ flattened, regions[] }` (a take folder's composite; segments ordered and non-ove
 fingerprint identifies the material it was rendered from).
 
 **Mixer groups** add `linkEdit` (phase-locked region editing across members).
+
+## Schema 6 — native effects (Phases 12–13)
+
+Schema 5 files migrate by bumping the version (they contain no effects). Older applications
+refuse schema 6 instead of dropping effects.
+
+**Effect inserts.** An insert's `processor` may be `{ "type": "effect", "kind", "params",
+"sidechain"?, "alternate"? }`. `kind` is one of `parametricEq`, `compressor`, `gate`,
+`stereoTool`, `testGenerator`, `delay`, `reverb`, `convolutionReverb`, `chorus`,
+`flanger`, `phaser`, `tremolo`, `rotary`, `distortion`, `bitcrusher`, `pitchShifter`.
+`params` maps parameter keys to numbers in their own unit (dB, Hz, ms, %, or the index of a
+choice; toggles are 0/1). On load unknown keys are ignored, missing keys take the default and
+values are clamped into range. `sidechain` (compressor, gate) is a track id; a track cannot key
+itself and track-to-track keys must not form a cycle (at most 16 distinct key tracks).
+`alternate` is the stored other half of an A/B comparison (same key format). The parameter
+tables (keys, ranges, defaults, units, choices) are `elyvon-project/src/effects.rs` and are
+returned at run time by `effects_catalog`.
+
+**Effect automation.** `{type:"insert", id, param: { "effect": { "kind", "index" } }}`
+addresses parameter `index` of the effect's table (the index never changes meaning). Choices
+and toggles are stepped; logarithmic parameters interpolate on a log scale. Parameters that
+rebuild the processor (convolution space and IR length, distortion oversampling) are not
+automatable.
+
+**Filters** add `"mode": "bandPass"` and `"notch"`.
+
+**Presets** (user files, `<app data>/presets/<kind>/<name>.elyvonpreset`):
+`{ "format": "elyvon-effect-preset", "version": 1, "kind", "name", "params": { key: number } }`.
+Readers accept every version up to theirs and refuse newer ones with a clear error.

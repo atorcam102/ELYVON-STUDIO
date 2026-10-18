@@ -895,6 +895,7 @@ dependencies = [
  "elyvon-project",
  "midir",
  "midly",
+ "realfft",
  "rtrb",
  "rubato",
  "serde",

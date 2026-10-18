@@ -13,6 +13,7 @@ import type { InsertSlot } from "../bindings/InsertSlot";
 import type { Project } from "../bindings/Project";
 import type { Region } from "../bindings/Region";
 import { formatDb, formatPan } from "./format";
+import { effectInfo, formatParam } from "./effects";
 
 export interface ParamSpec {
   min: number;
@@ -35,6 +36,12 @@ export function paramSpec(p: AutomationParam): ParamSpec {
     case "mute":
       return SWITCH;
     case "insert":
+      if (typeof p.param === "object") {
+        // Native effect parameter: its range comes from the core's catalogue.
+        const d = effectInfo(p.param.effect.kind)?.params[p.param.effect.index];
+        if (!d) return SWITCH;
+        return { min: d.min, max: d.max, log: d.scale === "log", discrete: d.scale === "choice" || d.scale === "toggle" };
+      }
       switch (p.param) {
         case "bypass":
           return SWITCH;
@@ -186,7 +193,7 @@ export function paramKey(p: AutomationParam): string {
     case "sendLevel":
       return `send:${p.aux}`;
     case "insert":
-      return `insert:${p.id}:${p.param}`;
+      return `insert:${p.id}:${typeof p.param === "string" ? p.param : `${p.param.effect.kind}:${p.param.effect.index}`}`;
     default:
       return p.type;
   }
@@ -209,7 +216,7 @@ function insertsOf(project: Project, c: ChannelRef): InsertSlot[] {
 }
 
 const INSERT_PARAMS: { param: Extract<AutomationParam, { type: "insert" }>["param"]; on: string[] }[] = [
-  { param: "bypass", on: ["trim", "utility", "filter", "limiter"] },
+  { param: "bypass", on: ["trim", "utility", "filter", "limiter", "effect"] },
   { param: "trimGain", on: ["trim"] },
   { param: "filterCutoff", on: ["filter"] },
   { param: "filterQ", on: ["filter"] },
@@ -227,6 +234,13 @@ export function writableParams(project: Project, c: ChannelRef): AutomationParam
   for (const s of sends ?? []) out.push({ type: "sendLevel", aux: s.target });
   for (const slot of insertsOf(project, c)) {
     for (const ip of INSERT_PARAMS) if (ip.on.includes(slot.processor.type)) out.push({ type: "insert", id: slot.id, param: ip.param });
+    if (slot.processor.type === "effect") {
+      // Native effect parameters, by their append-only index (fixed ones excluded).
+      const kind = slot.processor.kind;
+      for (const p of effectInfo(kind)?.params ?? []) {
+        if (p.automatable) out.push({ type: "insert", id: slot.id, param: { effect: { kind, index: p.index } } });
+      }
+    }
   }
   return out;
 }
@@ -253,6 +267,10 @@ export function staticValue(project: Project, c: ChannelRef, p: AutomationParam)
       const slot = insertsOf(project, c).find((s) => s.id === p.id);
       if (!slot) return null;
       const x = slot.processor;
+      if (typeof p.param === "object") {
+        const d = effectInfo(p.param.effect.kind)?.params[p.param.effect.index];
+        return x.type === "effect" && d ? (x.params[d.key] ?? d.default) : null;
+      }
       switch (p.param) {
         case "bypass":
           return slot.bypass ? 1 : 0;
@@ -293,7 +311,12 @@ export function paramLabel(project: Project, c: ChannelRef, p: AutomationParam):
     case "insert": {
       const inserts = insertsOf(project, c);
       const i = inserts.findIndex((s) => s.id === p.id);
-      const kind = inserts[i]?.processor.type ?? "insert";
+      const x = inserts[i]?.processor;
+      if (typeof p.param === "object") {
+        const info = effectInfo(p.param.effect.kind);
+        return `${i + 1}. ${info?.short ?? p.param.effect.kind} · ${info?.params[p.param.effect.index]?.label ?? `Parámetro ${p.param.effect.index + 1}`}`;
+      }
+      const kind = x?.type === "effect" ? (effectInfo(x.kind)?.short ?? x.kind) : (x?.type ?? "insert");
       return `${i + 1}. ${kind[0]!.toUpperCase()}${kind.slice(1)} · ${INSERT_LABEL[p.param]}`;
     }
   }
@@ -309,6 +332,10 @@ export function formatParamValue(p: AutomationParam, v: number): string {
     case "mute":
       return v >= 0.5 ? "Muted" : "On";
     case "insert":
+      if (typeof p.param === "object") {
+        const d = effectInfo(p.param.effect.kind)?.params[p.param.effect.index];
+        return d ? formatParam(d, v) : v.toFixed(2);
+      }
       switch (p.param) {
         case "bypass":
           return v >= 0.5 ? "Bypassed" : "Active";

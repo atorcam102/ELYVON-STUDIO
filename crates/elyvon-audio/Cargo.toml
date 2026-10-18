@@ -16,6 +16,8 @@ rtrb = "0.4.0"
 midly = { version="0.5.3", default-features=false, features=["std"] }
 midir = { version="0.11.1", optional=true }
 rubato = "5.0.1"
+# Partitioned FFT convolution (already in the tree through rubato).
+realfft = "3.5.0"
 serde.workspace = true
 serde_json.workspace = true
 # MP3 tags (including embedded artwork) precede the audio frames. Without

@@ -14,6 +14,8 @@ use crate::updater::UpdaterState;
 #[derive(Debug, Clone)]
 pub struct AppPaths {
     pub config_dir: PathBuf,
+    /// User effect presets, one folder per effect kind.
+    pub presets_dir: PathBuf,
     pub recovery_dir: PathBuf,
     pub log_dir: PathBuf,
     pub home_dir: Option<PathBuf>,

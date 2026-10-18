@@ -652,3 +652,136 @@ fn automation_envelopes_and_live_overrides_never_allocate() {
     );
     handle.poll();
 }
+
+#[test]
+fn native_effects_sidechain_and_analyser_never_allocate() {
+    use elyvon_project::automation::{AutomationParam, AutomationTarget, InsertParam, PointSpec};
+    use elyvon_project::effects::{ALL_EFFECTS, EffectKind, EffectSlot};
+    use elyvon_project::mixer::{ChannelRef, Processor};
+    const RATE: u32 = 48_000;
+    let mut s = Session::new(118.0);
+    let a = s.audio_track();
+    let b = s.audio_track();
+    let tone = buffer(vec![sine(220.0, 0.5, RATE, 96_000)], RATE, RATE);
+    s.place(a, 0, &tone, "a");
+    s.place(b, 0, &tone, "b");
+    let aux = s
+        .apply(EditCommand::AddAux {
+            name: Some("FX".into()),
+            sources: vec![ChannelRef::Track { id: b }],
+        })
+        .created_auxes[0];
+    let strips = [
+        ChannelRef::Track { id: a },
+        ChannelRef::Track { id: b },
+        ChannelRef::Aux { id: aux },
+        ChannelRef::Master,
+    ];
+    let mut ids = Vec::new();
+    for (i, kind) in ALL_EFFECTS.iter().enumerate() {
+        let mut e = EffectSlot::new(*kind);
+        if *kind == EffectKind::ConvolutionReverb {
+            e.set("lengthSeconds", 1.0).unwrap();
+        }
+        if *kind == EffectKind::Compressor {
+            // The compressor lands on track B; track A keys it.
+            e.set("external", 1.0).unwrap();
+            e.sidechain = Some(a);
+        }
+        let channel = strips[i % strips.len()];
+        let id = s
+            .apply(EditCommand::AddInsert {
+                channel,
+                processor: Processor::Effect(e),
+                index: None,
+            })
+            .created_inserts[0];
+        ids.push((channel, id, e));
+    }
+    // Automate the equaliser's band-4 gain (an effect parameter).
+    let (eq_channel, eq_id, _) = ids[0];
+    s.apply(EditCommand::AddAutomationPoints {
+        target: AutomationTarget {
+            channel: eq_channel,
+            region: None,
+            param: AutomationParam::Insert {
+                id: eq_id,
+                param: InsertParam::Effect {
+                    kind: EffectKind::ParametricEq,
+                    index: 21,
+                },
+            },
+        },
+        points: vec![
+            PointSpec {
+                tick: 0,
+                value: -12.0,
+                curve: None,
+            },
+            PointSpec {
+                tick: 3840,
+                value: 12.0,
+                curve: None,
+            },
+        ],
+    });
+    let lookup = s.lookup();
+    let (mut handle, mut eng) = engine::create(RATE, 512, build_plan(&s.project, &lookup, RATE, 1));
+    handle.shared().set_analyzer_slot(Some(0));
+    let mut out = vec![0.0f32; 480 * 2];
+    let mut midi = elyvon_audio::engine::NoMidi;
+    handle.send(TransportCommand::Play {
+        from_tick: Some(0),
+        count_in: false,
+        pre_roll: false,
+    });
+    for round in 0..6u32 {
+        for _ in 0..30 {
+            guarded(|| eng.process(&mut out, 2, &mut midi));
+        }
+        // Graph swaps while playing: effect parameters, bypass, order.
+        let mut edited = s.project.clone();
+        for (k, (channel, id, e)) in ids.iter().enumerate() {
+            let mut e = *e;
+            for (i, d) in e.kind.params().iter().enumerate() {
+                if d.automatable && !d.discrete() && (i + k + round as usize).is_multiple_of(3) {
+                    e.params.0[i] = d.min + (d.max - d.min) * 0.5;
+                }
+            }
+            elyvon_project::edit::apply(
+                &mut edited,
+                &EditCommand::SetInsert {
+                    channel: *channel,
+                    id: *id,
+                    bypass: (k + round as usize).is_multiple_of(5),
+                    processor: Processor::Effect(e),
+                },
+            )
+            .unwrap();
+        }
+        handle.publish(build_plan(&edited, &lookup, RATE, 2 + u64::from(round)));
+        guarded(|| eng.process(&mut out, 2, &mut midi));
+        handle.poll();
+    }
+    // Stopped: tails keep ringing through the graph.
+    handle.send(TransportCommand::Stop);
+    for _ in 0..20 {
+        guarded(|| eng.process(&mut out, 2, &mut midi));
+    }
+    let mut big = vec![0.0f32; 4096 * 2];
+    guarded(|| eng.process(&mut big, 2, &mut midi));
+    assert!(out.iter().chain(&big).all(|v| v.is_finite()));
+    assert_eq!(
+        ALLOCS.load(Ordering::Relaxed),
+        0,
+        "allocations in the audio callback"
+    );
+    assert_eq!(
+        FREES.load(Ordering::Relaxed),
+        0,
+        "frees in the audio callback"
+    );
+    let meters = handle.shared().read_meters(&mut Default::default(), 2, 1);
+    assert!(meters.reduction.iter().all(|r| r.reduction_db.is_finite()));
+    handle.poll();
+}

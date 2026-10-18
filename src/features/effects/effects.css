@@ -1,0 +1,243 @@
+/* Native effect editor (Phases 12–13). Uses the design tokens only. */
+
+.fx-editor {
+  max-height: min(86vh, 860px);
+  overflow: auto;
+}
+
+.fx-editor__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--strip-sep);
+}
+
+.fx-editor__ab,
+.fx-editor__save,
+.fx-editor__preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fx-editor__preset select,
+.fx-editor__save input,
+.fx-editor__sidechain select {
+  background: var(--button-dark);
+  color: var(--text-1, #e6e6e6);
+  border: 1px solid var(--strip-sep);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.fx-editor__save input {
+  width: 150px;
+}
+
+.fx-editor__hint {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.fx-btn {
+  background: var(--button);
+  color: var(--text-1, #e6e6e6);
+  border: 1px solid var(--strip-sep);
+  border-radius: 4px;
+  padding: 3px 9px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.fx-btn:hover:not(:disabled) {
+  background: var(--button-hi);
+}
+
+.fx-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.fx-btn.is-on {
+  background: var(--slot-blue);
+}
+
+.fx-editor__status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 6px 0;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.fx-editor__sidechain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 6px 0 10px;
+}
+
+.fx-editor__sidechain label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.fx-editor__empty,
+.fx-editor__note {
+  font-size: 11px;
+  opacity: 0.7;
+  margin: 10px 0 0;
+}
+
+.fx-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px 18px;
+  padding-top: 8px;
+}
+
+.fx-param {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 2px 8px;
+  font-size: 12px;
+}
+
+.fx-param__label {
+  grid-column: 1 / -1;
+  opacity: 0.85;
+}
+
+.fx-param__fixed {
+  opacity: 0.6;
+  font-size: 10px;
+}
+
+.fx-param input[type="range"] {
+  width: 100%;
+  accent-color: var(--slot-blue);
+}
+
+.fx-param select {
+  grid-column: 1 / -1;
+  background: var(--button-dark);
+  color: inherit;
+  border: 1px solid var(--strip-sep);
+  border-radius: 4px;
+  padding: 2px 4px;
+  font: inherit;
+}
+
+.fx-param--toggle {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.fx-param__value,
+.fx-param__input {
+  min-width: 74px;
+  text-align: right;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  background: var(--lcd);
+  color: inherit;
+  border: 1px solid var(--lcd-line);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.fx-param__value {
+  cursor: text;
+}
+
+.fx-gr {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  min-width: 260px;
+}
+
+.fx-gr__track {
+  position: relative;
+  flex: 1;
+  height: 8px;
+  background: var(--fader-track);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.fx-gr__bar {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: #e0a33a;
+}
+
+.fx-gr__value {
+  min-width: 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.fx-eq__graph {
+  width: 100%;
+  height: 240px;
+  display: block;
+  border-radius: 4px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.fx-eq__bands {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 10px;
+}
+
+.fx-eq__band {
+  border: 1px solid var(--strip-sep);
+  border-top-width: 3px;
+  border-radius: 4px;
+  padding: 4px 8px 8px;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fx-eq__band legend {
+  font-size: 11px;
+  padding: 0 4px;
+}
+
+.fx-eq__band .fx-param {
+  grid-template-columns: 1fr auto;
+}
+
+.slot__gr {
+  float: right;
+  font-size: 9px;
+  color: #e0a33a;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .fx-eq__bands {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

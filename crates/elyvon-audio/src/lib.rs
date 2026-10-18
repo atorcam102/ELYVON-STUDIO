@@ -7,6 +7,8 @@
 //! * [`engine`] — engine status, the real-time [`engine::Engine`] and its
 //!   lock-free control handle.
 //! * [`transport`] — transport commands and the state shared with the UI.
+//! * [`fx`] — native effects (equaliser, dynamics, delay, reverbs,
+//!   modulation, distortion, pitch) used as mixer inserts.
 //! * [`render`] — offline (faster than real time) rendering and WAV export
 //!   through the same engine code path.
 //! * [`device`] — audio-device output (feature `device`) and an internal clock.
@@ -26,6 +28,7 @@ pub mod contracts;
 pub mod device;
 pub mod dsp;
 pub mod engine;
+pub mod fx;
 pub mod gain;
 #[cfg(feature = "device")]
 pub mod input;
@@ -36,6 +39,7 @@ pub mod plan;
 pub mod recording;
 pub mod render;
 pub mod rt;
+pub mod spectrum;
 pub mod synth;
 pub mod transport;
 pub mod waveform;

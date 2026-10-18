@@ -1,4 +1,5 @@
-//! Native insert processors and mixer building blocks (Phase 09).
+//! Native insert processors and mixer building blocks (Phase 09), and the
+//! insert wrapper of the Phase 12–13 effects ([`crate::fx`]).
 //!
 //! Everything here is built on the control thread (allocation happens in
 //! `new`) and processed on the audio thread without allocating, locking or
@@ -10,6 +11,7 @@
 use elyvon_project::automation::InsertParam;
 use elyvon_project::mixer::{FilterMode, Processor};
 
+use crate::fx::{Effect, FxContext};
 use crate::gain::db_to_gain;
 
 /// Linear gain pair that ramps to a new target over one block, so fader,
@@ -124,7 +126,7 @@ struct Biquad {
 }
 
 impl Biquad {
-    /// RBJ cookbook 2nd-order high/low-pass.
+    /// RBJ cookbook 2nd-order high/low-pass, band-pass and notch.
     fn new(mode: FilterMode, cutoff: f64, q: f64, rate: u32) -> Self {
         let nyquist = f64::from(rate) * 0.5;
         let f = cutoff.clamp(10.0, nyquist * 0.95);
@@ -135,6 +137,8 @@ impl Biquad {
         let (b0, b1, b2) = match mode {
             FilterMode::LowPass => ((1.0 - cos) / 2.0, 1.0 - cos, (1.0 - cos) / 2.0),
             FilterMode::HighPass => ((1.0 + cos) / 2.0, -(1.0 + cos), (1.0 + cos) / 2.0),
+            FilterMode::BandPass => (alpha, 0.0, -alpha),
+            FilterMode::Notch => (1.0, -2.0 * cos, 1.0),
         };
         Self {
             b0: (b0 / a0) as f32,
@@ -173,6 +177,8 @@ struct Limiter {
     gain: f32,
     /// Automated bypass amount: 0 limits, 1 passes the delayed signal.
     pass: f32,
+    /// Largest gain reduction (dB) since the meter last read it.
+    reduction: f32,
 }
 
 impl Limiter {
@@ -190,6 +196,7 @@ impl Limiter {
             index: 0,
             gain: 1.0,
             pass: 0.0,
+            reduction: 0.0,
         }
     }
 
@@ -278,6 +285,7 @@ enum Kind {
         q: f64,
     },
     Limiter(Box<Limiter>),
+    Effect(Box<Effect>),
 }
 
 /// Crossfade between the dry and processed signal over one block.
@@ -301,6 +309,8 @@ pub struct Insert {
     automated_bypass: bool,
     amount: f32,
     amount_target: f32,
+    /// Key-signal slot of an external sidechain (see `plan::PlaybackPlan::keys`).
+    pub key_slot: Option<usize>,
 }
 
 impl Insert {
@@ -341,6 +351,7 @@ impl Insert {
                 release_ms,
                 rate,
             ))),
+            Processor::Effect(ref slot) => Kind::Effect(Box::new(Effect::new(slot, rate))),
         };
         Self {
             id,
@@ -351,6 +362,7 @@ impl Insert {
             automated_bypass: false,
             amount: f32::from(u8::from(bypass)),
             amount_target: f32::from(u8::from(bypass)),
+            key_slot: None,
         }
     }
 
@@ -398,6 +410,9 @@ impl Insert {
                 let frames = (f64::from(value) * f64::from(self.rate) / 1000.0).max(1.0);
                 l.release = (1.0 - (-1.0 / frames).exp()) as f32;
             }
+            (InsertParam::Effect { kind, index }, Kind::Effect(e)) if e.kind() == kind => {
+                e.set(usize::from(index), f64::from(value));
+            }
             _ => {}
         }
     }
@@ -413,7 +428,38 @@ impl Insert {
     pub fn latency(&self) -> usize {
         match &self.kind {
             Kind::Limiter(l) if !self.bypass => l.latency(),
+            Kind::Effect(e) if !self.bypass => e.latency(),
             _ => 0,
+        }
+    }
+
+    /// The processor may still produce sound with silent input (delay and
+    /// reverb tails, a test generator): its strip keeps running while the
+    /// transport is stopped.
+    pub fn ringing(&self) -> bool {
+        match &self.kind {
+            Kind::Effect(e) if !self.bypass => {
+                e.ringing() || e.kind() == elyvon_project::effects::EffectKind::TestGenerator
+            }
+            _ => false,
+        }
+    }
+
+    /// Gain reduction (dB) since the previous call, for dynamics processors
+    /// and the limiter.
+    pub fn take_reduction(&mut self) -> Option<f32> {
+        match &mut self.kind {
+            Kind::Effect(e) => e.take_reduction(),
+            Kind::Limiter(l) => Some(std::mem::take(&mut l.reduction)),
+            _ => None,
+        }
+    }
+
+    /// The prepared effect, if this insert is one (inspection and tests).
+    pub fn effect(&self) -> Option<&Effect> {
+        match &self.kind {
+            Kind::Effect(e) => Some(e),
+            _ => None,
         }
     }
 
@@ -432,19 +478,20 @@ impl Insert {
             (Kind::Trim(a), Kind::Trim(b)) => a.adopt(b),
             (Kind::Filter { biquad: a, .. }, Kind::Filter { biquad: b, .. }) => a.z = b.z,
             (Kind::Limiter(a), Kind::Limiter(b)) => a.adopt(b),
+            (Kind::Effect(a), Kind::Effect(b)) => a.adopt(b),
             _ => {}
         }
     }
 
     /// Processes interleaved stereo `buf` in place. Real-time safe.
-    pub fn process(&mut self, buf: &mut [f32]) {
+    pub fn process(&mut self, buf: &mut [f32], cx: &FxContext<'_>) {
         if self.automated_bypass {
-            return self.process_blended(buf);
+            return self.process_blended(buf, cx);
         }
         let fade = std::mem::replace(&mut self.fade, Fade::None);
         if fade == Fade::None {
             if !self.bypass {
-                self.run(buf);
+                self.run(buf, cx);
             }
             return;
         }
@@ -456,7 +503,7 @@ impl Insert {
             let end = (at + dry.len()).min(buf.len());
             let piece = &mut buf[at..end];
             dry[..piece.len()].copy_from_slice(piece);
-            self.run(piece);
+            self.run(piece, &cx.sub(at / 2, piece.len() / 2));
             for (i, (w, d)) in piece.iter_mut().zip(&dry).enumerate() {
                 let t = ((at + i) / 2 + 1) as f32 / n as f32;
                 let wet = if fade == Fade::In { t } else { 1.0 - t };
@@ -474,9 +521,10 @@ impl Insert {
         buf: &mut [f32],
         trim_db: Option<&[f32]>,
         bypass: Option<&[f32]>,
+        cx: &FxContext<'_>,
     ) {
         if trim_db.is_none() && bypass.is_none() {
-            return self.process(buf);
+            return self.process(buf, cx);
         }
         self.fade = Fade::None;
         let at = |s: Option<&[f32]>, i: usize, default: f32| {
@@ -510,7 +558,7 @@ impl Insert {
                     let k = db_to_gain(f64::from(last)) as f32;
                     *g = Smoothed::new((k, k));
                 }
-                _ => self.run(piece),
+                _ => self.run(piece, &cx.sub(start / 2, piece.len() / 2)),
             }
             if bypass.is_some() || self.automated_bypass {
                 for (j, (w, d)) in piece.iter_mut().zip(&dry).enumerate() {
@@ -528,7 +576,7 @@ impl Insert {
 
     /// Automated bypass: ramps the dry amount from its last value to the
     /// target over `buf`.
-    fn process_blended(&mut self, buf: &mut [f32]) {
+    fn process_blended(&mut self, buf: &mut [f32], cx: &FxContext<'_>) {
         let (from, to) = (self.amount, self.amount_target);
         self.amount = to;
         let n = (buf.len() / 2).max(1) as f32;
@@ -543,7 +591,7 @@ impl Insert {
             return;
         }
         if from == 0.0 && to == 0.0 {
-            return self.run(buf);
+            return self.run(buf, cx);
         }
         let mut dry = [0.0f32; 128];
         let mut at = 0;
@@ -551,7 +599,7 @@ impl Insert {
             let end = (at + dry.len()).min(buf.len());
             let piece = &mut buf[at..end];
             dry[..piece.len()].copy_from_slice(piece);
-            self.run(piece);
+            self.run(piece, &cx.sub(at / 2, piece.len() / 2));
             for (i, (w, d)) in piece.iter_mut().zip(&dry).enumerate() {
                 let x = from + (to - from) * ((at + i) / 2 + 1) as f32 / n;
                 *w += (*d - *w) * x;
@@ -560,7 +608,7 @@ impl Insert {
         }
     }
 
-    fn run(&mut self, buf: &mut [f32]) {
+    fn run(&mut self, buf: &mut [f32], cx: &FxContext<'_>) {
         let n = buf.len() / 2;
         match &mut self.kind {
             Kind::Trim(g) => {
@@ -611,7 +659,10 @@ impl Insert {
                     let (a, b) = f.split_at_mut(1);
                     l.process(&mut a[0], &mut b[0]);
                 }
+                let gr = -20.0 * l.gain.max(1e-6).log10();
+                l.reduction = l.reduction.max(gr);
             }
+            Kind::Effect(e) => e.process(buf, cx),
         }
     }
 }
@@ -629,6 +680,72 @@ mod tests {
                 [v, v]
             })
             .collect()
+    }
+
+    fn run(insert: &mut Insert, x: &mut [f32]) {
+        let map = crate::fx::testing::map(120.0);
+        insert.process(x, &crate::fx::testing::cx(&map, 48_000, 0));
+    }
+
+    #[test]
+    fn band_pass_and_notch_filters() {
+        let rate = 48_000;
+        for (mode, centre_kept) in [(FilterMode::BandPass, true), (FilterMode::Notch, false)] {
+            let p = Processor::Filter {
+                mode,
+                cutoff_hz: 1000.0,
+                q: 2.0,
+            };
+            let at = |freq: f64| {
+                let mut f = Insert::new(InsertId::new(), false, &p, rate);
+                let mut x = sine(freq, rate, 48_000, 0.5);
+                run(&mut f, &mut x);
+                rms(&x[24_000..]) / (0.5 / 2f32.sqrt())
+            };
+            let (centre, far) = (at(1000.0), at(100.0));
+            if centre_kept {
+                assert!(
+                    (centre - 1.0).abs() < 0.02 && far < 0.1,
+                    "bp {centre} {far}"
+                );
+            } else {
+                assert!(
+                    centre < 0.02 && (far - 1.0).abs() < 0.02,
+                    "notch {centre} {far}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn effects_wrap_into_inserts_and_report_latency_and_reduction() {
+        use elyvon_project::effects::{EffectKind, EffectSlot};
+        let mut conv = EffectSlot::new(EffectKind::ConvolutionReverb);
+        conv.set("lengthSeconds", 0.3).expect("key");
+        let ins = Insert::new(InsertId::new(), false, &Processor::Effect(conv), 48_000);
+        assert_eq!(ins.latency(), crate::fx::convolution::PARTITION);
+        let bypassed = Insert::new(InsertId::new(), true, &Processor::Effect(conv), 48_000);
+        assert_eq!(bypassed.latency(), 0);
+        let mut comp = EffectSlot::new(EffectKind::Compressor);
+        comp.set("thresholdDb", -40.0).expect("key");
+        let mut c = Insert::new(InsertId::new(), false, &Processor::Effect(comp), 48_000);
+        let mut x = sine(200.0, 48_000, 4_800, 0.5);
+        run(&mut c, &mut x);
+        assert!(c.take_reduction().expect("dynamics") > 10.0);
+        // Automation reaches the effect's parameter.
+        c.automate(
+            InsertParam::Effect {
+                kind: EffectKind::Compressor,
+                index: 0,
+            },
+            0.0,
+        );
+        let mut x = sine(200.0, 48_000, 48_000, 0.1);
+        run(&mut c, &mut x);
+        let _ = c.take_reduction();
+        let mut x = sine(200.0, 48_000, 4_800, 0.1);
+        run(&mut c, &mut x);
+        assert!(c.take_reduction().expect("dynamics") < 0.5);
     }
 
     fn rms(x: &[f32]) -> f32 {
@@ -662,9 +779,9 @@ mod tests {
             let mut f = Insert::new(InsertId::new(), false, &p, rate);
             let mut low = sine(100.0, rate, 48_000, 0.5);
             let mut high = sine(10_000.0, rate, 48_000, 0.5);
-            f.process(&mut low);
+            run(&mut f, &mut low);
             let mut f = Insert::new(InsertId::new(), false, &p, rate);
-            f.process(&mut high);
+            run(&mut f, &mut high);
             let (l, h) = (rms(&low[9600..]), rms(&high[9600..]));
             let pass = 0.5 / 2f32.sqrt();
             if low_kept {
@@ -689,7 +806,7 @@ mod tests {
         // An isolated full-scale spike.
         x[2 * 5000] = 1.0;
         let input = x.clone();
-        lim.process(&mut x);
+        run(&mut lim, &mut x);
         let ceiling = db_to_gain(-6.0) as f32;
         assert!(x.iter().all(|v| v.abs() <= ceiling + 1e-6));
         // Delayed by exactly the look-ahead: the output tracks the input
@@ -703,7 +820,7 @@ mod tests {
         let mut bypassed = Insert::new(InsertId::new(), true, &p, rate);
         assert_eq!(bypassed.latency(), 0);
         let mut y = input.clone();
-        bypassed.process(&mut y);
+        run(&mut bypassed, &mut y);
         assert_eq!(y, input);
     }
 
@@ -717,7 +834,7 @@ mod tests {
         };
         let mut u = Insert::new(InsertId::new(), false, &p, 48_000);
         let mut x = vec![0.5, 0.25];
-        u.process(&mut x);
+        run(&mut u, &mut x);
         assert_eq!(x, [0.25, -0.5]);
         let mono = Processor::Utility {
             invert_left: false,
@@ -727,7 +844,7 @@ mod tests {
         };
         let mut m = Insert::new(InsertId::new(), false, &mono, 48_000);
         let mut x = vec![1.0, 0.0];
-        m.process(&mut x);
+        run(&mut m, &mut x);
         assert_eq!(x, [0.5, 0.5]);
     }
 

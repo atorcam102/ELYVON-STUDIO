@@ -22,6 +22,9 @@ import { useProject } from "../../state/project";
 import { useTransport } from "../../state/transport";
 import { useUi } from "../../state/ui";
 import { pendingControl } from "../topbar/menuActions";
+import { EffectEditor } from "../effects/EffectEditor";
+import { effectMenuEntries } from "../effects/effectMenu";
+import { effectInfo } from "../../lib/effects";
 import type { AutomationMode } from "../../bindings/AutomationMode";
 import type { AutomationParam } from "../../bindings/AutomationParam";
 import type { TouchPhase } from "../../bindings/TouchPhase";
@@ -311,6 +314,8 @@ const PROCESSORS: { label: string; make: () => Processor }[] = [
   { label: "Utility (polarity / mono / swap)", make: () => ({ type: "utility", invertLeft: false, invertRight: false, swap: false, mono: false }) },
   { label: "Filter (high-pass)", make: () => ({ type: "filter", mode: "highPass", cutoffHz: 80, q: 0.707 }) },
   { label: "Filter (low-pass)", make: () => ({ type: "filter", mode: "lowPass", cutoffHz: 12000, q: 0.707 }) },
+  { label: "Filter (band-pass)", make: () => ({ type: "filter", mode: "bandPass", cutoffHz: 1000, q: 1 }) },
+  { label: "Filter (notch)", make: () => ({ type: "filter", mode: "notch", cutoffHz: 1000, q: 4 }) },
   { label: "Limiter (look-ahead)", make: () => ({ type: "limiter", ceilingDb: -1, lookaheadMs: 5, releaseMs: 80 }) },
 ];
 
@@ -321,9 +326,11 @@ function processorLabel(p: Processor): string {
     case "utility":
       return ["Util", p.invertLeft || p.invertRight ? "Ø" : "", p.mono ? "M" : "", p.swap ? "⇄" : ""].filter(Boolean).join(" ");
     case "filter":
-      return `${p.mode === "highPass" ? "HP" : "LP"} ${p.cutoffHz >= 1000 ? `${(p.cutoffHz / 1000).toFixed(1)}k` : Math.round(p.cutoffHz)}`;
+      return `${{ highPass: "HP", lowPass: "LP", bandPass: "BP", notch: "Notch" }[p.mode]} ${p.cutoffHz >= 1000 ? `${(p.cutoffHz / 1000).toFixed(1)}k` : Math.round(p.cutoffHz)}`;
     case "limiter":
       return `Lim ${formatDb(p.ceilingDb)}`;
+    case "effect":
+      return effectInfo(p.kind)?.short ?? p.kind;
   }
 }
 
@@ -348,9 +355,11 @@ function InsertEditor({ channel, slot, index, count, onClose, at }: { channel: C
       case "filter":
         return (
           <>
-            <select className="pr__select" aria-label="Filter mode" value={p.mode} onChange={(e) => set({ ...p, mode: e.target.value as "highPass" | "lowPass" })}>
+            <select className="pr__select" aria-label="Filter mode" value={p.mode} onChange={(e) => set({ ...p, mode: e.target.value as typeof p.mode })}>
               <option value="highPass">High-pass</option>
               <option value="lowPass">Low-pass</option>
+              <option value="bandPass">Band-pass</option>
+              <option value="notch">Notch</option>
             </select>
             <NumberField label="Cutoff" value={p.cutoffHz} min={20} max={20000} step={10} suffix="Hz" onCommit={(cutoffHz) => set({ ...p, cutoffHz })} />
             <NumberField label="Q" value={p.q} min={0.3} max={10} step={0.05} precision={2} onCommit={(q) => set({ ...p, q })} />
@@ -453,6 +462,8 @@ const ChannelStrip = memo(function ChannelStrip({
   const apply = useProject((s) => s.apply);
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; entries: MenuEntry[] } | null>(null);
   const [editing, setEditing] = useState<{ index: number; at: { x: number; y: number } } | null>(null);
+  /** Native effect insert open in the effect editor. */
+  const [fxEditing, setFxEditing] = useState<string | null>(null);
   const c = strip.channel;
   const key = keyOf(c);
   const patch = (p: StripPatch) => void apply({ type: "setStrip", channel: c, patch: p });
@@ -551,6 +562,13 @@ const ChannelStrip = memo(function ChannelStrip({
         { heading: "Native processors" },
         ...PROCESSORS.map((p) => ({ id: p.label, label: p.label, onSelect: () => void apply({ type: "addInsert", channel: c, processor: p.make() }) })),
         "separator",
+        ...effectMenuEntries((slot) =>
+          void apply({ type: "addInsert", channel: c, processor: { type: "effect", ...slot } }).then((r) => {
+            const id = r?.createdInserts[0];
+            if (id) setFxEditing(id);
+          }),
+        ),
+        "separator",
         { id: "plug", label: "Third-party plug-ins: not available yet", disabled: true, onSelect: () => undefined },
       ],
     });
@@ -576,7 +594,11 @@ const ChannelStrip = memo(function ChannelStrip({
             className={`slot slot--fx${slot.bypass ? " is-bypassed" : ""}`}
             title={`${processorLabel(slot.processor)}${slot.bypass ? " (bypassed)" : ""} — click to edit`}
             disabled={disabledAudio}
-            onClick={(e) => setEditing({ index: i, at: at(e) })}
+            onClick={(e) => (slot.processor.type === "effect" ? setFxEditing(slot.id) : setEditing({ index: i, at: at(e) }))}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setEditing({ index: i, at: at(e) });
+            }}
           >
             {processorLabel(slot.processor)}
           </button>
@@ -740,6 +762,9 @@ const ChannelStrip = memo(function ChannelStrip({
       {menu && <Menu at={menu.at} entries={menu.entries} onClose={() => setMenu(null)} />}
       {editing && strip.inserts[editing.index] && (
         <InsertEditor channel={c} slot={strip.inserts[editing.index]!} index={editing.index} count={strip.inserts.length} at={editing.at} onClose={() => setEditing(null)} />
+      )}
+      {fxEditing && (
+        <EffectEditor channel={c} insertId={fxEditing} onClose={() => setFxEditing(null)} />
       )}
     </div>
   );

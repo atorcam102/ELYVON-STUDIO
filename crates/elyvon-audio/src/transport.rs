@@ -95,6 +95,15 @@ pub struct EngineShared {
     max_block_ns: AtomicU64,
     midi_overflow: AtomicU64,
     streaming_underruns: AtomicU64,
+    /// Gain reduction (dB, f32 bits, max since read) per strip and insert.
+    reduction: Vec<AtomicU32>,
+    /// Meter slot whose post-fader signal feeds the spectrum analyser
+    /// (`u32::MAX`: none).
+    analyzer_slot: AtomicU32,
+    /// Expensive effects run their economy path (engine overload).
+    economy: AtomicBool,
+    /// Last callback's processing time over its duration (f32 bits).
+    dsp_load: AtomicU32,
     meters: Vec<MeterSlot>,
 }
 
@@ -122,6 +131,12 @@ impl EngineShared {
             max_block_ns: AtomicU64::new(0),
             midi_overflow: AtomicU64::new(0),
             streaming_underruns: AtomicU64::new(0),
+            reduction: (0..MAX_CHANNELS * elyvon_project::mixer::limits::MAX_INSERTS)
+                .map(|_| AtomicU32::new(0))
+                .collect(),
+            analyzer_slot: AtomicU32::new(u32::MAX),
+            economy: AtomicBool::new(false),
+            dsp_load: AtomicU32::new(0),
             meters: (0..MAX_CHANNELS).map(|_| MeterSlot::default()).collect(),
         }
     }
@@ -297,6 +312,59 @@ impl EngineShared {
         }
     }
 
+    /// Audio thread: records an insert's gain reduction (dB ≥ 0).
+    #[inline]
+    pub(crate) fn reduction(&self, slot: usize, insert: usize, db: f32) {
+        let max = elyvon_project::mixer::limits::MAX_INSERTS;
+        if insert < max
+            && let Some(r) = self.reduction.get(slot * max + insert)
+        {
+            r.fetch_max(db.max(0.0).to_bits(), Ordering::AcqRel);
+        }
+    }
+
+    /// Selects the strip (meter slot) feeding the spectrum analyser.
+    pub fn set_analyzer_slot(&self, slot: Option<usize>) {
+        let v = slot.and_then(|s| u32::try_from(s).ok()).unwrap_or(u32::MAX);
+        self.analyzer_slot.store(v, Ordering::Release);
+    }
+
+    #[inline]
+    pub(crate) fn analyzer_slot(&self) -> usize {
+        self.analyzer_slot.load(Ordering::Acquire) as usize
+    }
+
+    pub(crate) fn set_load(&self, load: f32, economy: bool) {
+        self.dsp_load.store(load.to_bits(), Ordering::Relaxed);
+        self.economy.store(economy, Ordering::Relaxed);
+    }
+
+    /// Gain reduction of every insert with any since the previous read.
+    fn read_reductions(&self, tracks: usize, auxes: usize) -> Vec<InsertReduction> {
+        let max = elyvon_project::mixer::limits::MAX_INSERTS;
+        let mut out = Vec::new();
+        let mut read = |slot: usize, strip: StripRef| {
+            for i in 0..max {
+                let v = f32::from_bits(self.reduction[slot * max + i].swap(0, Ordering::AcqRel));
+                if v > 0.0 {
+                    out.push(InsertReduction {
+                        strip,
+                        index: i as u8,
+                        reduction_db: v,
+                    });
+                }
+            }
+        };
+        read(MASTER_SLOT, StripRef::Master);
+        for t in 0..tracks.min(crate::plan::MAX_TRACKS) {
+            read(t, StripRef::Track { index: t as u32 });
+        }
+        for a in 0..auxes.min(crate::plan::MAX_AUXES) {
+            read(aux_slot(a), StripRef::Aux { index: a as u32 });
+        }
+        out
+    }
+
     /// Clears every clip indicator (control side).
     pub fn reset_clips(&self) {
         for m in &self.meters {
@@ -338,6 +406,7 @@ impl EngineShared {
             auxes: (0..auxes.min(crate::plan::MAX_AUXES))
                 .map(|a| read(aux_slot(a)))
                 .collect(),
+            reduction: self.read_reductions(tracks, auxes),
         }
     }
 
@@ -376,6 +445,8 @@ impl EngineShared {
             max_block_us: self.max_block_ns.load(Ordering::Relaxed) as f64 / 1000.0,
             midi_overflow: self.midi_overflow.load(Ordering::Relaxed),
             streaming_underruns: self.streaming_underruns.load(Ordering::Relaxed),
+            dsp_load: f32::from_bits(self.dsp_load.load(Ordering::Relaxed)),
+            economy: self.economy.load(Ordering::Relaxed),
         }
     }
 }
@@ -477,6 +548,42 @@ pub struct EngineStats {
     pub midi_overflow: u64,
     #[ts(type = "number")]
     pub streaming_underruns: u64,
+    /// Processing time of the last callback over its real-time duration.
+    pub dsp_load: f32,
+    /// Expensive effects (convolution) run reduced while overloaded.
+    pub economy: bool,
+}
+
+/// A channel strip in meter readings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(export)]
+pub enum StripRef {
+    Master,
+    /// Track in project order.
+    Track {
+        index: u32,
+    },
+    /// Auxiliary channel in mixer order.
+    Aux {
+        index: u32,
+    },
+}
+
+/// Gain reduction of one insert (compressor, gate, limiter) since the
+/// previous reading.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct InsertReduction {
+    pub strip: StripRef,
+    /// Insert position in the strip.
+    pub index: u8,
+    pub reduction_db: f32,
 }
 
 /// Meter levels of the master, tracks (project order) and auxiliary channels
@@ -488,6 +595,8 @@ pub struct Meters {
     pub master: ChannelMeter,
     pub tracks: Vec<ChannelMeter>,
     pub auxes: Vec<ChannelMeter>,
+    /// Dynamics gain reduction, only for inserts that reduced.
+    pub reduction: Vec<InsertReduction>,
 }
 
 #[cfg(test)]

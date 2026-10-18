@@ -23,6 +23,7 @@ use ts_rs::TS;
 use crate::automation::{ParamOverride, StripKey};
 use crate::contracts::{MidiEvent, MidiMessage};
 use crate::dsp::Smoothed;
+use crate::fx::FxContext;
 use crate::plan::{
     ClickSounds, Dest, MASTER_SLOT, MAX_AUXES, MAX_CHANNELS, MAX_TRACKS, PlanTrack, PlaybackPlan,
     Strip,
@@ -203,9 +204,16 @@ pub struct EngineHandle {
     midi_overflow: Arc<std::sync::atomic::AtomicBool>,
     live: Producer<LiveMidi>,
     overrides: Producer<ParamOverride>,
+    analyzer: Option<Consumer<f32>>,
 }
 
 impl EngineHandle {
+    /// The spectrum analyser's sample stream (mono post-fader signal of the
+    /// strip selected with [`EngineShared::set_analyzer_slot`]). Taken once.
+    pub fn take_analyzer(&mut self) -> Option<Consumer<f32>> {
+        self.analyzer.take()
+    }
+
     /// Queues a live automation control value (Touch/Latch/Write). `false`
     /// if the queue is full.
     pub fn send_override(&mut self, o: ParamOverride) -> bool {
@@ -364,6 +372,14 @@ pub struct Engine {
     callback_clock: u64,
     midi_output: Option<Producer<crate::midi::ScheduledPacket>>,
     midi_overflow: Arc<std::sync::atomic::AtomicBool>,
+    /// External sidechain key signals: one `chunk` per slot.
+    keys: Vec<f32>,
+    analyzer: Option<Producer<f32>>,
+    /// Driven by a device or clock in real time (enables economy mode).
+    realtime: bool,
+    economy: bool,
+    overloaded: u32,
+    relaxed: u32,
 }
 
 impl std::fmt::Debug for Engine {
@@ -391,6 +407,7 @@ pub fn create(sample_rate: u32, max_block: usize, plan: PlaybackPlan) -> (Engine
     let (override_tx, override_rx) = RingBuffer::new(OVERRIDE_CAPACITY);
     let shared = Arc::new(EngineShared::new(sample_rate));
     let (midi_tx, midi_rx) = RingBuffer::new(4096);
+    let (analyzer_tx, analyzer_rx) = RingBuffer::new(ANALYZER_CAPACITY);
     let midi_overflow = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let handle = EngineHandle {
         commands: cmd_tx,
@@ -406,6 +423,7 @@ pub fn create(sample_rate: u32, max_block: usize, plan: PlaybackPlan) -> (Engine
         midi_overflow: Arc::clone(&midi_overflow),
         live: live_tx,
         overrides: override_tx,
+        analyzer: Some(analyzer_rx),
     };
     let engine = Engine {
         plan: Box::new(plan),
@@ -443,8 +461,52 @@ pub fn create(sample_rate: u32, max_block: usize, plan: PlaybackPlan) -> (Engine
         callback_clock: 0,
         midi_output: Some(midi_tx),
         midi_overflow,
+        keys: vec![0.0; crate::plan::MAX_KEYS * chunk * 2],
+        analyzer: Some(analyzer_tx),
+        realtime: false,
+        economy: false,
+        overloaded: 0,
+        relaxed: 0,
     };
     (handle, engine)
+}
+
+/// Samples buffered for the spectrum analyser (~0.3 s at 48 kHz).
+const ANALYZER_CAPACITY: usize = 16_384;
+
+/// Timeline context shared by the effects of one rendered span.
+#[derive(Clone, Copy)]
+struct FxEnv<'a> {
+    map: &'a elyvon_core::tempo::TempoMap,
+    rate: u32,
+    economy: bool,
+}
+
+impl FxEnv<'_> {
+    /// The effect context of frames `k..k + n` of a span at `pos`.
+    #[allow(clippy::too_many_arguments)]
+    fn at<'k>(
+        &self,
+        pos: u64,
+        k: usize,
+        n: usize,
+        advancing: bool,
+        key: Option<usize>,
+        keys: &'k [f32],
+        chunk: usize,
+    ) -> FxContext<'k>
+    where
+        Self: 'k,
+    {
+        FxContext {
+            rate: self.rate,
+            map: self.map,
+            pos: if advancing { pos + k as u64 } else { pos },
+            advancing,
+            economy: self.economy,
+            key: key.and_then(|s| keys.get((s * chunk + k) * 2..(s * chunk + k + n) * 2)),
+        }
+    }
 }
 
 /// Accumulated block meter for one strip.
@@ -552,11 +614,21 @@ fn route_with(
 const INSERT_STEP: u64 = 32;
 
 /// Runs the inserts of a strip, applying automated parameters.
-fn run_inserts(strip: &mut Strip, buf: &mut [f32], pos: u64, advancing: bool) {
+#[allow(clippy::too_many_arguments)]
+fn run_inserts(
+    strip: &mut Strip,
+    buf: &mut [f32],
+    pos: u64,
+    advancing: bool,
+    env: &FxEnv<'_>,
+    keys: &[f32],
+    chunk: usize,
+) {
     let len = buf.len() / 2;
     let Some(auto) = strip.auto.as_mut().filter(|a| a.has_insert_slots()) else {
         for insert in &mut strip.inserts {
-            insert.process(buf);
+            let cx = env.at(pos, 0, len, advancing, insert.key_slot, keys, chunk);
+            insert.process(buf, &cx);
         }
         return;
     };
@@ -589,10 +661,12 @@ fn run_inserts(strip: &mut Strip, buf: &mut [f32], pos: u64, advancing: bool) {
                     })
                     .map(|s| &s.buf[k..k + n])
             };
+            let cx = env.at(pos, k, n, advancing, insert.key_slot, keys, chunk);
             insert.process_levels(
                 &mut buf[k * 2..(k + n) * 2],
                 levels(InsertParam::TrimGain),
                 levels(InsertParam::Bypass),
+                &cx,
             );
         }
         k += n;
@@ -702,6 +776,9 @@ fn process_strip(
     stem_offset: usize,
     pos: u64,
     advancing: bool,
+    env: &FxEnv<'_>,
+    keys: &mut [f32],
+    analyzer: &mut Option<Producer<f32>>,
 ) -> BlockMeter {
     let len = buf.len() / 2;
     if let Some(auto) = strip.auto.as_mut() {
@@ -714,11 +791,30 @@ fn process_strip(
             f[1] = m;
         }
     }
-    run_inserts(strip, buf, pos, advancing);
+    run_inserts(strip, buf, pos, advancing, env, keys, chunk);
+    for (i, insert) in strip.inserts.iter_mut().enumerate() {
+        if let Some(gr) = insert.take_reduction() {
+            shared.reduction(strip.meter_slot, i, gr);
+        }
+    }
+    if let Some(slot) = strip.key_out
+        && let Some(dst) = keys.get_mut(slot * chunk * 2..(slot * chunk + len) * 2)
+    {
+        dst.copy_from_slice(buf);
+    }
     route_sends(strip, buf, bus, edge, chunk, true);
     apply_fader(strip, buf);
     route_sends(strip, buf, bus, edge, chunk, false);
     let meter = BlockMeter::scan(buf);
+    if shared.analyzer_slot() == strip.meter_slot
+        && let Some(p) = analyzer.as_mut()
+    {
+        for f in buf.as_chunks::<2>().0 {
+            if p.push(0.5 * (f[0] + f[1])).is_err() {
+                break;
+            }
+        }
+    }
     shared.meter(
         strip.meter_slot,
         meter.peak,
@@ -811,6 +907,17 @@ impl Engine {
         s.data.get(base..base + frames.min(s.frames) * 2)
     }
 
+    /// Marks the engine as driven in real time by a device or clock: while
+    /// callbacks overrun their budget, expensive effects (convolution tails)
+    /// switch to an economy path instead of glitching. Offline renders keep
+    /// it off so they stay deterministic.
+    pub fn set_realtime(&mut self, realtime: bool) {
+        self.realtime = realtime;
+        if !realtime {
+            self.economy = false;
+        }
+    }
+
     /// Insert latency of the current graph's longest path, in frames.
     pub fn latency_frames(&self) -> usize {
         self.plan.stats.latency_frames
@@ -896,6 +1003,15 @@ impl Engine {
             }
             self.shared
                 .meter(MASTER_SLOT, [pl, pr], [sl, sr], n as u64, clipped);
+            if self.shared.analyzer_slot() == MASTER_SLOT
+                && let Some(p) = self.analyzer.as_mut()
+            {
+                for f in self.mix[..n * 2].as_chunks::<2>().0 {
+                    if p.push(0.5 * (f[0] + f[1])).is_err() {
+                        break;
+                    }
+                }
+            }
             if let Some(stems) = self.stems.as_mut() {
                 let base = (MASTER_SLOT * stems.frames + done) * 2;
                 if let Some(d) = stems.data.get_mut(base..base + n * 2) {
@@ -917,8 +1033,27 @@ impl Engine {
             self.plan.generation,
             frames as u64,
         );
-        self.shared
-            .add_block(frames as u64, started.elapsed().as_nanos() as u64);
+        let nanos = started.elapsed().as_nanos() as u64;
+        self.shared.add_block(frames as u64, nanos);
+        if self.realtime && frames > 0 {
+            let period = frames as f64 * 1e9 / f64::from(self.plan.sample_rate);
+            let load = (nanos as f64 / period) as f32;
+            // Hysteresis: three overruns switch economy on, ~50 calm
+            // callbacks switch it off again.
+            if load > 0.9 {
+                self.overloaded += 1;
+                self.relaxed = 0;
+            } else if load < 0.6 {
+                self.relaxed += 1;
+                self.overloaded = 0;
+            }
+            if self.overloaded >= 3 {
+                self.economy = true;
+            } else if self.relaxed >= 50 {
+                self.economy = false;
+            }
+            self.shared.set_load(load, self.economy);
+        }
     }
 
     fn drain_overrides(&mut self) {
@@ -1291,7 +1426,20 @@ impl Engine {
         }
         self.master_buf[..len * 2].fill(0.0);
         let frame0 = base + off as u32;
-        for (ti, track) in plan.tracks.iter_mut().enumerate() {
+        let keys = &mut self.keys[..plan.keys.min(crate::plan::MAX_KEYS) * chunk * 2];
+        for k in 0..plan.keys.min(crate::plan::MAX_KEYS) {
+            keys[k * chunk * 2..(k * chunk + len) * 2].fill(0.0);
+        }
+        let env = FxEnv {
+            map: &plan.map,
+            rate: plan.sample_rate,
+            economy: self.economy,
+        };
+        for oi in 0..plan.track_order.len() {
+            let ti = plan.track_order[oi];
+            let Some(track) = plan.tracks.get_mut(ti) else {
+                continue;
+            };
             self.synth_events.clear();
             if !track.audible {
                 release_track(
@@ -1353,7 +1501,8 @@ impl Engine {
             }
             let has_synth_sound = track.synth.as_ref().is_some_and(|s| s.active_voices() > 0)
                 || !self.synth_events.is_empty();
-            if !has_synth_sound && (!timeline || track.strip.is_idle()) {
+            if !has_synth_sound && ((!timeline && !track.strip.ringing()) || track.strip.is_idle())
+            {
                 continue;
             }
             let buf = &mut self.track_buf[..len * 2];
@@ -1387,6 +1536,9 @@ impl Engine {
                 stem_offset,
                 pos,
                 timeline,
+                &env,
+                keys,
+                &mut self.analyzer,
             );
             if let Some(m) = self.measure.as_mut().and_then(|m| m.get_mut(ti)) {
                 m.peak = m.peak.max(meter.peak[0].max(meter.peak[1]));
@@ -1412,6 +1564,9 @@ impl Engine {
                 stem_offset,
                 pos,
                 timeline,
+                &env,
+                keys,
+                &mut self.analyzer,
             );
         }
         let master = &mut plan.master;
@@ -1419,7 +1574,12 @@ impl Engine {
         if let Some(a) = master.auto.as_mut() {
             a.render(pos, len, timeline, timeline);
         }
-        run_inserts(master, buf, pos, timeline);
+        run_inserts(master, buf, pos, timeline, &env, keys, chunk);
+        for (i, insert) in master.inserts.iter_mut().enumerate() {
+            if let Some(gr) = insert.take_reduction() {
+                self.shared.reduction(MASTER_SLOT, i, gr);
+            }
+        }
         let dst = &mut self.mix[off * 2..(off + len) * 2];
         if master.auto.as_ref().is_some_and(|a| a.fader_dynamic()) {
             apply_fader(master, buf);

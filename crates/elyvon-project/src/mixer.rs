@@ -8,8 +8,9 @@
 //! feedback policy that allows cycles; this is deliberate (no delayed feedback
 //! paths, no runaway gain).
 //!
-//! Insert slots hold typed native processors. Third-party plug-in formats are
-//! not hosted yet and have no variant here.
+//! Insert slots hold typed native processors: the Phase 09 building blocks
+//! and the Phase 12–13 effects ([`crate::effects`]). Third-party plug-in
+//! formats are not hosted yet and have no variant here.
 
 use std::collections::{HashMap, HashSet};
 
@@ -124,10 +125,19 @@ pub struct Send {
 pub enum FilterMode {
     HighPass,
     LowPass,
+    /// Constant 0 dB peak gain band-pass (Phase 12).
+    BandPass,
+    /// Band-reject (Phase 12).
+    Notch,
 }
 
 /// A native processor. Parameters are validated; processing is in
 /// `elyvon-audio::dsp`.
+///
+/// `Effect` carries its parameter array inline (about 1 KiB) so the type
+/// stays `Copy`; processors live in project data on the control thread,
+/// never in per-sample paths, so the size difference is deliberate.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[serde(
     tag = "type",
@@ -158,6 +168,8 @@ pub enum Processor {
         lookahead_ms: f64,
         release_ms: f64,
     },
+    /// A native effect (equaliser, dynamics, delay, reverb, modulation, …).
+    Effect(crate::effects::EffectSlot),
 }
 
 impl Processor {
@@ -167,6 +179,16 @@ impl Processor {
             Self::Utility { .. } => "Utility",
             Self::Filter { .. } => "Filter",
             Self::Limiter { .. } => "Limiter",
+            Self::Effect(e) => e.kind.label(),
+        }
+    }
+
+    /// Whether `other` is the same processor type (and effect kind): an
+    /// insert keeps its type when edited.
+    pub fn same_type(&self, other: &Processor) -> bool {
+        match (self, other) {
+            (Self::Effect(a), Self::Effect(b)) => a.kind == b.kind,
+            _ => std::mem::discriminant(self) == std::mem::discriminant(other),
         }
     }
 
@@ -191,6 +213,7 @@ impl Processor {
             {
                 Err("limiter ceiling must be −24 … 0 dB, look-ahead 0 … 20 ms, release 1 … 1000 ms")
             }
+            Self::Effect(e) if e.validate().is_err() => Err("effect parameter out of range"),
             _ => Ok(()),
         }
     }
@@ -536,6 +559,10 @@ pub(crate) fn validate_inserts(path: &str, inserts: &[InsertSlot]) -> Result<(),
                 "duplicate insert id",
             ));
         }
+        if let Processor::Effect(e) = &slot.processor {
+            e.validate()
+                .map_err(|e| ValidationError::new(format!("{path}[{i}].processor"), e))?;
+        }
         slot.processor
             .validate()
             .map_err(|e| ValidationError::new(format!("{path}[{i}].processor"), e))?;
@@ -614,5 +641,6 @@ pub(crate) fn validate_mixer(project: &Project) -> Result<(), ValidationError> {
             ));
         }
     }
+    crate::effects::check_sidechains(project)?;
     check_routing(project).map(|_| ())
 }

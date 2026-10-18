@@ -422,7 +422,7 @@ pub(crate) fn set_insert(
         .iter_mut()
         .find(|s| s.id == id)
         .ok_or_else(|| invalid("unknown insert"))?;
-    if std::mem::discriminant(&slot.processor) != std::mem::discriminant(&processor) {
+    if !slot.processor.same_type(&processor) {
         return Err(invalid(
             "an insert keeps its processor type; remove it and add another",
         ));

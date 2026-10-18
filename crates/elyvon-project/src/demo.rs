@@ -6,6 +6,8 @@
 
 use elyvon_core::{Key, KeyMode, PitchClass, Tempo, Ticks};
 
+use crate::effects::{EffectKind, EffectSlot, factory_presets};
+use crate::mixer::{InsertId, InsertSlot, Processor};
 use crate::model::{
     MidiNote, Project, Region, RegionContent, RegionId, TRACK_PALETTE, Track, TrackKind,
 };
@@ -99,6 +101,24 @@ fn drums() -> Vec<(u8, Ticks, Ticks)> {
     p
 }
 
+/// A native effect insert loaded with one of Elyvon's factory presets.
+fn fx(kind: EffectKind, preset: &str, tweak: &[(&str, f64)]) -> InsertSlot {
+    let mut slot = EffectSlot::new(kind);
+    if let Some(p) = factory_presets(kind).into_iter().find(|p| p.name == preset)
+        && let Ok(values) = p.values_for(kind)
+    {
+        slot.params = values;
+    }
+    for (k, v) in tweak {
+        let _ = slot.set(k, *v);
+    }
+    InsertSlot {
+        id: InsertId::new(),
+        bypass: false,
+        processor: Processor::Effect(slot),
+    }
+}
+
 fn track(kind: TrackKind, name: &str, color: usize, regions: Vec<Region>) -> Track {
     let mut t = Track::new(kind, name, TRACK_PALETTE[color]);
     t.regions = regions;
@@ -126,7 +146,8 @@ pub fn demo_project() -> Project {
         ],
     );
     drums_t.volume_db = -3.0;
-    let bass_t = track(
+    drums_t.strip.inserts = vec![fx(EffectKind::ParametricEq, "Bombo: pegada", &[])];
+    let mut bass_t = track(
         TrackKind::Instrument,
         "Bass",
         3,
@@ -142,6 +163,21 @@ pub fn demo_project() -> Project {
         ],
     );
     keys_t.pan = -0.25;
+    keys_t.strip.inserts = vec![
+        fx(EffectKind::ParametricEq, "Limpieza de graves", &[]),
+        fx(EffectKind::Chorus, "Chorus clásico", &[("mix", 35.0)]),
+        fx(EffectKind::Delay, "Corchea con puntillo", &[("mix", 18.0)]),
+    ];
+    // The bass ducks under the kick: a compressor keyed by the drums.
+    let mut duck = fx(
+        EffectKind::Compressor,
+        "Ducking por sidechain",
+        &[("thresholdDb", -24.0), ("ratio", 4.0)],
+    );
+    if let Processor::Effect(e) = &mut duck.processor {
+        e.sidechain = Some(drums_t.id);
+    }
+    bass_t.strip.inserts = vec![duck];
     let lead_t = track(
         TrackKind::Midi,
         "Hardware Lead",
@@ -172,6 +208,11 @@ pub fn demo_project() -> Project {
         ],
     );
     vox_t.pan = 0.0;
+    vox_t.strip.inserts = vec![
+        fx(EffectKind::ParametricEq, "Voz: presencia y aire", &[]),
+        fx(EffectKind::Compressor, "Voz al frente", &[]),
+        fx(EffectKind::Reverb, "Placa brillante", &[("mix", 15.0)]),
+    ];
     let mut gtr_t = track(
         TrackKind::Audio,
         "Guitar",
@@ -195,6 +236,20 @@ mod tests {
         let p = demo_project();
         crate::validate::validate(&p).unwrap();
         assert!(p.region_count() > 5);
+        // The demo shows the native effects, including a sidechain.
+        let effects = p
+            .tracks
+            .iter()
+            .flat_map(|t| &t.strip.inserts)
+            .filter(|s| matches!(s.processor, Processor::Effect(_)))
+            .count();
+        assert!(effects >= 7);
+        assert!(p.tracks.iter().any(|t| {
+            t.strip
+                .inserts
+                .iter()
+                .any(|s| matches!(&s.processor, Processor::Effect(e) if e.sidechain.is_some()))
+        }));
     }
 
     #[test]

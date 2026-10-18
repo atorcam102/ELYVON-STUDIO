@@ -78,6 +78,12 @@ pub enum InsertParam {
     FilterQ,
     LimiterCeiling,
     LimiterRelease,
+    /// Parameter `index` of a native effect of `kind` (an index into
+    /// [`crate::effects::EffectKind::params`], which is append-only).
+    Effect {
+        kind: crate::effects::EffectKind,
+        index: u8,
+    },
 }
 
 impl InsertParam {
@@ -92,7 +98,24 @@ impl InsertParam {
                     Self::LimiterCeiling | Self::LimiterRelease,
                     Processor::Limiter { .. }
                 )
-        )
+        ) || match (self, processor) {
+            (Self::Effect { kind, index }, Processor::Effect(e)) => {
+                e.kind == kind
+                    && kind
+                        .params()
+                        .get(usize::from(index))
+                        .is_some_and(|d| d.automatable)
+            }
+            _ => false,
+        }
+    }
+
+    /// The effect parameter description, for `Effect` parameters.
+    pub fn effect_def(self) -> Option<&'static crate::effects::ParamDef> {
+        match self {
+            Self::Effect { kind, index } => kind.params().get(usize::from(index)),
+            _ => None,
+        }
     }
 
     /// Current static value of this parameter on `processor`.
@@ -104,6 +127,9 @@ impl InsertParam {
             (Self::FilterQ, Processor::Filter { q, .. }) => *q,
             (Self::LimiterCeiling, Processor::Limiter { ceiling_db, .. }) => *ceiling_db,
             (Self::LimiterRelease, Processor::Limiter { release_ms, .. }) => *release_ms,
+            (Self::Effect { kind, index }, Processor::Effect(e)) if e.kind == kind => {
+                *e.params.0.get(usize::from(index))?
+            }
             _ => return None,
         })
     }
@@ -146,7 +172,7 @@ pub struct ParamSpec {
     pub min: f64,
     pub max: f64,
     pub scale: Scale,
-    /// Two states only (0 or 1); curves are always steps.
+    /// Whole values only (switches, choices); curves are always steps.
     pub discrete: bool,
 }
 
@@ -220,6 +246,19 @@ impl AutomationParam {
                 InsertParam::FilterQ => ParamSpec::log(0.3, 10.0),
                 InsertParam::LimiterCeiling => ParamSpec::linear(-24.0, 0.0),
                 InsertParam::LimiterRelease => ParamSpec::log(1.0, 1000.0),
+                InsertParam::Effect { .. } => match param.effect_def() {
+                    Some(d) => ParamSpec {
+                        min: d.min,
+                        max: d.max,
+                        scale: if d.scale == crate::effects::ParamScale::Log {
+                            Scale::Log
+                        } else {
+                            Scale::Linear
+                        },
+                        discrete: d.discrete(),
+                    },
+                    None => ParamSpec::switch(),
+                },
             },
         }
     }
@@ -237,6 +276,7 @@ impl AutomationParam {
                 InsertParam::FilterQ => "Filter Q",
                 InsertParam::LimiterCeiling => "Limiter ceiling",
                 InsertParam::LimiterRelease => "Limiter release",
+                InsertParam::Effect { .. } => param.effect_def().map_or("Effect", |d| d.label),
             },
         }
     }
@@ -710,8 +750,11 @@ pub(crate) fn validate_lanes(path: &str, lanes: &[AutomationLane]) -> Result<(),
                     ),
                 ));
             }
-            if spec.discrete && p.value != 0.0 && p.value != 1.0 {
-                return Err(ValidationError::new(pp(), "switch values are 0 or 1"));
+            if spec.discrete && p.value.fract() != 0.0 {
+                return Err(ValidationError::new(
+                    pp(),
+                    "switch and choice values are whole numbers",
+                ));
             }
             if !p.curve.is_valid() {
                 return Err(ValidationError::new(pp(), "Bézier controls must be 0…1"));

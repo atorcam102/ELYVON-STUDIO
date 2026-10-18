@@ -232,3 +232,24 @@ Ver [ADR 0008](ADR/0008-sample-accurate-automation-and-non-destructive-comping.m
 - Los comps describen qué toma suena en cada tramo; las tomas no cambian. Freeze y bounce
   escriben ficheros nuevos; reverse, normalizar, slices, slip y glue solo cambian referencias.
 - El historial por instantáneas tiene presupuesto de memoria además del límite de pasos.
+
+## Efectos nativos (Fases 12–13)
+
+Ver [ADR 0009](ADR/0009-native-effects-with-resumable-control-chunks.md) y
+[audit/PHASE-12-13.md](audit/PHASE-12-13.md).
+
+- `elyvon-project::effects` describe los 16 efectos: tabla de parámetros por tipo (clave, rango,
+  escala, unidad, automatizable), valores guardados por clave, presets versionados y A/B. El
+  índice de cada parámetro es su id de automatización y la tabla solo crece.
+- `elyvon-audio::fx` contiene el DSP: EQ paramétrica de 8 bandas (biquads en `f64`), compresor y
+  puerta/expansor con sidechain, utilidad estéreo, generador de prueba, delay sincronizable con
+  cinta, reverb FDN original, convolución por particiones con IR sintetizadas por el proyecto,
+  chorus, flanger, phaser, trémolo, altavoz rotatorio, distorsión con sobremuestreo 2×/4×,
+  bitcrusher y cambio de tono. Todo se reserva al construir; el callback no asigna memoria.
+- Los efectos trabajan en bloques de control de 16 frames alineados al frame absoluto y
+  reanudables entre callbacks: el bounce offline es idéntico bit a bit al directo con cualquier
+  tamaño de bloque. Los LFO sincronizados siguen la posición musical (mapa de tempo).
+- El plan asigna las claves de sidechain (fuentes antes que destinos), cuenta la latencia de cada
+  insert y mantiene vivas las tiras con colas tras parar. Si el callback se sobrecarga, la
+  convolución entra en modo económico. El analizador de espectro calcula la FFT fuera del hilo de
+  audio a partir de una cola SPSC; la curva de la EQ sale de las mismas secciones biquad.

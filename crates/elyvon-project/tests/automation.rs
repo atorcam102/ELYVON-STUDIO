@@ -446,7 +446,7 @@ fn automation_survives_save_and_reopen_identically() {
     let reopened = ProjectSession::open(&path).unwrap();
     assert_eq!(reopened.project(), s.project());
     let text = std::fs::read_to_string(&path).unwrap();
-    assert!(text.contains("\"schemaVersion\": 5"));
+    assert!(text.contains("\"schemaVersion\": 6"));
     assert!(text.contains("\"mode\": \"latch\""));
 }
 
@@ -467,7 +467,7 @@ fn schema_v4_files_migrate_without_automation() {
     }
     assert_eq!(p.mixer.auxes.len(), 1);
     assert!(!p.mixer.groups[0].link_edit);
-    // Re-encoded as schema 5 and read back identically.
+    // Re-encoded as the current schema and read back identically.
     let again = format::decode(&format::encode(&p, "test")).unwrap();
     assert_eq!(again, p);
 }

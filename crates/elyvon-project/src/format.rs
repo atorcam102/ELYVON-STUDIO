@@ -29,7 +29,7 @@ use crate::model::Project;
 use crate::validate::validate;
 
 pub const FORMAT_ID: &str = "elyvon-studio-project";
-pub const CURRENT_SCHEMA_VERSION: u32 = 5;
+pub const CURRENT_SCHEMA_VERSION: u32 = 6;
 pub const FILE_EXTENSION: &str = "elyvon";
 /// Projects reference media instead of embedding it, so 64 MiB is generous.
 pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -137,6 +137,16 @@ pub fn migrate(value: Value, from: u32) -> Result<Value, ProjectError> {
             // group edits. Every new field has a neutral serde default.
             let mut value = value;
             value["schemaVersion"] = serde_json::json!(5);
+            migrate(value, 5)
+        }
+        5 => {
+            // Schema 6 adds native effect inserts (`processor.type = "effect"`,
+            // parameters stored by key), band-pass/notch filter modes and
+            // effect-parameter automation ids. Older documents contain none
+            // of them, so the step only bumps the version; older Elyvon
+            // versions refuse schema 6 instead of dropping effects.
+            let mut value = value;
+            value["schemaVersion"] = serde_json::json!(6);
             Ok(value)
         }
         other => Err(ProjectError::UnsupportedSchema { found: other }),

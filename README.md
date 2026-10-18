@@ -19,7 +19,8 @@
 
 ![Elyvon Studio: demo session with the arrangement, inspector and control bar](docs/screenshots/0.4.1-windows/02-demo.png)
 
-> **Status: 0.4.1 Windows x64 preview.** Phases 02–11 are implemented and verified by Rust,
+> **Status: 0.4.1 Windows x64 preview** (phases 12–13, native effects, on branch `fases-12-13`,
+> not released yet). Phases 02–13 are implemented and verified by Rust,
 > frontend and native end-to-end tests on Windows 11 x64. Listening tests on real hardware, a
 > physical microphone/MIDI-keyboard session and every other platform are still pending, so the
 > phases stay **PARTIAL**. Details: [STATUS](docs/STATUS.md) ·
@@ -46,12 +47,13 @@ not distributed.
 
 | Area | What works today |
 | --- | --- |
-| **Projects** | `.elyvon` projects with atomic saves, Save As, unsaved-change prompts, crash recovery and schema migrations (1 → 5) |
+| **Projects** | `.elyvon` projects with atomic saves, Save As, unsaved-change prompts, crash recovery and schema migrations (1 → 6) |
 | **Arrangement** | Audio, instrument and MIDI tracks; metre-aware snap; move, trim, split, glue, slip, ripple, marquee; fades and editable crossfades (equal power, linear, S-curve); reverse, normalise, slices at transients, bounce in place, track freeze |
 | **Recording** | Armed audio inputs to recoverable WAV/BWF takes with count-in, pre-roll, punch and cycle; native MIDI 1.0 recording and routing; virtual keyboard |
 | **Takes and comping** | Cycle passes become take folders; drag across takes in **Tomas y audio** to comp with centred crossfades; flatten and unflatten without touching the files |
 | **Piano roll** | Draw, select, move, resize, erase; quantise with strength and swing, humanise, transpose, legato; velocity and controller lanes; multi-region editing |
 | **Mixer** | Aux buses, pre/post-fader sends, native inserts (trim, filters, look-ahead limiter), delay compensation, groups, real peak/RMS meters, stem export |
+| **Effects** | 16 native effects in Rust: parametric EQ with the engine's real curve and a measured spectrum, compressor and gate/expander with sidechain and gain-reduction meters, stereo utility, test generator, tempo-synced delay (tape, ping-pong), algorithmic and convolution reverbs, chorus, flanger, phaser, tremolo, rotary, distortion with oversampling, bitcrusher, pitch shifter; presets, A/B, automation; bounce identical to live playback |
 | **Automation** | Volume, pan, mute, sends and insert parameters on tracks, buses, master and regions; Read/Touch/Latch/Write from the mixer; linear, step and Bézier curves; lane editor in **Automatización**; playback identical to export |
 | **Media** | Project media dialog: find moved files by content, rescan, collect into the project folder, back up unused files before removing them |
 | **Interface** | Spanish desktop chrome with menu bar, control bar, inspector, side panels (events, markers, tempo, metre, browsers, notes), bottom editors and keyboard shortcuts |

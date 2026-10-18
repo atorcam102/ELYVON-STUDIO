@@ -186,15 +186,25 @@ pub struct Strip {
     pub active: bool,
     /// Automated parameters (Phase 10); `None` keeps the static fast path.
     pub auto: Option<Box<StripAuto>>,
+    /// Key-signal slot this strip writes (post-insert, pre-fader) because an
+    /// effect elsewhere uses it as an external sidechain.
+    pub key_out: Option<usize>,
 }
 
 impl Strip {
     /// True when processing would only produce silence.
     pub fn is_idle(&self) -> bool {
         !self.active
+            && !self.ringing()
             && (self.fader.is_silent() || self.out_gate.is_silent())
             && self.sends.iter().all(|s| s.gain.is_silent())
             && self.auto.as_ref().is_none_or(|a| !a.any_dynamic())
+    }
+
+    /// An insert still produces sound without input (effect tails, a
+    /// generator): process the strip even while the transport is stopped.
+    pub fn ringing(&self) -> bool {
+        self.inserts.iter().any(Insert::ringing)
     }
 
     /// Continue fader ramps, insert and delay state from the old graph.
@@ -342,6 +352,10 @@ pub struct PlaybackPlan {
     pub auxes: Vec<PlanAux>,
     /// Aux processing order (sources before destinations).
     pub aux_order: Vec<usize>,
+    /// Track processing order: sidechain sources before the tracks they key.
+    pub track_order: Vec<usize>,
+    /// Key-signal slots in use (external sidechains), ≤ [`MAX_KEYS`].
+    pub keys: usize,
     pub master: Strip,
     /// End of the last region, in frames.
     pub end_frame: u64,
@@ -407,6 +421,8 @@ impl PlaybackPlan {
             track_index: Vec::new(),
             auxes: Vec::new(),
             aux_order: Vec::new(),
+            track_order: Vec::new(),
+            keys: 0,
             master: master_strip(&Project::new("empty"), sample_rate),
             end_frame: 0,
             stats: PlanStats::default(),
@@ -658,7 +674,60 @@ fn master_strip(project: &Project, rate: u32) -> Strip {
         meter_slot: MASTER_SLOT,
         active: true,
         auto: None,
+        key_out: None,
     }
+}
+
+/// Distinct external sidechain sources per plan.
+pub const MAX_KEYS: usize = elyvon_project::effects::MAX_SIDECHAIN_SOURCES;
+
+/// Routes external sidechains: every source track writes a key slot and
+/// every effect keyed by it reads that slot. Returns the slots in use.
+fn assign_keys(
+    project: &Project,
+    tracks: &mut [PlanTrack],
+    auxes: &mut [PlanAux],
+    master: &mut Strip,
+) -> usize {
+    use elyvon_project::mixer::{InsertSlot, Processor};
+    let mut sources: Vec<elyvon_project::TrackId> = Vec::new();
+    let mut slot_of = |id: elyvon_project::TrackId| -> Option<usize> {
+        if let Some(i) = sources.iter().position(|s| *s == id) {
+            return Some(i);
+        }
+        (sources.len() < MAX_KEYS).then(|| {
+            sources.push(id);
+            sources.len() - 1
+        })
+    };
+    let mut wire = |slots: &[InsertSlot], strip: &mut Strip| {
+        for (slot, insert) in slots.iter().zip(strip.inserts.iter_mut()) {
+            if let Processor::Effect(e) = &slot.processor
+                && let Some(src) = e.sidechain
+                && project.tracks.iter().take(MAX_TRACKS).any(|t| t.id == src)
+            {
+                insert.key_slot = slot_of(src);
+            }
+        }
+    };
+    for (t, plan) in project.tracks.iter().zip(tracks.iter_mut()) {
+        if !plan.strip.inserts.is_empty() {
+            wire(&t.strip.inserts, &mut plan.strip);
+        }
+    }
+    for (a, plan) in project.mixer.auxes.iter().zip(auxes.iter_mut()) {
+        wire(&a.strip.inserts, &mut plan.strip);
+    }
+    wire(&project.mixer.master.inserts, master);
+    for (i, src) in sources.iter().enumerate() {
+        if let Some(t) = tracks.iter_mut().find(|t| t.key == src.0.as_u128()) {
+            t.strip.key_out = Some(i);
+            // A key source is processed even when muted or silenced by solo:
+            // its output stays gated, its key does not.
+            t.strip.active = true;
+        }
+    }
+    sources.len()
 }
 
 /// Graph node index: tracks `0..t`, auxes `t..t + a`.
@@ -1195,6 +1264,7 @@ pub fn build_plan(
                 meter_slot: ti,
                 active: audible && has_audio,
                 auto: None,
+                key_out: None,
             },
             events,
             audible,
@@ -1222,6 +1292,7 @@ pub fn build_plan(
                 meter_slot: aux_slot(i),
                 active: solo.processed(graph.t + i) && !muted_eff[graph.t + i],
                 auto: None,
+                key_out: None,
             },
         })
         .collect();
@@ -1379,6 +1450,10 @@ pub fn build_plan(
     master.latency = master.inserts.iter().map(Insert::latency).sum();
     stats.inserts += master.inserts.len();
     stats.latency_frames = master_in + master.latency;
+    let keys = assign_keys(project, &mut tracks, &mut auxes, &mut master);
+    let track_order = elyvon_project::effects::sidechain_order(project)
+        .map(|o| o.into_iter().filter(|&i| i < tracks.len()).collect())
+        .unwrap_or_else(|| (0..tracks.len()).collect());
 
     let mut track_index: Vec<(u128, usize)> =
         tracks.iter().enumerate().map(|(i, t)| (t.key, i)).collect();
@@ -1405,6 +1480,8 @@ pub fn build_plan(
         track_index,
         auxes,
         aux_order: order,
+        track_order,
+        keys,
         master,
         end_frame,
         stats,

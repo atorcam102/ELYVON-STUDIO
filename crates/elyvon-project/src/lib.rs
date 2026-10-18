@@ -15,6 +15,7 @@ pub mod automation_record;
 pub mod comp;
 pub mod demo;
 pub mod edit;
+pub mod effects;
 pub mod error;
 pub mod format;
 pub mod history;

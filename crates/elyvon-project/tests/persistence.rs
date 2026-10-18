@@ -206,12 +206,12 @@ fn encoded_files_carry_the_current_envelope() {
 #[test]
 fn newer_schema_is_refused_with_clear_error() {
     let text = std::fs::read_to_string(fixture("v1-basic.elyvon")).unwrap();
-    let newer = text.replace("\"schemaVersion\": 1", "\"schemaVersion\": 6");
+    let newer = text.replace("\"schemaVersion\": 1", "\"schemaVersion\": 7");
     let err = format::decode(newer.as_bytes()).unwrap_err();
     assert!(matches!(
         err,
         ProjectError::NewerSchema {
-            found: 6,
+            found: 7,
             supported: CURRENT_SCHEMA_VERSION
         }
     ));

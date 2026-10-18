@@ -4,6 +4,19 @@
 (commit `1521006`, built and verified locally on Windows 11 x64; unsigned; see
 [RELEASES](RELEASES.md#preview-041-windows-x64-compilación-local)).
 
+**Phases 12–13 (2026-10-18, schema 6): PARTIAL.** Sixteen native effects in Rust — 8-band
+parametric EQ (real curve drawn from the engine's biquads over a spectrum analysed off the audio
+thread), compressor and gate/expander with external sidechain and gain-reduction meters, stereo
+utility, test generator, tempo-synced stereo/tape delay with protected feedback, original FDN
+reverb, partitioned convolution reverb with synthesised IRs, chorus, flanger, phaser,
+tremolo/auto-pan, rotary speaker, distortion with 2×/4× oversampling, bitcrusher and a simple
+pitch shifter — with versioned presets, A/B, automation of every non-structural parameter,
+latency compensation, tails after stop and an economy path under overload. Bounces are
+bit-identical to live playback at any block size; the callback allocates nothing. Verified by
+Rust, Vitest and native E2E tests built and run on this Windows x64 laptop on branch
+`fases-12-13`. Listening tests and every other platform remain pending. Evidence:
+[audit/PHASE-12-13.md](audit/PHASE-12-13.md).
+
 **Phases 10–11 (2026-10-17, schema 5): PARTIAL.** Sample-accurate mix automation (track/region
 lanes for volume, pan, mute, sends and insert parameters; Read/Touch/Latch/Write with lock-free
 capture; linear/step/Bézier curves; offline render bit-identical to live playback) and

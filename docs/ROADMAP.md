@@ -57,6 +57,15 @@ shapes, crossfades, slip, ripple, marquee, glue, slices, normalise, freeze, boun
 repair and collect, memory-bounded history. Evidence: [audit/PHASE-10-11.md](audit/PHASE-10-11.md).
 Pending: listening on hardware, a microphone cycle recording, other platforms, control surfaces.
 
+## Phases 12–13 — Native effects (partial, schema 6)
+
+Parametric EQ, compressor, gate/expander, utilities and test generator; delay, algorithmic and
+convolution reverbs, chorus, flanger, phaser, tremolo, rotary, distortion with oversampling,
+bitcrusher and pitch shifter. Parameter tables with stable automation indices, versioned
+presets, A/B, sidechains, GR meters, analyser, latency compensation, bit-identical bounce.
+Evidence: [audit/PHASE-12-13.md](audit/PHASE-12-13.md). Pending: listening on hardware, user IR
+files, a production pitch shifter, other platforms.
+
 ## Later — Instruments and editing
 
 Playback note chase, a production synth/sampler, MIDI 2.0 per-note expression, step input and
@@ -64,7 +73,7 @@ playable loop browser.
 
 ## Later — Plug-ins and production
 
-Isolated CLAP/VST3 (AU on macOS where supported), more FX, final export formats and
+Isolated CLAP/VST3 (AU on macOS where supported), final export formats and
 large-session optimisation. Any licensed/certified format requires an explicit decision
 and tests; no Atmos or proprietary compatibility is promised.
 
