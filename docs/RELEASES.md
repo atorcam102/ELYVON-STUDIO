@@ -3,6 +3,31 @@
 Este documento explica cómo se compilan, firman y publican las versiones de
 Elyvon Studio, y qué credenciales hay que configurar.
 
+## Preview 0.5.0 (Windows x64 local; macOS ARM64 y Ubuntu x64 en Actions a petición)
+
+[`v0.5.0-preview.1`](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.5.0-preview.1) apunta al commit `7f16dc8` (efectos nativos, fases 12–13, esquema 6).
+Por petición expresa del usuario, **macOS ARM64 y Ubuntu x64** se compilaron en GitHub Actions con
+el workflow manual `build-platforms.yml` (solo `workflow_dispatch`, no publica nada):
+[run 39152097068](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/39152097068), donde pasaron
+486 tests de Rust y 56 de Vitest en `macos-latest` y `ubuntu-22.04` antes de empaquetar. **Windows x64**
+se compiló en el portátil desde un worktree limpio en el mismo commit (`tauri build --target
+x86_64-pc-windows-msvc --bundles nsis msi`, sin artefactos de updater): 486 tests de Rust, Vitest
+56/56 y E2E nativo 18/18 contra el binario release. Los cinco ficheros se publicaron con
+`gh release create` (pre-release, no «latest»; ningún workflow se disparó) y se volvieron a
+descargar para comprobar los hashes.
+
+```
+915f6464ff2a5ea9860939d283d70c4bc8d1619fb7b41d2028be526ab85807e1  Elyvon-Studio-v0.5.0-macos-arm64.dmg
+e20f1d167144da188aa8c2c67314fd4e24eb61fb97bcb86e311ae767a2021048  Elyvon-Studio-v0.5.0-ubuntu-amd64.AppImage
+a2762aa08e8e251160bb6e806f057f0696d3d8166e4f74f762cfe42bdb88807b  Elyvon-Studio-v0.5.0-ubuntu-amd64.deb
+4b5b0864201ffdca42a8f8feb7d069cfc390782d61a6da0d96c6c4cda0d00422  Elyvon-Studio-v0.5.0-windows-x64-setup.exe
+f54ec75eead6c2228513f675adc0f74d67bd21a33e94851a75208aab73f6ac60  Elyvon-Studio-v0.5.0-windows-x64.msi
+```
+
+Sin Authenticode, macOS con firma ad hoc sin notarizar, sin firma de updater. Los paquetes de
+macOS y Ubuntu no se han instalado en un equipo real. No incluye Windows x86/ARM64, macOS Intel ni
+Ubuntu ARM64.
+
 ## Preview 0.4.1 (Windows x64, compilación local)
 
 [`v0.4.1-windows-preview.1`](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.4.1-windows-preview.1)

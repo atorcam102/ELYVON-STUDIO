@@ -29,18 +29,21 @@
 
 | Platform | Installer | |
 | --- | --- | --- |
-| **Windows x64** (64-bit Windows 10/11) | [EXE setup](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.4.1-windows-preview.1/Elyvon-Studio-v0.4.1-windows-x64-setup.exe) | [MSI](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.4.1-windows-preview.1/Elyvon-Studio-v0.4.1-windows-x64.msi) |
+| **Windows x64** (64-bit Windows 10/11) | [EXE setup](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.5.0-preview.1/Elyvon-Studio-v0.5.0-windows-x64-setup.exe) | [MSI](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.5.0-preview.1/Elyvon-Studio-v0.5.0-windows-x64.msi) |
+| **macOS** (Apple Silicon) | [DMG](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.5.0-preview.1/Elyvon-Studio-v0.5.0-macos-arm64.dmg) | |
+| **Ubuntu x64** | [DEB](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.5.0-preview.1/Elyvon-Studio-v0.5.0-ubuntu-amd64.deb) | [AppImage](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.5.0-preview.1/Elyvon-Studio-v0.5.0-ubuntu-amd64.AppImage) |
 
-[Release notes](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.4.1-windows-preview.1) ·
-[SHA-256 checksums](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.4.1-windows-preview.1/SHA256SUMS.txt) ·
+[Release notes](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.5.0-preview.1) ·
+[SHA-256 checksums](https://github.com/atorcam102/ELYVON-STUDIO/releases/download/v0.5.0-preview.1/SHA256SUMS.txt) ·
 [all releases](https://github.com/atorcam102/ELYVON-STUDIO/releases)
 
-Install **one** of the two: the EXE is the usual setup wizard; the MSI suits managed
-deployments. Both contain the same application. The installers are built and checked on the
-maintainer's Windows x64 laptop, not in CI. They are **unsigned** (no Authenticode, no updater
-signature), so Windows SmartScreen may warn and automatic updates are off; compare the file's
-SHA-256 with `SHA256SUMS.txt` before installing. Other operating systems and architectures are
-not distributed.
+Install **one** file for your system. The Windows installers are built and checked on the
+maintainer's Windows x64 laptop; the macOS and Ubuntu ones are built and tested by a manually
+started GitHub Actions workflow and **have not been tried on a real Mac or Ubuntu machine yet**.
+Everything is **unsigned** (no Authenticode, ad-hoc signed and not notarized on macOS, no updater
+signature), so SmartScreen and Gatekeeper may warn and automatic updates are off; compare the
+file's SHA-256 with `SHA256SUMS.txt` before installing. Other systems and architectures are not
+distributed.
 
 ## Features
 

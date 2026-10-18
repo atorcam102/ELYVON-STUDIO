@@ -137,8 +137,13 @@ draws the strip's real curve; the insert areas of all strips grow with the fulle
 
 | Target | Built | Tested |
 | --- | --- | --- |
-| Windows x64 (`x86_64-pc-windows-msvc`) | Yes, debug, on this laptop | Rust, Vitest, native E2E (WebView2) |
-| Windows x86, Windows ARM64, macOS x64/ARM64, Ubuntu x64/ARM64 | No | No — no support is claimed |
+| Windows x64 (`x86_64-pc-windows-msvc`) | Yes, debug and release, on this laptop | Rust 486, Vitest 56, native E2E 18/18 on debug and on the release binary; audio confirmed by ear by the user |
+| macOS ARM64 (`aarch64-apple-darwin`) | Yes, GitHub Actions `macos-latest`, on request ([run 39152097068](https://github.com/atorcam102/ELYVON-STUDIO/actions/runs/39152097068)) | Rust 486, Vitest 56 on the runner; DMG not installed on a real Mac |
+| Ubuntu x64 (`x86_64-unknown-linux-gnu`) | Yes, GitHub Actions `ubuntu-22.04`, same run | Rust 486, Vitest 56 on the runner; DEB/AppImage not installed on a real machine |
+| Windows x86, Windows ARM64, macOS Intel, Ubuntu ARM64 | No | No — no support is claimed |
+
+Published as the pre-release [`v0.5.0-preview.1`](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.5.0-preview.1) with `SHA256SUMS.txt`; the
+downloaded files were re-checked against it.
 
 The DSP is portable Rust without SIMD intrinsics or platform APIs; floating-point results may
 differ in the last bits between targets (the golden test uses tolerances for that reason).

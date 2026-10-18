@@ -1,8 +1,9 @@
 # Status
 
-**Current release: [0.4.1 Windows x64 preview](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.4.1-windows-preview.1)**
-(commit `1521006`, built and verified locally on Windows 11 x64; unsigned; see
-[RELEASES](RELEASES.md#preview-041-windows-x64-compilación-local)).
+**Current release: [0.5.0 preview](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.5.0-preview.1)** (commit `7f16dc8`, unsigned): Windows x64
+built and verified on the maintainer's laptop (audio confirmed by ear); macOS ARM64 and Ubuntu x64
+built and tested in a manually started GitHub Actions run, not yet tried on a device. See
+[RELEASES](RELEASES.md).
 
 **Phases 12–13 (2026-10-18, schema 6): PARTIAL.** Sixteen native effects in Rust — 8-band
 parametric EQ (real curve drawn from the engine's biquads over a spectrum analysed off the audio
@@ -14,8 +15,9 @@ pitch shifter — with versioned presets, A/B, automation of every non-structura
 latency compensation, tails after stop and an economy path under overload. Bounces are
 bit-identical to live playback at any block size; the callback allocates nothing. Verified by
 Rust, Vitest and native E2E tests built and run on this Windows x64 laptop; the user confirmed
-by ear that the audio works on that laptop. Released as 0.5.0 (schema 6). macOS ARM64 and
-Ubuntu x64 builds come from a manually started CI workflow; no device test on them. Evidence:
+by ear that the audio works on that laptop. Released as [0.5.0 preview](https://github.com/atorcam102/ELYVON-STUDIO/releases/tag/v0.5.0-preview.1) (schema 6).
+macOS ARM64 and Ubuntu x64 builds come from a manually started CI workflow (486 Rust and 56
+frontend tests passed on each runner); no device test on them. Evidence:
 [audit/PHASE-12-13.md](audit/PHASE-12-13.md).
 
 **Phases 10–11 (2026-10-17, schema 5): PARTIAL.** Sample-accurate mix automation (track/region
